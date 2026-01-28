@@ -21,6 +21,12 @@ This document outlines the mandatory testing standards for all agents and contri
     -   **Parameterization**: Use `pytest.mark.parametrize` to test logic against diverse data distributions.
     -   **Generalization**: Logic must pass tests for "expected" cases AND fail gracefully/correctly for edge cases.
 
+## Continuous Integration (CI)
+
+On every push and pull request, the GitHub CI workflow automatically:
+- Runs all unit tests.
+- Excludes tests marked as `api_dependent` or `slow` (using `pytest -m "not api_dependent and not slow"`) to ensure fast feedback and avoid external dependency failures.
+
 ## Testing Framework
 
 -   **Framework**: [pytest](https://docs.pytest.org/)
