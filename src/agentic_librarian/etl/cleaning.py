@@ -36,11 +36,7 @@ def split_authors(df: pd.DataFrame) -> pd.DataFrame:
     if "Author" not in df.columns:
         raise ValueError("DataFrame must contain an 'Author' column")
 
-    author_splits = (
-        df["Author"]
-        .str.split(";", expand=True)
-        .applymap(lambda x: x.strip() if isinstance(x, str) else x)
-    )
+    author_splits = df["Author"].str.split(";", expand=True).applymap(lambda x: x.strip() if isinstance(x, str) else x)
 
     # Rename the new columns with numbers
     author_splits.columns = [f"Author_{i + 1}" for i in range(author_splits.shape[1])]
@@ -63,15 +59,11 @@ def split_narrators(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("DataFrame must contain a 'Narrator' column")
 
     narrator_splits = (
-        df["Narrator"]
-        .str.split(";", expand=True)
-        .applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        df["Narrator"].str.split(";", expand=True).applymap(lambda x: x.strip() if isinstance(x, str) else x)
     )
 
     # Rename the new columns with numbers
-    narrator_splits.columns = [
-        f"Narrator_{i + 1}" for i in range(narrator_splits.shape[1])
-    ]
+    narrator_splits.columns = [f"Narrator_{i + 1}" for i in range(narrator_splits.shape[1])]
 
     # Drop the original 'Narrator' column and add the new narrator columns
     df = pd.concat([df.drop(columns=["Narrator"]), narrator_splits], axis=1)

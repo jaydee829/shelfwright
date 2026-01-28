@@ -29,7 +29,8 @@ dependencies = [
     "dagster",
     "dagster-webserver",
     # Testing
-    "pytest"
+    "pytest",
+    "pytest-cov"
 ]
 
 [project.optional-dependencies]
@@ -103,4 +104,8 @@ testpaths = [
 ]
 python_files = [
     "test_*.py"
+]
+markers = [
+    "api_dependent: tests that require an external API key and should be skipped in pre-commit",
+    "slow: tests that are slow to run and should be skipped for fast feedback loops",
 ]
