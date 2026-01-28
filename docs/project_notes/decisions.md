@@ -63,3 +63,21 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Higher code quality, better maintainability, consistent verification across different agents.
 - Cons: Slightly higher initial overhead for new contributors.
+### ADR-006: Secure Credential Management & Interactive Prompting (2026-01-28)
+**Context:**
+- Need to prevent hardcoded credentials and ensure users are prompted for missing information in interactive environments.
+**Decision:**
+- Use `python-dotenv` for local configuration.
+- Implement interactive prompting for missing `POSTGRES_USER` and `POSTGRES_PASSWORD` in `DatabaseManager`.
+- Raise `ValueError` if credentials remain missing in non-interactive environments.
+**Consequences:**
+- Pros: Enhanced security by removing fallbacks, improved user experience in local development.
+
+### ADR-007: Local-Only Service Exposure for Development (2026-01-28)
+**Context:**
+- Need to minimize the attack surface of Docker services during local development.
+**Decision:**
+- Bind Postgres and MLFlow ports to `127.0.0.1` in `docker-compose.yml`.
+**Consequences:**
+- Pros: Services are not exposed to the local network by default.
+- Cons: Requires manual reconfiguration for remote access or container-to-container access from outside the default bridge network.

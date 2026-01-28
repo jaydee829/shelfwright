@@ -18,8 +18,11 @@ This file tracks important project configuration, constants, and environment det
 - **Testing**: Pytest (Unit, Integration), Playwright (E2E)
 - **Containerization**: Docker, Docker Compose
   - **Ports**: 
-    - Postgres: `5432`
-    - MLFlow: `5000`
+    - Postgres: `5432` (Bound to `127.0.0.1`)
+    - MLFlow: `5000` (Bound to `127.0.0.1`)
+- **Configuration**:
+  - `python-dotenv` loads `.env` files.
+  - `DB_SSL_MODE`: Support for `sslmode` in SQLAlchemy (e.g., `require`).
 
 ## Core Entities
 - **Authors**: Bio, JSONB style attributes (pacing, tone, style).

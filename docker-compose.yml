@@ -4,11 +4,11 @@ services:
     container_name: agentic_librarian_db
     restart: always
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-librarian}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-librarian_secret_password}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-agentic_librarian}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
@@ -23,9 +23,9 @@ services:
     container_name: agentic_librarian_mlflow
     restart: always
     ports:
-      - "${MLFLOW_PORT:-5000}:5000"
+      - "127.0.0.1:${MLFLOW_PORT:-5000}:5000"
     environment:
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI:-postgresql://librarian:librarian_secret_password@db:5432/agentic_librarian}
+      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
     depends_on:
       db:
         condition: service_healthy
@@ -33,7 +33,7 @@ services:
       - ./mlruns:/app/mlruns
     command: >
       mlflow server 
-      --backend-store-uri ${MLFLOW_TRACKING_URI:-postgresql://librarian:librarian_secret_password@db:5432/agentic_librarian}
+      --backend-store-uri ${MLFLOW_TRACKING_URI}
       --default-artifact-root /app/mlruns
       --host 0.0.0.0
 
