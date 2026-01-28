@@ -30,7 +30,7 @@
 ## Phase 3: Flow 2 - Recommendation Engine (A2A & MCP)
 **Goal**: Build a user-facing agentic system using A2A for collaboration and MCP for data tools.
 *   **Order of Work**:
-    1.  **MCP Server Implementation**: 
+    1.  **MCP Server Implementation**:
         -   Expose the Postgres/pgvector database as an MCP server.
         -   Add tools for checking `Suggestions` and `ReadingHistory`.
     2.  **Experiment: Search Strategies**:

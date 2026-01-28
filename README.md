@@ -41,28 +41,49 @@ The development environment includes the following packages:
 - **Audio/Books**: audible
 - **LLM**: openai, langchain, langchain-openai
 
-### Code Quality
+### Code Quality and Testing
 
-This project uses [ruff](https://github.com/astral-sh/ruff) for fast Python linting and formatting. Linting is automatically run on every commit and pull request via GitHub Actions.
+This project uses `pre-commit` to ensure code quality and consistency. The following checks are run on every commit:
 
-To run linting locally:
+- **Linting & Formatting**: Handled by [ruff](https://github.com/astral-sh/ruff) (fastest Python linter/formatter).
+- **Static Analysis**: Standard `pre-commit-hooks` (whitespace, YAML, etc.).
+- **Tests**: `pytest` is run on a subset of fast, non-API-dependent tests.
 
-```bash
-# Install uv (fast Python package installer)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+#### Local Setup
 
-# Install ruff
-uv pip install ruff
+1. **Install pre-commit**:
+   ```bash
+   pip install pre-commit
+   ```
 
-# Run linting
-ruff check .
+2. **Install the git hooks**:
+   ```bash
+   pre-commit install
+   ```
 
-# Run formatting check
-ruff format --check .
+3. **(Optional) Run on all files**:
+   ```bash
+   pre-commit run --all-files
+   ```
 
-# Auto-fix issues
-ruff check --fix .
+#### Testing Strategy
 
-# Auto-format code
-ruff format .
-```
+- **Fast Tests**: Run automatically on commit.
+- **Slow/API Tests**: Skipped in `pre-commit` to maintain speed. Mark these in code using:
+  ```python
+  @pytest.mark.api_dependent
+  def test_something_with_api():
+      ...
+
+  @pytest.mark.slow
+  def test_something_slow():
+      ...
+  ```
+- **Manual Test Execution**:
+  ```bash
+  # Run all tests
+  pytest
+
+  # Run only fast tests (what pre-commit runs)
+  pytest -m "not api_dependent and not slow"
+  ```

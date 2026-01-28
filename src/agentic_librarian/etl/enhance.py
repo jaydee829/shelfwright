@@ -16,9 +16,7 @@ def enhanced_book_features(context: AssetExecutionContext):
         df = pd.read_csv(f"data/raw/{context.partition_key}.csv")
     except FileNotFoundError:
         context.log.error(f"File data/raw/{context.partition_key}.csv not found.")
-        raise Exception(
-            f"Sensor triggered but file data/raw/{context.partition_key}.csv is missing."
-        ) from None
+        raise Exception(f"Sensor triggered but file data/raw/{context.partition_key}.csv is missing.") from None
 
     df = cleaning.split_formats(df)
     df = cleaning.split_authors(df)
@@ -50,9 +48,7 @@ def enhanced_book_features(context: AssetExecutionContext):
     context.add_output_metadata(
         {
             "row_count": len(df),
-            "preview": MetadataValue.md(
-                df.head(5).to_markdown()
-            ),  # Renders a table in UI
+            "preview": MetadataValue.md(df.head(5).to_markdown()),  # Renders a table in UI
             "missing_values": int(df.isnull().sum().sum()),
             "columns": str(list(df.columns)),
         }

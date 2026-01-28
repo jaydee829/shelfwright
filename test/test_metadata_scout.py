@@ -65,9 +65,7 @@ def test_fetch_book_metadata_no_results(monkeypatch):
 
     monkeypatch.setattr("requests.get", mock_get)
 
-    metadata = md_scout.fetch_google_books_metadata(
-        "Nonexistent Book", "Unknown Author"
-    )
+    metadata = md_scout.fetch_google_books_metadata("Nonexistent Book", "Unknown Author")
     assert metadata is None
 
     def mock_get(*args, **kwargs):
@@ -105,9 +103,7 @@ def test_fetch_book_metadata_missing_fields(monkeypatch):
 
     monkeypatch.setattr("requests.get", mock_get)
 
-    metadata = md_scout.fetch_google_books_metadata(
-        "Test Book Missing Fields", "Test Author"
-    )
+    metadata = md_scout.fetch_google_books_metadata("Test Book Missing Fields", "Test Author")
     assert metadata is not None
     assert metadata["google_id"] == "test_id_missing_fields"
     assert metadata["title"] == "Test Book Missing Fields"
@@ -135,6 +131,7 @@ def test_fetch_book_metadata_no_items_key(monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.api_dependent
 def test_fetch_book_metadata_integration_live():
     # Skip if explicitly disabled to avoid network calls in some CI environments
     if os.environ.get("SKIP_INTEGRATION_TESTS") == "1":
@@ -158,12 +155,11 @@ def test_fetch_book_metadata_integration_live():
     title_ok = "way of kings" in metadata["title"].lower()
     authors = metadata.get("authors") or []
     author_ok = any("sanderson" in a.lower() for a in authors)
-    assert (
-        title_ok or author_ok
-    ), f"Returned metadata does not appear to match '{title}' by '{author}'"
+    assert title_ok or author_ok, f"Returned metadata does not appear to match '{title}' by '{author}'"
 
 
 @pytest.mark.integration
+@pytest.mark.api_dependent
 def test_fetch_audible_metadata_integration_live():
     # Skip if explicitly disabled to avoid network calls in some CI environments
     if os.environ.get("SKIP_INTEGRATION_TESTS") == "1":
@@ -182,9 +178,7 @@ def test_fetch_audible_metadata_integration_live():
     # Ensure the returned metadata matches the queried book/author (case-insensitive, tolerant)
     title_ok = "way of kings" in metadata["title"].lower()
     author_ok = "sanderson" in metadata["narrator"].lower()
-    assert (
-        title_ok or author_ok
-    ), f"Returned metadata does not appear to match '{title}' by '{author}'"
+    assert title_ok or author_ok, f"Returned metadata does not appear to match '{title}' by '{author}'"
 
 
 def test_fetch_hardcover_metadata_no_api_key():
@@ -192,9 +186,7 @@ def test_fetch_hardcover_metadata_no_api_key():
     author = "Brandon Sanderson"
 
     with pytest.raises(ValueError, match="Hardcover API key not set"):
-        md_scout.fetch_hardcover_metadata(
-            title, author, format="Audiobook", api_key=None
-        )
+        md_scout.fetch_hardcover_metadata(title, author, format="Audiobook", api_key=None)
 
 
 def test_fetch_hardcover_metadata_api_failure(monkeypatch):
@@ -207,9 +199,7 @@ def test_fetch_hardcover_metadata_api_failure(monkeypatch):
     author = "Brandon Sanderson"
     api_key = "dummy_api_key"
 
-    metadata = md_scout.fetch_hardcover_metadata(
-        title, author, format="Audiobook", api_key=api_key
-    )
+    metadata = md_scout.fetch_hardcover_metadata(title, author, format="Audiobook", api_key=api_key)
     assert metadata == {}, "Expected empty dict on API failure"
 
 
@@ -232,9 +222,7 @@ def test_fetch_hardcover_metadata_no_results(monkeypatch):
     author = "Unknown Author"
     api_key = "dummy_api_key"
 
-    metadata = md_scout.fetch_hardcover_metadata(
-        title, author, format="Audiobook", api_key=api_key
-    )
+    metadata = md_scout.fetch_hardcover_metadata(title, author, format="Audiobook", api_key=api_key)
     assert metadata == {}, "Expected empty dict when no results found"
 
 
@@ -272,9 +260,7 @@ def test_fetch_hardcover_metadata_paperback_format(monkeypatch):
     author = "Test Author"
     api_key = "dummy_api_key"
 
-    metadata = md_scout.fetch_hardcover_metadata(
-        title, author, format="Paperback", api_key=api_key
-    )
+    metadata = md_scout.fetch_hardcover_metadata(title, author, format="Paperback", api_key=api_key)
     assert metadata is not None
     assert metadata["title"] == "Test Paperback Book"
     assert metadata["edition_format"] == "Paperback"
@@ -297,9 +283,7 @@ def test_fetch_hardcover_metadata_audiobook_format(monkeypatch):
                             "isbn_13": "9876543210987",
                             "book": {
                                 "description": "A test audiobook description.",
-                                "contributions": [
-                                    {"author": {"name": "Narrator Name"}}
-                                ],
+                                "contributions": [{"author": {"name": "Narrator Name"}}],
                             },
                         }
                     ]
@@ -319,9 +303,7 @@ def test_fetch_hardcover_metadata_audiobook_format(monkeypatch):
     author = "Narrator Name"
     api_key = "dummy_api_key"
 
-    metadata = md_scout.fetch_hardcover_metadata(
-        title, author, format="Audiobook", api_key=api_key
-    )
+    metadata = md_scout.fetch_hardcover_metadata(title, author, format="Audiobook", api_key=api_key)
     assert metadata is not None
     assert metadata["title"] == "Test Audiobook"
     assert metadata["edition_format"] == "Audiobook"
@@ -331,6 +313,7 @@ def test_fetch_hardcover_metadata_audiobook_format(monkeypatch):
 
 
 @pytest.mark.integration
+@pytest.mark.api_dependent
 def test_fetch_hardcover_metadata_integration_live():
     # Skip if explicitly disabled to avoid network calls in some CI environments
     if os.environ.get("SKIP_INTEGRATION_TESTS") == "1":
@@ -341,9 +324,7 @@ def test_fetch_hardcover_metadata_integration_live():
     author = "Brandon Sanderson"
     api_key = os.environ.get("HARDCOVER_API_KEY")
 
-    metadata = md_scout.fetch_hardcover_metadata(
-        title, author, format=format, api_key=api_key
-    )
+    metadata = md_scout.fetch_hardcover_metadata(title, author, format=format, api_key=api_key)
     assert metadata is not None, "Expected live API to return metadata"
     assert "title" in metadata
     assert "moods" in metadata
@@ -352,6 +333,4 @@ def test_fetch_hardcover_metadata_integration_live():
     title_ok = "way of kings" in metadata["title"].lower()
     authors = metadata.get("author_names") or []
     author_ok = any("sanderson" in a.lower() for a in authors)
-    assert (
-        title_ok or author_ok
-    ), f"Returned metadata does not appear to match '{title}' by '{author}'"
+    assert title_ok or author_ok, f"Returned metadata does not appear to match '{title}' by '{author}'"

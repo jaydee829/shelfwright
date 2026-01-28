@@ -55,3 +55,11 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Industry-standard tools for reproducibility and monitoring.
 
+### ADR-005: Standardized Testing Strategy (2026-01-28)
+**Context:**
+- Need to ensure all agents and contributors follow consistent testing practices (TDD, coverage, use-case driven).
+**Decision:**
+- Adopt a formal testing strategy documented in `docs/testing_strategy.md`, enforced via agent protocols and a standardized `.agent/workflows/test.md` workflow.
+**Consequences:**
+- Pros: Higher code quality, better maintainability, consistent verification across different agents.
+- Cons: Slightly higher initial overhead for new contributors.

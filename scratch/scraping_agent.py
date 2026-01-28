@@ -29,9 +29,7 @@ def search_audible_link(book_title):
 
 def fetch_page_content(url):
     """Fetches raw HTML (mimicking a browser)."""
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
-    }
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"}
     response = requests.get(url, headers=headers)
 
     # We strip scripts/styles to save tokens, even though Gemini is cheap
@@ -65,9 +63,7 @@ def extract_with_gemini(text_content):
 
     response = model.generate_content(
         prompt,
-        generation_config=GenerationConfig(
-            temperature=0, response_mime_type="application/json"
-        ),
+        generation_config=GenerationConfig(temperature=0, response_mime_type="application/json"),
     )
 
     return response.text

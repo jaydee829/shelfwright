@@ -9,7 +9,7 @@ A system to provide personalized book recommendations by leveraging a user's rea
 
 ## Project Structure
 - `src/` – Application source code
-- `tests/` – Unit and integration tests
+- `tests/` – Unit, integration, and end-to-end tests
 - `docs/` – Documentation
 - `data/` - Raw and processed datasets
 
@@ -32,10 +32,10 @@ A system to provide personalized book recommendations by leveraging a user's rea
 
 ### Flow 1: Reading History Processing
 1. **Ingest**: CSV data from `data/raw`.
-2. **Scout**: 
+2. **Scout**:
     - Basic metadata from Google Books and Hardcover.
     - Audiobook/Narrator metadata via LLM-assisted scraping of Audible.
-3. **Enrich**: 
+3. **Enrich**:
     - Synthesis of LLM knowledge and internet search for deep metadata.
     - Tropes managed by a "Trope Manager" component that balances specificity vs. generalizability.
 4. **versioning**: DVC for dataset versioning, orchestrated by Dagster.
@@ -45,11 +45,11 @@ A system to provide personalized book recommendations by leveraging a user's rea
 2. **Search**: Dual-mode exploration:
     - *Mode A (Internal tool)*: `google-genai` with search capability.
     - *Mode B (External A2A)*: A separate search service discovered via A2A.
-3. **Filter**: 
+3. **Filter**:
     - Exclude `ReadingHistory` unless the book matches perfectly and was read >2 years ago (Re-read logic).
     - Checks against the `Suggestions` table to avoid repeating recent recommendations.
 4. **Rank**: Use vector similarity of tropes and author/narrator style matches.
-5. **Justify (Trope-RAG)**: 
+5. **Justify (Trope-RAG)**:
     - Perform **Retrieval-Augmented Generation (RAG)** by pulling the names and descriptions of the top-matching tropes.
     - Feed this retrieved context into the LLM to provide grounded, evidence-based recommendations (e.g., "I'm recommending this because it features the 'Enemies to Lovers' trope, which you've rated 5 stars in 3 other books").
     - Log the result to `Suggestions`.
@@ -61,7 +61,7 @@ A system to provide personalized book recommendations by leveraging a user's rea
 - **UI**: Extensible Web UI (Vite/Next.js) for recommendations and history analysis.
 
 ## Special Handling & Edge Cases
-- **Multi-volume/Anthologies**: 
+- **Multi-volume/Anthologies**:
     - Multi-volume books by one author = 1 Work.
     - Short story collections by one author = 1 Work.
 - **Multi-author collections**:

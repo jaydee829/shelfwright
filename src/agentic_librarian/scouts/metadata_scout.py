@@ -78,9 +78,7 @@ def fetch_google_books_metadata(title: str, author: str, api_key: str = None) ->
         return None
 
 
-def fetch_hardcover_metadata(
-    title: str, author: str, format: str, api_key: str = None
-) -> dict:
+def fetch_hardcover_metadata(title: str, author: str, format: str, api_key: str = None) -> dict:
     """Get metadata from Hardcover API
 
     Args:
@@ -208,15 +206,11 @@ class AudiobookScout:
         """Finds the Audible URL using Google Custom Search."""
         search_engine_id = os.environ.get("SEARCH_ENGINE_ID")
         if not search_engine_id:
-            raise ValueError(
-                "Search Engine ID not set. Please set the SEARCH_ENGINE_ID environment variable."
-            )
+            raise ValueError("Search Engine ID not set. Please set the SEARCH_ENGINE_ID environment variable.")
 
         service = build("customsearch", "v1", developerKey=self._API_KEY)
         search_results = (
-            service.cse()
-            .list(q=f"site:audible.com {title} audiobook", cx=search_engine_id, num=1)
-            .execute()
+            service.cse().list(q=f"site:audible.com {title} audiobook", cx=search_engine_id, num=1).execute()
         )
 
         if "items" in search_results and len(search_results["items"]) > 0:
@@ -230,9 +224,7 @@ class AudiobookScout:
         if not url:
             raise ValueError(f"No Audible link found for title: {title}")
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"
-        }
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"}
         response = requests.get(url, headers=headers)
 
         # strip scripts/styles to save tokens
@@ -260,9 +252,7 @@ class AudiobookScout:
         {text_content[:30000]}
         """
 
-        response = self._client.models.generate_content(
-            model="gemini-2.5-flash-lite", contents=prompt
-        )
+        response = self._client.models.generate_content(model="gemini-2.5-flash-lite", contents=prompt)
 
         text = response.text.strip()
         if text.startswith("```json"):

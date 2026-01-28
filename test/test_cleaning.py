@@ -5,9 +5,7 @@ import src.agentic_librarian.etl.cleaning as cleaning
 
 
 def test_split_formats_single_format():
-    df = pd.DataFrame(
-        {"title": ["Book A", "Book B"], "format": ["Hardcover", "Paperback"]}
-    )
+    df = pd.DataFrame({"title": ["Book A", "Book B"], "format": ["Hardcover", "Paperback"]})
     result = cleaning.split_formats(df)
     assert len(result) == 2
     assert result.iloc[0]["format"] == "Hardcover"
@@ -33,9 +31,7 @@ def test_split_formats_no_format_column():
 
 
 def test_split_authors_single_author():
-    df = pd.DataFrame(
-        {"title": ["Book A", "Book B"], "Author": ["Author One", "Author Two"]}
-    )
+    df = pd.DataFrame({"title": ["Book A", "Book B"], "Author": ["Author One", "Author Two"]})
     result = cleaning.split_authors(df)
     assert "Author_1" in result.columns
     assert result.iloc[0]["Author_1"] == "Author One"

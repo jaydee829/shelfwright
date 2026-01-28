@@ -3,7 +3,7 @@
 The following tools are exposed by the MCP server to allow agents (Search, Filter, Rank) to interact with the database.
 
 ## 1. Information Retrieval
-*   **`get_similar_tropes(embedding: vector, limit: int)`**: 
+*   **`get_similar_tropes(embedding: vector, limit: int)`**:
     - Queries the `Tropes` table using cosine similarity.
     - *Purpose*: Map a user's prompt concepts to canonical tropes.
 *   **`search_works(genres: list[str], moods: list[str], tropes: list[str])`**:

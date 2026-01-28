@@ -7,12 +7,18 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
 
-  - repo: https://github.com/psf/black
-    rev: 24.3.0
-    hooks:
-      - id: black
-
   - repo: https://github.com/charliermarsh/ruff-pre-commit
     rev: v0.4.4
     hooks:
       - id: ruff
+        args: [ --fix ]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: pytest -m "not api_dependent and not slow"
+        language: system
+        pass_filenames: false
+        always_run: true

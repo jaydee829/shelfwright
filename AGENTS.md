@@ -11,6 +11,10 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 
 ## Memory-Aware Protocols
 
+**Before starting implementation:**
+- Review [testing_strategy.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/docs/testing_strategy.md) to ensure adherence to TDD, coverage, and the **Anti-Hardcoding** mandate.
+- **NEVER** implement logic that only satisfies specific test inputs; logic must be generalized and verified with parameterized tests.
+
 **Before proposing architectural changes:**
 - Check `docs/project_notes/decisions.md` for existing decisions
 - Verify the proposed approach doesn't conflict with past choices

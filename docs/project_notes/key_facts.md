@@ -15,6 +15,8 @@ This file tracks important project configuration, constants, and environment det
 - **Interface**: Web UI (Vite/React/Next.js), FastAPI (Backend)
 - **AI/LLM**: `google-genai` (Gemini), LangChain, FastMCP
 - **Protocols**: MCP (Data Access), A2A (Agent Collaboration)
+- **Testing**: Pytest (Unit, Integration), Playwright (E2E)
+- **Containerization**: Docker, Docker Compose
 
 ## Core Entities
 - **Authors**: Bio, JSONB style attributes (pacing, tone, style).
