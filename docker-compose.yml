@@ -32,7 +32,7 @@ services:
     volumes:
       - ./mlruns:/app/mlruns
     command: >
-      mlflow server 
+      mlflow server
       --backend-store-uri ${MLFLOW_TRACKING_URI}
       --default-artifact-root /app/mlruns
       --host 0.0.0.0

@@ -17,7 +17,7 @@ This file tracks important project configuration, constants, and environment det
 - **Protocols**: MCP (Data Access), A2A (Agent Collaboration)
 - **Testing**: Pytest (Unit, Integration), Playwright (E2E)
 - **Containerization**: Docker, Docker Compose
-  - **Ports**: 
+  - **Ports**:
     - Postgres: `5432` (Bound to `127.0.0.1`)
     - MLFlow: `5000` (Bound to `127.0.0.1`)
 - **Configuration**:

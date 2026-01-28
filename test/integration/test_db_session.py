@@ -1,5 +1,7 @@
 import pytest
+
 from src.agentic_librarian.db.session import DatabaseManager
+
 
 @pytest.mark.db_integration
 def test_database_manager_connection(db_url):
