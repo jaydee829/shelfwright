@@ -90,3 +90,21 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Orchestration code and other Python source files MUST be tracked exclusively by Git.
 **Consequences:**
 - Pros: standard dev ergonomics, better code reviews, avoidance of "missing file" errors during local development.
+
+### ADR-009: Encapsulate Ingest Logic in HistoryIngestor (2026-01-30)
+**Context:**
+- CSV cleaning and model mapping were becoming scattered and harder to test in isolation.
+**Decision:**
+- Create a `HistoryIngestor` class to centralize cleaning (via `cleaning.py`) and SQLAlchemy object generation (`to_models`).
+**Consequences:**
+- Pros: Cleaner Dagster assets, easier unit testing of the ingest pipeline, clear path for Phase 2 enrichment.
+
+### ADR-010: Contextual Year Inference for Ambiguous Dates (2026-01-30)
+**Context:**
+- The raw CSV contains ambiguous dates like "4-Jan" without a year.
+- These dates appear in clusters that share a year with unambiguous dates (e.g., "1/7/2020").
+**Decision:**
+- Use contextual inference (`ffill` and `bfill`) on extracted years from unambiguous dates within the same CSV to fill missing years.
+**Consequences:**
+- Pros: Automated reconstruction of historical dates without manual data entry.
+- Cons: **Dependency on Row Order**. If the CSV rows are not chronologically clustered, the inferred year may be incorrect. Downstream logic must be aware that `date_completed` may be an estimate in these cases.

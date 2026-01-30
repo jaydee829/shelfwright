@@ -1,4 +1,4 @@
-"""Data cleaning utilities"""
+from datetime import date
 
 import pandas as pd
 
@@ -24,8 +24,48 @@ def split_formats(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def parse_completion_date(date_str: str, fallback_year: int | None = None) -> date | None:
+    """Parse common completion date formats in the CSV.
+
+    Handles:
+    - 1/7/2020
+    - 4-Jan (uses fallback_year if provided, else current year)
+    - 2020-01-28
+    """
+    if not date_str or pd.isna(date_str) or str(date_str).strip() == "":
+        return None
+
+    date_str = str(date_str).strip()
+
+    # Try common explicit formats first
+    # %d-%b handles "4-Jan" (though result has year 1900)
+    for fmt in ["%d-%b", "%b-%d", "%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"]:
+        try:
+            parsed = pd.to_datetime(date_str, format=fmt, errors="coerce")
+            if not pd.isna(parsed):
+                if parsed.year == 1900:
+                    # Use fallback year or current year for "day-Month" formats
+                    target_year = fallback_year if fallback_year else date.today().year
+                    parsed = parsed.replace(year=target_year)
+                return parsed.date()
+        except (ValueError, TypeError):
+            continue
+
+    # Fallback to generic robust parsing
+    try:
+        parsed = pd.to_datetime(date_str, errors="coerce")
+        if not pd.isna(parsed):
+            return parsed.date()
+    except Exception:
+        pass
+
+    return None
+
+
 def split_authors(df: pd.DataFrame) -> pd.DataFrame:
     """Create additional columns for books with more than one author
+
+    Handles: ';', 'and', and ' & ' as separators.
 
     Args:
         df (pd.DataFrame): raw book data
@@ -36,7 +76,16 @@ def split_authors(df: pd.DataFrame) -> pd.DataFrame:
     if "Author" not in df.columns:
         raise ValueError("DataFrame must contain an 'Author' column")
 
-    author_splits = df["Author"].str.split(";", expand=True).applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    # Split on ';', ' and ', or ' & '
+    author_pattern = r";|\s+and\s+|\s+&\s+"
+
+    # We use apply(lambda s: ...) to handle potential non-string values safely
+    # but the CSV reader usually gives strings or NaN.
+    author_splits = df["Author"].str.split(author_pattern, expand=True)
+
+    # Strip whitespace from all resulting columns
+    for col in author_splits.columns:
+        author_splits[col] = author_splits[col].str.strip()
 
     # Rename the new columns with numbers
     author_splits.columns = [f"Author_{i + 1}" for i in range(author_splits.shape[1])]
@@ -58,9 +107,7 @@ def split_narrators(df: pd.DataFrame) -> pd.DataFrame:
     if "Narrator" not in df.columns:
         raise ValueError("DataFrame must contain a 'Narrator' column")
 
-    narrator_splits = (
-        df["Narrator"].str.split(";", expand=True).applymap(lambda x: x.strip() if isinstance(x, str) else x)
-    )
+    narrator_splits = df["Narrator"].str.split(";", expand=True).map(lambda x: x.strip() if isinstance(x, str) else x)
 
     # Rename the new columns with numbers
     narrator_splits.columns = [f"Narrator_{i + 1}" for i in range(narrator_splits.shape[1])]

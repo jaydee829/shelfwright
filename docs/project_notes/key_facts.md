@@ -32,6 +32,11 @@ This file tracks important project configuration, constants, and environment det
 - **ReadingHistory**: User ratings, notes, completion dates.
 - **Suggestions**: Log of agent recommendations with justifications.
 
+## Data Ingestion Assumptions
+- **Chronological Density**: The system assumes that raw CSV rows are chronologically clustered.
+- **Year Inference**: Dates missing a year (e.g., `4-Jan`) are contextually inferred from the nearest unambiguous date (e.g., `1/7/2020`) using forward and backward fills.
+- **Reference Date**: If no contextual year is found, the system defaults to the current year.
+
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.
 - **DO NOT** store PII.

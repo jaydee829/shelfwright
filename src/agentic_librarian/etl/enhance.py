@@ -1,6 +1,7 @@
 import agentic_librarian.etl.cleaning as cleaning
 import mlflow
 import pandas as pd
+from agentic_librarian.etl.ingest import HistoryIngestor
 from agentic_librarian.scouts.metadata_scout import AudiobookScout, fetch_google_books_metadata
 
 # import os
@@ -18,8 +19,9 @@ def enhanced_book_features(context: AssetExecutionContext):
         context.log.error(f"File data/raw/{context.partition_key}.csv not found.")
         raise Exception(f"Sensor triggered but file data/raw/{context.partition_key}.csv is missing.") from None
 
-    df = cleaning.split_formats(df)
-    df = cleaning.split_authors(df)
+    # Use the refactored HistoryIngestor for cleaning
+    ingestor = HistoryIngestor(df)
+    df = ingestor.clean()
 
     mlflow.set_experiment("agentic_audiobook_metadata")
 

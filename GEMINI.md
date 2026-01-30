@@ -44,4 +44,5 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - **Keep entries concise** (1-3 lines for descriptions)
 - **Always include dates** for temporal context
 - **Include URLs** for tickets, documentation, monitoring dashboards
+- **Use pre-commit** before committing changes and presenting walkthroughs
 - **Manual cleanup** of old entries is expected (not automated)
