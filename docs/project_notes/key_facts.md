@@ -8,6 +8,8 @@ This file tracks important project configuration, constants, and environment det
 
 ## Local Development
 - **OS**: Windows
+- **Conda Environment**: `agentic_librarian`
+- **Execution Rule**: Always run commands (pytest, ruff, dagster, etc.) prefixed with `conda run -n agentic_librarian` to ensure the correct dependencies are used.
 
 ## Technology Stack
 - **Database**: PostgreSQL with `pgvector` (1536 dims for tropes)
