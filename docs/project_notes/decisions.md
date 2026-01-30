@@ -81,3 +81,12 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Services are not exposed to the local network by default.
 - Cons: Requires manual reconfiguration for remote access or container-to-container access from outside the default bridge network.
+
+### ADR-008: Data Versioning Scope (2026-01-30)
+**Context:**
+- Misconfiguration was found where orchestration code was tracked by DVC instead of Git.
+**Decision:**
+- DVC MUST only be used for data files (e.g., `data/raw/*.csv`).
+- Orchestration code and other Python source files MUST be tracked exclusively by Git.
+**Consequences:**
+- Pros: standard dev ergonomics, better code reviews, avoidance of "missing file" errors during local development.

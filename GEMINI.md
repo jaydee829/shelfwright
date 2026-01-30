@@ -8,6 +8,7 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - **decisions.md** - Architectural Decision Records (ADRs) with context and trade-offs
 - **key_facts.md** - Project configuration, credentials, ports, important URLs
 - **issues.md** - Work log with ticket IDs, descriptions, and URLs
+- **testing_strategy.md** - Testing protocols and standards
 
 ## Memory-Aware Protocols
 

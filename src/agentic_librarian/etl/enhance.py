@@ -1,10 +1,10 @@
-import etl.cleaning as cleaning
+import agentic_librarian.etl.cleaning as cleaning
 import mlflow
 import pandas as pd
 
 # import os
 from dagster import AssetExecutionContext, MetadataValue, asset
-from scouts.metadata_scout import AudiobookScout, fetch_google_books_metadata
+from agentic_librarian.scouts.metadata_scout import AudiobookScout, fetch_google_books_metadata
 
 # from dvc.repo import Repo
 
