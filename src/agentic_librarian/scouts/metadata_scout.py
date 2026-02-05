@@ -4,6 +4,8 @@ import json
 import os
 
 import requests
+import time
+import mlflow
 from bs4 import BeautifulSoup
 from google import genai
 from googleapiclient.discovery import build
@@ -116,6 +118,7 @@ def fetch_hardcover_metadata(title: str, author: str, format: str, api_key: str 
                 description
                 pages
                 audio_seconds
+                release_date
                 }
                 pages
                 audio_seconds
@@ -165,21 +168,21 @@ def fetch_hardcover_metadata(title: str, author: str, format: str, api_key: str 
             if author:
                 authors.append(author)
 
-        release_date = edition.get("release_date")
-        if not release_date:
-            release_date = book.get("release_date")
+        edition_release_date = edition.get("release_date")
+        original_release_date = book.get("release_date") or edition_release_date
 
         return {
             "title": edition.get("title"),
             "authors": authors,
             "edition_format": edition.get("edition_format"),
             "page_count": pages,
-            "release_date": release_date,
+            "publication_date": edition_release_date,
+            "original_publication_date": original_release_date,
             "isbn_13": edition.get("isbn_13"),
             "moods": set(moods),
             "genres": set(genres),
             "description": book.get("description", ""),
-            "length_minutes": audio_length // 60 if audio_length else None,
+            "audio_minutes": audio_length // 60 if audio_length else None,
         }
     except requests.RequestException as e:
         print(f"Hardcover API request failed: {e}")
@@ -258,3 +261,148 @@ class AudiobookScout:
         if text.startswith("```json"):
             text = text.replace("```json", "").replace("```", "")
         return json.loads(text)
+
+
+class DirectKnowledgeScout:
+    """Scouts audiobook metadata using direct LLM knowledge and search grounding."""
+
+    def __init__(self):
+        self._API_KEY = os.environ.get("GOOGLE_SEARCH_API_KEY")
+        if not self._API_KEY:
+            raise ValueError(
+                "Google Search API key not set. Please set the GOOGLE_SEARCH_API_KEY environment variable."
+            )
+        self._client = genai.Client(api_key=self._API_KEY)
+
+    def scout_audiobook(self, title: str, author: str) -> dict:
+        """Uses Gemini with search grounding to find audiobook details."""
+        prompt = f"""
+        Find the official audiobook duration and narrator for:
+        Title: {title}
+        Author: {author}
+
+        Return ONLY a raw JSON object with:
+        - title (string)
+        - narrator (string)
+        - audio_minutes (int)
+        """
+
+        # Using tools for search grounding (simulated by prompt since direct tool support varies by SDK version)
+        # Note: If the SDK supports tools=[{ 'google_search': {} }], add it here.
+        # For now, we rely on the model's knowledge/search capabilities.
+        response = self._client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config={
+                "tools": [{"google_search": {}}] if os.environ.get("USE_SEARCH_GROUNDING") == "1" else []
+            },
+        )
+
+        text = response.text.strip()
+        if text.startswith("```json"):
+            text = text.replace("```json", "").replace("```", "")
+        return json.loads(text)
+
+
+class MultiSourceScout:
+    """Consolidates book metadata enrichment from Google Books, Hardcover, and Audible."""
+
+    def __init__(self, google_api_key: str = None, hardcover_api_key: str = None):
+        """
+        Initialize the scout with API keys.
+
+        Args:
+            google_api_key (str): Google Books API key.
+            hardcover_api_key (str): Hardcover API key.
+        """
+        self.google_api_key = google_api_key or os.environ.get("GOOGLE_BOOKS_API_KEY")
+        self.hardcover_api_key = hardcover_api_key or os.environ.get("HARDCOVER_API_KEY")
+        self.audio_scout = AudiobookScout()
+        self.direct_scout = DirectKnowledgeScout()
+
+    def scout_metadata(self, title: str, author: str, format: str = "Paperback") -> dict:
+        """
+        Scouts metadata from multiple sources and merges them.
+
+        Args:
+            title (str): The book title.
+            author (str): The book author.
+            format (str): The book format (e.g., "Paperback", "Audiobook").
+
+        Returns:
+            dict: Unified metadata dictionary.
+        """
+        # Fetch from standard sources
+        google_data = fetch_google_books_metadata(title, author, api_key=self.google_api_key) or {}
+        hardcover_data = fetch_hardcover_metadata(title, author, format=format, api_key=self.hardcover_api_key) or {}
+
+        # Handle Audiobooks with dual-pathway scouting
+        audio_minutes = hardcover_data.get("audio_minutes")
+        pathway_a_results = {}
+        pathway_b_results = {}
+
+        if "audiobook" in format.lower():
+            # Setup MLFlow experiment
+            mlflow.set_experiment("audiobook_scouting_comparison")
+
+            with mlflow.start_run(run_name=f"scout_{title}_{int(time.time())}"):
+                mlflow.log_params({"title": title, "author": author, "hardcover_minutes": audio_minutes})
+
+                # Pathway A: Scraping
+                start_a = time.time()
+                try:
+                    pathway_a_results = self.audio_scout.extract_metadata_with_gemini(title)
+                    mlflow.log_metric("pathway_a_latency", time.time() - start_a)
+                    mlflow.log_metric("pathway_a_minutes", pathway_a_results.get("length_minutes", 0))
+                except Exception as e:
+                    mlflow.log_param("pathway_a_error", str(e))
+
+                # Pathway B: Direct Knowledge
+                start_b = time.time()
+                try:
+                    pathway_b_results = self.direct_scout.scout_audiobook(title, author)
+                    mlflow.log_metric("pathway_b_latency", time.time() - start_b)
+                    mlflow.log_metric("pathway_b_minutes", pathway_b_results.get("audio_minutes", 0))
+                except Exception as e:
+                    mlflow.log_param("pathway_b_error", str(e))
+
+                # Selection logic: Prefer Audible (Pathway A) if available, fallback to Direct (Pathway B)
+                # Compare and flag disparity
+                audible_min = pathway_a_results.get("length_minutes")
+                direct_min = pathway_b_results.get("audio_minutes")
+
+                if audible_min and direct_min and abs(audible_min - direct_min) > 10:
+                    mlflow.log_param("disparity_warning", True)
+                    print(f"Warning: Disparity detected between Audible ({audible_min}) and Direct ({direct_min})")
+
+                audio_minutes = audible_min or direct_min or audio_minutes
+
+        # Safely handle dates
+        pub_date_str = hardcover_data.get("publication_date") or google_data.get("published_date")
+        orig_date_str = hardcover_data.get("original_publication_date") or google_data.get("published_date")
+
+        # Extract year for original_publication_year (Work model expects Int)
+        original_year = None
+        if orig_date_str:
+            try:
+                original_year = int(orig_date_str.split("-")[0])
+            except (ValueError, IndexError):
+                pass
+
+        merged = {
+            "title": hardcover_data.get("title") or google_data.get("title") or title,
+            "authors": hardcover_data.get("authors") or google_data.get("authors") or [author],
+            "isbn_13": hardcover_data.get("isbn_13") or google_data.get("ISBN_13"),
+            "page_count": hardcover_data.get("page_count") or google_data.get("page_count"),
+            "description": hardcover_data.get("description") or google_data.get("description"),
+            "genres": list(set(list(hardcover_data.get("genres", [])) + google_data.get("genres", []))),
+            "moods": list(hardcover_data.get("moods", [])),  # Only Hardcover has moods
+            "average_rating": google_data.get("average_rating"),
+            "thumbnail": google_data.get("thumbnail"),
+            "publication_date": pub_date_str,
+            "original_publication_year": original_year,
+            "audio_minutes": audio_minutes,
+            "source_priority": ["hardcover", "google_books", "audible"],
+        }
+
+        return merged

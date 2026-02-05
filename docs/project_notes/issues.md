@@ -26,3 +26,13 @@ This file tracks work history and ticket references.
 - **Status**: Completed
 - **Description**: Refactored CSV cleaning, implemented `HistoryIngestor` class for model mapping, and updated Dagster orchestration.
 - **URL**: [walkthrough.md](file:///C:/Users/Justin.Merrick/.gemini/antigravity/brain/5ce3f9cf-5c02-4fc9-b36b-dfd010ef9c9c/walkthrough.md)
+
+### 2026-01-30 - ETL-004: Phase 2 Step 2 - MultiSourceScout Implementation
+- **Status**: Completed
+- **Description**: Implemented `MultiSourceScout` with dual-pathway audiobook scouting (Audible Scraping vs Direct LLM Knowledge) and MLFlow logging.
+- **URL**: [walkthrough.md](file:///C:/Users/Justin.Merrick/.gemini/antigravity/brain/0e68aa32-bb55-4a26-824f-540a33780cf3/walkthrough.md)
+- **Efficacy Test Plan**:
+    1. Run `test_efficacy.py` in an environment with valid `GOOGLE_SEARCH_API_KEY` and `HARDCOVER_API_KEY`.
+    2. Review MLFlow experiment `audiobook_scouting_comparison`.
+    3. Metrics to compare: `pathway_a_latency` vs `pathway_b_latency`, `pathway_a_minutes` accuracy vs `pathway_b_minutes`.
+    4. Goal: Determine if Direct LLM Knowledge (B) is reliable enough to replace Scraping (A).

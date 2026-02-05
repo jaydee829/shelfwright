@@ -108,3 +108,15 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Automated reconstruction of historical dates without manual data entry.
 - Cons: **Dependency on Row Order**. If the CSV rows are not chronologically clustered, the inferred year may be incorrect. Downstream logic must be aware that `date_completed` may be an estimate in these cases.
+### ADR-011: Dual-Pathway Audiobook Scouting & MLFlow Benchmarking (2026-01-30)
+**Context:**
+- Audiobook metadata (especially duration) is often inconsistent across sources.
+- Comparison between "web scraping + parsing" vs "direct LLM knowledge" is needed to determine the most reliable and cost-effective method.
+**Decision:**
+- Implement two concurrent scouting pathways:
+    - **Pathway A (Scraping)**: Google Custom Search -> BeautifulSoup Scraping -> LLM Extraction.
+    - **Pathway B (Direct)**: Gemini Model with built-in Search Grounding.
+- Log both results, latency, and success metrics to MLFlow for benchmarking.
+**Consequences:**
+- Pros: Data-driven decision making for metadata sources, fallback robustness.
+- Cons: Increased API cost during the experimentation phase.
