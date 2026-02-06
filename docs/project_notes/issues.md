@@ -36,3 +36,8 @@ This file tracks work history and ticket references.
     2. Review MLFlow experiment `audiobook_scouting_comparison`.
     3. Metrics to compare: `pathway_a_latency` vs `pathway_b_latency`, `pathway_a_minutes` accuracy vs `pathway_b_minutes`.
     4. Goal: Determine if Direct LLM Knowledge (B) is reliable enough to replace Scraping (A).
+
+### 2026-02-06 - ETL-005: Robust Metadata Year Parsing
+- **Status**: Completed
+- **Description**: Refactored `metadata_scout.py` to use regex for year extraction, improving robustness against various date formats.
+- **URL**: [walkthrough.md](file:///C:/Users/Justin.Merrick/.gemini/antigravity/brain/d22419e7-1275-4f93-9170-efa7436e44cf/walkthrough.md)

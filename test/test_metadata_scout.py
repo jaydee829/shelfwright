@@ -1,8 +1,9 @@
 import os
+from unittest.mock import MagicMock
 
 import pytest
 import requests
-from unittest.mock import MagicMock
+
 import src.agentic_librarian.scouts.metadata_scout as md_scout
 
 
@@ -267,7 +268,7 @@ def test_fetch_hardcover_metadata_paperback_format(monkeypatch):
     assert metadata["page_count"] == 350
     assert metadata["description"] == "A test paperback book description."
     assert metadata["authors"] == ["Test Author"]
-    assert metadata["publication_date"] is None # Not in mock
+    assert metadata["publication_date"] is None  # Not in mock
 
 
 def test_fetch_hardcover_metadata_audiobook_format(monkeypatch):
@@ -447,7 +448,7 @@ def test_multi_source_scout_audiobook_dual_pathway(monkeypatch):
 
     # Verify selection logic (Prefer Pathway A / Audible)
     assert result["audio_minutes"] == 120
-    
+
     # Verify MLFlow calls
     assert mock_mlflow.set_experiment.called
     assert mock_mlflow.start_run.called

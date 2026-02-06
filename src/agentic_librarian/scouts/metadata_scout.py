@@ -2,10 +2,12 @@
 
 import json
 import os
-
-import requests
+import re
 import time
+from contextlib import suppress
+
 import mlflow
+import requests
 from bs4 import BeautifulSoup
 from google import genai
 from googleapiclient.discovery import build
@@ -293,9 +295,7 @@ class DirectKnowledgeScout:
         response = self._client.models.generate_content(
             model="gemini-2.0-flash",
             contents=prompt,
-            config={
-                "tools": [{"google_search": {}}] if os.environ.get("USE_SEARCH_GROUNDING") == "1" else []
-            },
+            config={"tools": [{"google_search": {}}] if os.environ.get("USE_SEARCH_GROUNDING") == "1" else []},
         )
 
         text = response.text.strip()
@@ -382,12 +382,7 @@ class MultiSourceScout:
         orig_date_str = hardcover_data.get("original_publication_date") or google_data.get("published_date")
 
         # Extract year for original_publication_year (Work model expects Int)
-        original_year = None
-        if orig_date_str:
-            try:
-                original_year = int(orig_date_str.split("-")[0])
-            except (ValueError, IndexError):
-                pass
+        original_year = self._extract_year(orig_date_str)
 
         merged = {
             "title": hardcover_data.get("title") or google_data.get("title") or title,
@@ -406,3 +401,25 @@ class MultiSourceScout:
         }
 
         return merged
+
+    def _extract_year(self, date_str: str | None) -> int | None:
+        """Helper to extract a 4-digit year from a string robustly.
+
+        Handles ISO (YYYY-MM-DD), Year only (YYYY), and descriptive dates (Jan 2023).
+
+        Args:
+            date_str (str | None): The date string to parse.
+
+        Returns:
+            int | None: The 4-digit year as an integer, or None if not found.
+        """
+        if not date_str:
+            return None
+
+        # Look for first sequence of exactly 4 digits
+        match = re.search(r"(\d{4})", str(date_str))
+        if match:
+            with suppress(ValueError):
+                return int(match.group(1))
+
+        return None
