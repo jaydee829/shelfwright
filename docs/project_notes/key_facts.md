@@ -14,6 +14,14 @@ This file tracks important project configuration, constants, and environment det
 ## Technology Stack
 - **Database**: PostgreSQL with `pgvector` (1536 dims for tropes)
 - **MLOps**: DVC (Data Versioning), MLFlow (Experiment Tracking), Dagster (Orchestration)
+  - **Dagster Assets**:
+    - `raw_history`: CSV loading and cleaning via `HistoryIngestor`.
+    - `enriched_metadata`: Metadata enrichment via `MultiSourceScout`.
+    - `vectorized_tropes`: Trope standardization and vectorization via `TropeManager`.
+  - **Dagster Resources**:
+    - `db_manager`: Provides SQLAlchemy sessions to assets.
+  - **Dagster Partitions**:
+    - `csv_files`: Dynamic partitions based on raw CSV filenames.
 - **Interface**: Web UI (Vite/React/Next.js), FastAPI (Backend)
 - **AI/LLM**: `google-genai` (Gemini), LangChain, FastMCP
 - **Protocols**: MCP (Data Access), A2A (Agent Collaboration)

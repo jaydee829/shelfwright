@@ -120,3 +120,14 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Data-driven decision making for metadata sources, fallback robustness.
 - Cons: Increased API cost during the experimentation phase.
+
+### ADR-012: Trope Deduplication via Semantic Similarity (2026-02-06)
+**Context:**
+- Book scouts often return inconsistent tags (e.g., "Enemies-to-Lovers" vs "Enemies to Lovers").
+- We need a way to group these into standardized tropes to avoid sparse vector space and fragmented recommendations.
+**Decision:**
+- Use `text-embedding-004` (Gemini) for trope vectorization.
+- Implement a `TropeManager` that checks for exact name matches first, then uses cosine similarity with a default threshold of `0.85` to deduplicate incoming tags.
+**Consequences:**
+- Pros: Automated standardization, reduces noise in the database, improves recommendation relevance.
+- Cons: Small risk of false positives (merging distinct tropes) if the threshold is too low.

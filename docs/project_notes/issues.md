@@ -41,3 +41,13 @@ This file tracks work history and ticket references.
 - **Status**: Completed
 - **Description**: Refactored `metadata_scout.py` to use regex for year extraction, improving robustness against various date formats.
 - **URL**: [walkthrough.md](file:///C:/Users/Justin.Merrick/.gemini/antigravity/brain/d22419e7-1275-4f93-9170-efa7436e44cf/walkthrough.md)
+
+### 2026-02-06 - ETL-006: Phase 2 Step 3 - TropeManager Implementation
+- **Status**: Completed
+- **Description**: Implemented `TropeManager` for semantic tag deduplication and embedding using TDD. Achieved 100% test coverage.
+- **URL**: N/A
+
+### 2026-02-06 - ETL-007: Phase 2 Step 4 - Dagster Orchestration
+- **Status**: Completed
+- **Description**: Orchestrated the ETL flow with Dagster using modular assets (`raw_history`, `enriched_metadata`, `vectorized_tropes`). Integrated `MultiSourceScout` and `TropeManager`.
+- **URL**: N/A
