@@ -56,3 +56,8 @@ This file tracks work history and ticket references.
 - **Status**: Completed
 - **Description**: Refined Phase 3 architecture to use a Hybrid Data Access model and Coarse-Grained MCP tools to handle complex transactions in Flow 2.
 - **URL**: N/A
+
+### 2026-02-06 - ARC-009: Phase 2.5 - Abstract Scout Refactor
+- **Status**: In Progress
+- **Description**: Refactoring metadata scouting into a hierarchical abstract architecture (`BaseScout` -> `APIScout`/`LLMScout`).
+- **URL**: N/A

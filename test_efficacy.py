@@ -1,28 +1,30 @@
-import src.agentic_librarian.scouts.metadata_scout as md_scout
-
-# Set environment variables for testing (mock/live depending on env)
-# os.environ["USE_SEARCH_GROUNDING"] = "1"
-
-books = [
-    {"title": "The Way of Kings", "author": "Brandon Sanderson"},  # Popular, complex
-    {"title": "Project Hail Mary", "author": "Andy Weir"},  # Very popular audiobook
-    {"title": "The 7 1/2 Deaths of Evelyn Hardcastle", "author": "Stuart Turton"},  # Unique titles
-    {"title": "Dungeons and Drama", "author": "Kristy Boyce"},  # Newer/less obscure
-    {"title": "The Martian", "author": "Andy Weir"},  # Iconic
-]
+import agentic_librarian.scouts.metadata_scout as md_scout
 
 
 def run_efficacy_test():
-    scout = md_scout.MultiSourceScout()
-
-    # Mock MLFlow for terminal output if needed, but the code already does it.
-    # If MLFlow isn't running, it might fail or log locally.
+    # Use the new ScoutManager instead of the legacy MultiSourceScout
+    manager = md_scout.ScoutManager()
+    manager.register_scout(md_scout.HardcoverScout(), priority=1)
+    manager.register_scout(md_scout.GoogleBooksScout(), priority=2)
+    manager.register_scout(md_scout.AudiobookScout(), priority=3)
+    manager.register_scout(md_scout.DirectKnowledgeScout(), priority=4)
 
     print("Starting Efficacy Test...")
+    books = [
+        {"title": "The Way of Kings", "author": "Brandon Sanderson"},
+        {"title": "Project Hail Mary", "author": "Andy Weir"},
+        {"title": "The 7 1/2 Deaths of Evelyn Hardcastle", "author": "Stuart Turton"},
+        {"title": "Dungeons and Drama", "author": "Kristy Boyce"},
+        {"title": "The Martian", "author": "Andy Weir"},
+    ]
+
     for book in books:
         print(f"Scouting: {book['title']} by {book['author']}")
-        result = scout.scout_metadata(book["title"], book["author"], format="Audiobook")
-        print(f"Result: {result['audio_minutes']} minutes (Source Priority: {result['source_priority']})")
+        result = manager.enrich(book["title"], book["author"], format="Audiobook")
+        # Format results for output
+        audio_min = result.get("audio_minutes", "N/A")
+        priority = result.get("source_priority", [])
+        print(f"Result: {audio_min} minutes (Source Priority: {priority})")
         print("-" * 20)
 
 

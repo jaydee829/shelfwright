@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock credentials before importing defs to prevent DatabaseManager from raising ValueError in CI
+# Mock credentials before importing defs
 with patch.dict(
     os.environ,
     {"POSTGRES_USER": "mock_user", "POSTGRES_PASSWORD": "mock_password", "GOOGLE_SEARCH_API_KEY": "mock_key"},
@@ -16,25 +16,17 @@ with patch.dict(
 
 def create_mock_session(existing_edition=None):
     session = MagicMock()
-
-    # We need a stable mock for the query chain
     mock_q = MagicMock()
     mock_q.join.return_value = mock_q
     mock_q.filter.return_value = mock_q
     mock_q.filter_by.return_value = mock_q
 
     if existing_edition:
-        # Side effect for .first()
-        # Row 1 (Kings): Enriched check (existing_edition), Work check, Edition check, History check
-        # Row 2 (Hail Mary): Enriched check (None), Work check, Edition check, History check
+
         def first_side_effect():
             if not hasattr(first_side_effect, "calls"):
                 first_side_effect.calls = 0
-
-            val = None
-            if first_side_effect.calls == 0:
-                val = existing_edition
-
+            val = existing_edition if first_side_effect.calls == 0 else None
             first_side_effect.calls += 1
             return val
 
@@ -47,17 +39,16 @@ def create_mock_session(existing_edition=None):
 
 
 @pytest.fixture
-def mock_scout():
-    with patch("agentic_librarian.orchestration.assets.MultiSourceScout") as mock:
-        scout_inst = mock.return_value
-        scout_inst.scout_metadata.return_value = {
-            "title": "Mock Title",
-            "authors": ["Mock Author"],
-            "isbn_13": "1234567890123",
-            "genres": ["Fantasy"],
-            "moods": ["Epic"],
-        }
-        yield scout_inst
+def mock_scout_manager():
+    manager = MagicMock()
+    manager.enrich.return_value = {
+        "title": "Mock Title",
+        "authors": ["Mock Author"],
+        "isbn_13": "1234567890123",
+        "genres": ["Fantasy"],
+        "moods": ["Epic"],
+    }
+    return manager
 
 
 @pytest.fixture
@@ -75,7 +66,7 @@ def mock_mlflow():
 
 
 @pytest.mark.slow
-def test_enhance_job_integration_all_new(mock_scout, mock_trope_manager, mock_mlflow):
+def test_enhance_job_integration_all_new(mock_scout_manager, mock_trope_manager, mock_mlflow):
     job_def = defs.get_job_def("enhance_job")
     instance = DagsterInstance.ephemeral()
     instance.add_dynamic_partitions("csv_files", ["test_sample"])
@@ -85,25 +76,25 @@ def test_enhance_job_integration_all_new(mock_scout, mock_trope_manager, mock_ml
     mock_db_manager.get_session.return_value.__enter__.return_value = session
 
     result = job_def.execute_in_process(
-        partition_key="test_sample", resources={"db_manager": mock_db_manager}, instance=instance
+        partition_key="test_sample",
+        resources={"db_manager": mock_db_manager, "scout_manager": mock_scout_manager},
+        instance=instance,
     )
 
     assert result.success
     added_objects = [call[0][0] for call in session.add.call_args_list]
-
     history_entries = [obj for obj in added_objects if isinstance(obj, ReadingHistory)]
     assert len(history_entries) == 2
-    assert mock_scout.scout_metadata.call_count == 2
+    assert mock_scout_manager.enrich.call_count == 2
 
 
 @pytest.mark.slow
-def test_enhance_job_deduplication(mock_scout, mock_trope_manager, mock_mlflow):
+def test_enhance_job_deduplication(mock_scout_manager, mock_trope_manager, mock_mlflow):
     """Deduplication path: One book exists, one is new."""
     job_def = defs.get_job_def("enhance_job")
     instance = DagsterInstance.ephemeral()
     instance.add_dynamic_partitions("csv_files", ["test_sample"])
 
-    # Setup specific mock session for this test
     existing_work = Work(title="The Way of Kings", id="existing-work-id")
     existing_edition = Edition(work=existing_work, format="hardcover", id="existing-edition-id")
 
@@ -112,15 +103,14 @@ def test_enhance_job_deduplication(mock_scout, mock_trope_manager, mock_mlflow):
     mock_db_manager.get_session.return_value.__enter__.return_value = session
 
     result = job_def.execute_in_process(
-        partition_key="test_sample", resources={"db_manager": mock_db_manager}, instance=instance
+        partition_key="test_sample",
+        resources={"db_manager": mock_db_manager, "scout_manager": mock_scout_manager},
+        instance=instance,
     )
 
     assert result.success
-
-    # Verify scout only called for the second (new) row
-    assert mock_scout.scout_metadata.call_count == 1
-
-    # Verify both rows got a ReadingHistory record
+    # Scout should only be called for the second row (Project Hail Mary)
+    assert mock_scout_manager.enrich.call_count == 1
     added_objects = [call[0][0] for call in session.add.call_args_list]
     history_entries = [obj for obj in added_objects if isinstance(obj, ReadingHistory)]
     assert len(history_entries) == 2

@@ -73,5 +73,6 @@ class TropeManager:
         # 3. Create New
         new_trope = Trope(name=raw_tag, embedding=embedding)
         self.session.add(new_trope)
+        self.session.flush()  # Ensure ID is populated for the caller
         # We don't commit here, let the caller handle it or use a flush
         return new_trope

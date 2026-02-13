@@ -7,7 +7,7 @@ The following tools are exposed by the MCP server to allow agents (Search, Filte
     - **Logic**: Performs a `pgvector` similarity search across `Works` using the provided tropes AND automatically filters out books found in `ReadingHistory` (unless they meet re-read criteria).
     - *Purpose*: Encapsulates the entire search + deduplication + filtering transaction into one call.
 *   **`analyze_external_work(title: str, author: str)`**:
-    - **Logic**: Triggers the `MultiSourceScout` and `TropeManager` to generate a temporary vector/profile for a book found via external search (Pathway B). Returns a "Compatibility Score" against user preferences without necessarily saving to the DB.
+    - **Logic**: Triggers the `ScoutManager` and `TropeManager` to generate a temporary vector/profile for a book found via external search (Pathway B). Returns a "Compatibility Score" against user preferences without necessarily saving to the DB.
     - *Purpose*: Allows agents to evaluate books they find "in the wild" against the user's history.
 
 ## 2. Information Retrieval & Facts

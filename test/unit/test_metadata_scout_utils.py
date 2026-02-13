@@ -1,6 +1,16 @@
-import pytest
+from unittest.mock import patch
 
-from src.agentic_librarian.scouts.metadata_scout import MultiSourceScout
+import pytest
+from agentic_librarian.scouts.metadata_scout import GoogleBooksScout
+
+
+@pytest.fixture(autouse=True)
+def mock_search_api_key(request):
+    if "api_dependent" in request.keywords:
+        yield
+    else:
+        with patch.dict("os.environ", {"GOOGLE_SEARCH_API_KEY": "mock_key"}):
+            yield
 
 
 @pytest.mark.parametrize(
@@ -18,6 +28,6 @@ from src.agentic_librarian.scouts.metadata_scout import MultiSourceScout
     ],
 )
 def test_extract_year(input_date, expected_year):
-    scout = MultiSourceScout()
+    scout = GoogleBooksScout(api_key="key")
     actual = scout._extract_year(input_date)
     assert actual == expected_year

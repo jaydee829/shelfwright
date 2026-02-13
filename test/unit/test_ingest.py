@@ -48,6 +48,26 @@ def test_ingestor_year_inference(sample_df):
     assert cleaned_df.iloc[1]["date_completed"] == date(2023, 12, 14)
 
 
+def test_ingestor_year_inference_strict():
+    # Scenario: Row with ambiguous date, row with full date, and tricky day/month numbers
+    df = pd.DataFrame(
+        [
+            {"Title": "A", "Author": "X", "Date complete": "15-May", "format": "hc"},
+            {
+                "Title": "B",
+                "Author": "Y",
+                "Date complete": "12/14/2023",
+                "format": "hc",
+            },  # 12 and 14 shouldn't match as years
+        ]
+    )
+    ingestor = HistoryIngestor(df)
+    cleaned = ingestor.clean()
+
+    # 15-May should become 2023-05-15
+    assert cleaned.iloc[0]["date_completed"] == date(2023, 5, 15)
+
+
 def test_ingestor_to_models(sample_df):
     ingestor = HistoryIngestor(sample_df)
     # Note: ingestor.clean() should be called internally or by the user

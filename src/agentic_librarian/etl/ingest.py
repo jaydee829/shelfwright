@@ -36,8 +36,8 @@ class HistoryIngestor:
                     parsed = pd.to_datetime(s, errors="coerce")
                     # If it's unambiguous (not 1900 and not current year by default from a short string)
                     # Actually pd.to_datetime("4-Jan") gives 2026-01-04 today.
-                    # We need to check if the original string has a year.
-                    if re.search(r"\d{4}|\b\d{2}\b", str(s)):
+                    # We need to check if the original string has an explicit 4-digit year.
+                    if re.search(r"\b\d{4}\b", str(s)):
                         return parsed.year if not pd.isna(parsed) else None
                     return None
                 except Exception:

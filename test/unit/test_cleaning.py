@@ -5,29 +5,78 @@ import pytest
 from agentic_librarian.etl.cleaning import parse_completion_date, split_authors, split_formats, split_narrators
 
 
-def test_split_formats():
-    df = pd.DataFrame({"Title": ["Book 1"], "format": ["hardcover, e-book"]})
+@pytest.mark.parametrize(
+    "input_fmt,expected",
+    [
+        ("Hardcover", ["Hardcover"]),
+        ("Hardcover, eBook", ["Hardcover", "eBook"]),
+        ("Paperback, Audiobook", ["Paperback", "Audiobook"]),
+        ("  hardcover ,  e-book  ", ["hardcover", "e-book"]),
+    ],
+)
+def test_split_formats_parameterized(input_fmt, expected):
+    df = pd.DataFrame({"format": [input_fmt]})
     result = split_formats(df)
-    assert len(result) == 2
-    assert sorted(result["format"].tolist()) == ["e-book", "hardcover"]
+    assert sorted(result["format"].tolist()) == sorted(expected)
 
 
-def test_split_authors_diverse_separators():
-    # Test semicolon, 'and', and comma
-    df = pd.DataFrame({"Author": ["Author A; Author B", "Author C and Author D", "Author E, Author F"]})
+def test_split_formats_no_format_column():
+    df = pd.DataFrame({"title": ["Book A"]})
+    with pytest.raises(ValueError, match="DataFrame must contain a 'format' column"):
+        split_formats(df)
+
+
+@pytest.mark.parametrize(
+    "input_author,expected_list",
+    [
+        ("Author One", ["Author One"]),
+        ("Author A; Author B", ["Author A", "Author B"]),
+        ("Author C and Author D", ["Author C", "Author D"]),
+        ("Author E & Author F", ["Author E", "Author F"]),
+        ("Sanderson, Brandon", ["Sanderson, Brandon"]),
+        ("Sanderson, Brandon; Jordan, Robert", ["Sanderson, Brandon", "Jordan, Robert"]),
+        ("Robert Jordan, Brandon Sanderson", ["Robert Jordan", "Brandon Sanderson"]),
+        ("Kurt Vonnegut, Jr.", ["Kurt Vonnegut, Jr."]),
+        ("Martin, George R. R.", ["Martin, George R. R."]),
+    ],
+)
+def test_split_authors_parameterized(input_author, expected_list):
+    df = pd.DataFrame({"Author": [input_author]})
     result = split_authors(df)
 
-    # Check first row
-    assert result.iloc[0]["Author_1"] == "Author A"
-    assert result.iloc[0]["Author_2"] == "Author B"
+    # Collect all Author_X values that aren't None/NaN
+    actual = []
+    for i in range(1, len(expected_list) + 1):
+        col = f"Author_{i}"
+        val = result.iloc[0][col]
+        if val and not pd.isna(val):
+            actual.append(val)
 
-    # Check second row
-    assert result.iloc[1]["Author_1"] == "Author C"
-    assert result.iloc[1]["Author_2"] == "Author D"
+    assert actual == expected_list
 
-    # Note: Comma is tricky as it might be part of a name, but for this project
-    # we'll assume it's a separator if we find it in the author column based on plan.
-    # Actually, let's stick to the plan's mentioned separators first.
+
+def test_split_authors_multiple_authors_batch():
+    """Verify batched processing and column indexing for multiple rows."""
+    df = pd.DataFrame(
+        {
+            "Author": [
+                "Author One; Author Two",
+                "Author Three; Author Four; Author Five",
+            ]
+        }
+    )
+    result = split_authors(df)
+    assert "Author_1" in result.columns
+    assert "Author_2" in result.columns
+    assert "Author_3" in result.columns
+
+    assert result.iloc[0]["Author_1"] == "Author One"
+    assert result.iloc[0]["Author_2"] == "Author Two"
+    assert pd.isna(result.iloc[0].get("Author_3"))
+
+    assert result.iloc[1]["Author_1"] == "Author Three"
+    assert result.iloc[1]["Author_2"] == "Author Four"
+    assert result.iloc[1]["Author_3"] == "Author Five"
 
 
 @pytest.mark.parametrize(
@@ -35,7 +84,7 @@ def test_split_authors_diverse_separators():
     [
         ("1/7/2020", None, date(2020, 1, 7)),
         ("4-Jan", 2020, date(2020, 1, 4)),
-        ("4-Jan", None, date(2026, 1, 4)),  # Current year
+        ("4-Jan", None, date(2026, 1, 4)),  # Current year (2026 in system context)
         ("1/24/2020", 2021, date(2020, 1, 24)),  # Explicit year trumps fallback
         (None, 2020, None),
     ],

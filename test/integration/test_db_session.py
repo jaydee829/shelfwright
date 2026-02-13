@@ -1,6 +1,6 @@
 import pytest
-
-from src.agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.db.session import DatabaseManager
+from sqlalchemy import text
 
 
 @pytest.mark.db_integration
@@ -9,5 +9,5 @@ def test_database_manager_connection(db_url):
     db_manager = DatabaseManager(db_url)
     with db_manager.get_session() as session:
         # Just check if we can execute a simple query
-        result = session.execute("SELECT 1").scalar()
+        result = session.execute(text("SELECT 1")).scalar()
         assert result == 1

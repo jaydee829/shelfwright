@@ -16,6 +16,8 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - Review [testing_strategy.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/docs/testing_strategy.md) to ensure adherence to TDD, coverage, and the **Anti-Hardcoding** mandate.
 - **NEVER** implement logic that only satisfies specific test inputs; logic must be generalized and verified with parameterized tests.
 - **Single With Statements**: Always combine multiple context managers into a single `with` statement (e.g., `with A, B:`) to avoid SIM117 errors.
+- **No Broad Except-Pass**: Never use `except Exception: pass`. Handle specific exceptions or log errors to ensure visibility of failures.
+- **Explicit Flushing**: Always call `session.flush()` after adding new database entities if their generated IDs are needed for subsequent logic in the same transaction.
 
 **Before proposing architectural changes:**
 - Check `docs/project_notes/decisions.md` for existing decisions

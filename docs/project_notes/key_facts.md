@@ -16,7 +16,7 @@ This file tracks important project configuration, constants, and environment det
 - **MLOps**: DVC (Data Versioning), MLFlow (Experiment Tracking), Dagster (Orchestration)
   - **Dagster Assets**:
     - `raw_history`: CSV loading and cleaning via `HistoryIngestor`.
-    - `enriched_metadata`: Metadata enrichment via `MultiSourceScout`.
+    - `enriched_metadata`: Metadata enrichment via `ScoutManager`.
     - `vectorized_tropes`: Trope standardization and vectorization via `TropeManager`.
   - **Dagster Resources**:
     - `db_manager`: Provides SQLAlchemy sessions to assets.

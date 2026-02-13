@@ -153,3 +153,39 @@ This file documents key architectural decisions, their context, and trade-offs.
 - This applies to database sessions, file handles, and mock patches.
 **Consequences:**
 - Pros: Cleaner code, guaranteed compliance with `ruff` (SIM117), reduced indentation levels.
+
+### ADR-016: Explicit Session Flushing for Dependency Management (2026-02-06)
+**Context:**
+- In complex transactions, new entities are often created and immediately used as foreign keys for subsequent records (e.g., creating a Work and then checking for its Edition).
+- SQLAlchemy does not populate the `id` field of a new object until the session is flushed to the database.
+**Decision:**
+- Explicitly call `session.flush()` after adding a new entity if its ID is required for a subsequent query or relationship within the same transaction.
+**Consequences:**
+- Pros: Prevents "ID is None" race conditions and data integrity issues.
+- Cons: Minor performance overhead of an extra database round-trip (though usually negligible compared to the risk of data corruption).
+
+### ADR-017: Abstract Scout Architecture (2026-02-06)
+**Context:**
+- As we add more metadata sources (OpenLibrary, StoryGraph, etc.), the monolithic `MultiSourceScout` and loose functions become difficult to maintain and test.
+- Need a standardized way to define new sources with consistent error handling and initialization.
+**Decision:**
+- Adopt a hierarchical abstract architecture:
+    - `BaseScout` (ABC): Core contract and shared utilities.
+    - `APIScout`: Specialized for structured REST/GraphQL APIs.
+    - `LLMScout`: Specialized for unstructured/semantic data using LLMs.
+- All metadata sources MUST be implemented as classes inheriting from this hierarchy.
+- **ScoutManager**: A central coordinator will handle the registration and merging of multiple scouts.
+**Consequences:**
+- Pros: Highly modular, easy to add/remove sources, standardized error handling, better testability via class mocking.
+- Cons: Slightly more boilerplate for simple APIs.
+
+### ADR-015: Prohibition of Broad Except-Pass Blocks (2026-02-06)
+**Context:**
+- The use of `except Exception: pass` (or broad `except: pass`) swallows all errors, including keyboard interrupts and unexpected logic failures, making debugging difficult.
+**Decision:**
+- Broad `except-pass` blocks are strictly prohibited.
+- Error handling must be specific (e.g., `except ValueError`) or log the error before continuing.
+- When using libraries that provide safety flags (like `errors="coerce"` in Pandas), rely on those instead of broad try-except blocks.
+**Consequences:**
+- Pros: Better error visibility, easier debugging, more robust code.
+- Cons: Requires more explicit handling of edge cases.

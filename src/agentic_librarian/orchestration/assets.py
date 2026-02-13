@@ -3,7 +3,7 @@ import pandas as pd
 from agentic_librarian.db.models import Author, Edition, Work
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.ingest import HistoryIngestor
-from agentic_librarian.scouts.metadata_scout import MultiSourceScout
+from agentic_librarian.scouts.metadata_scout import ScoutManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from dagster import AssetExecutionContext, DynamicPartitionsDefinition, MetadataValue, ResourceParam, asset
 
@@ -31,10 +31,12 @@ def raw_history(context: AssetExecutionContext) -> pd.DataFrame:
 
 @asset(partitions_def=csv_partitions)
 def enriched_metadata(
-    context: AssetExecutionContext, raw_history: pd.DataFrame, db_manager: ResourceParam[DatabaseManager]
+    context: AssetExecutionContext,
+    raw_history: pd.DataFrame,
+    db_manager: ResourceParam[DatabaseManager],
+    scout_manager: ResourceParam[ScoutManager],
 ) -> pd.DataFrame:
-    """Enriches reading history with metadata from multiple scouts, skipping existing ones."""
-    scout = MultiSourceScout()
+    """Enriches reading history using the ScoutManager resource, skipping existing ones."""
     enriched_rows = []
 
     mlflow.set_experiment("metadata_enrichment")
@@ -63,7 +65,7 @@ def enriched_metadata(
                 enriched_rows.append({**row.to_dict(), "skip_enrichment": True})
             else:
                 context.log.info(f"Enriching new entry: {title} ({fmt})")
-                metadata = scout.scout_metadata(title=title, author=primary_author, format=fmt)
+                metadata = scout_manager.enrich(title=title, author=primary_author, format=fmt)
                 # Merge original row with metadata
                 combined = {**row.to_dict(), **metadata, "skip_enrichment": False}
                 enriched_rows.append(combined)
@@ -104,6 +106,7 @@ def vectorized_tropes(
                 if not author:
                     author = Author(name=name)
                     session.add(author)
+                    session.flush()  # Ensure author.id is populated
                 authors.append(author)
 
             # 2. Work
@@ -124,6 +127,7 @@ def vectorized_tropes(
                     moods=row.get("moods"),
                 )
                 session.add(work)
+                session.flush()  # Ensure work.id is populated for Edition check
             elif not row.get("skip_enrichment"):
                 # Update existing work if new metadata found
                 work.original_publication_year = row.get("original_publication_year") or work.original_publication_year
@@ -143,6 +147,7 @@ def vectorized_tropes(
                     publication_date=row.get("publication_date"),
                 )
                 session.add(edition)
+                session.flush()  # Ensure edition.id is populated for ReadingHistory check
             elif not row.get("skip_enrichment"):
                 # Update existing edition if new metadata found
                 edition.isbn_13 = row.get("isbn_13") or edition.isbn_13
