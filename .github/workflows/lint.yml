@@ -28,7 +28,7 @@ jobs:
 
       - name: Run pre-commit on all files
         run: |
-          pre-commit run --all-files --show-diff-on-failure
+          SKIP=pytest pre-commit run --all-files --show-diff-on-failure
 
       - name: Run tests
         run: |
