@@ -8,12 +8,16 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - **decisions.md** - Architectural Decision Records (ADRs) with context and trade-offs
 - **key_facts.md** - Project configuration, credentials, ports, important URLs
 - **issues.md** - Work log with ticket IDs, descriptions, and URLs
+- **testing_strategy.md** - Testing protocols and standards
 
 ## Memory-Aware Protocols
 
 **Before starting implementation:**
 - Review [testing_strategy.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/docs/testing_strategy.md) to ensure adherence to TDD, coverage, and the **Anti-Hardcoding** mandate.
 - **NEVER** implement logic that only satisfies specific test inputs; logic must be generalized and verified with parameterized tests.
+- **Single With Statements**: Always combine multiple context managers into a single `with` statement (e.g., `with A, B:`) to avoid SIM117 errors.
+- **No Broad Except-Pass**: Never use `except Exception: pass`. Handle specific exceptions or log errors to ensure visibility of failures.
+- **Explicit Flushing**: Always call `session.flush()` after adding new database entities if their generated IDs are needed for subsequent logic in the same transaction.
 
 **Before proposing architectural changes:**
 - Check `docs/project_notes/decisions.md` for existing decisions
@@ -43,4 +47,5 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - **Keep entries concise** (1-3 lines for descriptions)
 - **Always include dates** for temporal context
 - **Include URLs** for tickets, documentation, monitoring dashboards
+- **Use pre-commit** before committing changes and presenting walkthroughs
 - **Manual cleanup** of old entries is expected (not automated)

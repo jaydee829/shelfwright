@@ -1,0 +1,46 @@
+import pytest
+from agentic_librarian.db import models
+
+
+@pytest.mark.parametrize(
+    "model_class,attribute",
+    [
+        (models.Author, "id"),
+        (models.Author, "name"),
+        (models.Author, "bio"),
+        (models.Author, "style_attributes"),
+        (models.Work, "id"),
+        (models.Work, "title"),
+        (models.Work, "original_publication_year"),
+        (models.Work, "description"),
+        (models.Work, "genres"),
+        (models.Work, "moods"),
+        (models.Trope, "id"),
+        (models.Trope, "name"),
+        (models.Trope, "description"),
+        (models.Trope, "embedding"),
+        (models.Edition, "id"),
+        (models.Edition, "work_id"),
+        (models.Edition, "isbn_13"),
+        (models.Edition, "format"),
+        (models.Edition, "page_count"),
+        (models.Edition, "audio_minutes"),
+        (models.Edition, "publication_date"),
+        (models.ReadingHistory, "id"),
+        (models.ReadingHistory, "edition_id"),
+        (models.ReadingHistory, "date_started"),
+        (models.ReadingHistory, "date_completed"),
+        (models.ReadingHistory, "user_rating"),
+        (models.ReadingHistory, "user_notes"),
+        (models.Suggestions, "id"),
+        (models.Suggestions, "work_id"),
+        (models.Suggestions, "suggested_at"),
+        (models.Suggestions, "context"),
+        (models.Suggestions, "justification"),
+        (models.Suggestions, "status"),
+        (models.Suggestions, "conversation_id"),
+    ],
+)
+def test_model_structure_parameterized(model_class, attribute):
+    """Verify that all core models have their expected columns."""
+    assert hasattr(model_class, attribute)

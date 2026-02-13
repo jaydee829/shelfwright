@@ -63,3 +63,129 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Higher code quality, better maintainability, consistent verification across different agents.
 - Cons: Slightly higher initial overhead for new contributors.
+### ADR-006: Secure Credential Management & Interactive Prompting (2026-01-28)
+**Context:**
+- Need to prevent hardcoded credentials and ensure users are prompted for missing information in interactive environments.
+**Decision:**
+- Use `python-dotenv` for local configuration.
+- Implement interactive prompting for missing `POSTGRES_USER` and `POSTGRES_PASSWORD` in `DatabaseManager`.
+- Raise `ValueError` if credentials remain missing in non-interactive environments.
+**Consequences:**
+- Pros: Enhanced security by removing fallbacks, improved user experience in local development.
+
+### ADR-007: Local-Only Service Exposure for Development (2026-01-28)
+**Context:**
+- Need to minimize the attack surface of Docker services during local development.
+**Decision:**
+- Bind Postgres and MLFlow ports to `127.0.0.1` in `docker-compose.yml`.
+**Consequences:**
+- Pros: Services are not exposed to the local network by default.
+- Cons: Requires manual reconfiguration for remote access or container-to-container access from outside the default bridge network.
+
+### ADR-008: Data Versioning Scope (2026-01-30)
+**Context:**
+- Misconfiguration was found where orchestration code was tracked by DVC instead of Git.
+**Decision:**
+- DVC MUST only be used for data files (e.g., `data/raw/*.csv`).
+- Orchestration code and other Python source files MUST be tracked exclusively by Git.
+**Consequences:**
+- Pros: standard dev ergonomics, better code reviews, avoidance of "missing file" errors during local development.
+
+### ADR-009: Encapsulate Ingest Logic in HistoryIngestor (2026-01-30)
+**Context:**
+- CSV cleaning and model mapping were becoming scattered and harder to test in isolation.
+**Decision:**
+- Create a `HistoryIngestor` class to centralize cleaning (via `cleaning.py`) and SQLAlchemy object generation (`to_models`).
+**Consequences:**
+- Pros: Cleaner Dagster assets, easier unit testing of the ingest pipeline, clear path for Phase 2 enrichment.
+
+### ADR-010: Contextual Year Inference for Ambiguous Dates (2026-01-30)
+**Context:**
+- The raw CSV contains ambiguous dates like "4-Jan" without a year.
+- These dates appear in clusters that share a year with unambiguous dates (e.g., "1/7/2020").
+**Decision:**
+- Use contextual inference (`ffill` and `bfill`) on extracted years from unambiguous dates within the same CSV to fill missing years.
+**Consequences:**
+- Pros: Automated reconstruction of historical dates without manual data entry.
+- Cons: **Dependency on Row Order**. If the CSV rows are not chronologically clustered, the inferred year may be incorrect. Downstream logic must be aware that `date_completed` may be an estimate in these cases.
+### ADR-011: Dual-Pathway Audiobook Scouting & MLFlow Benchmarking (2026-01-30)
+**Context:**
+- Audiobook metadata (especially duration) is often inconsistent across sources.
+- Comparison between "web scraping + parsing" vs "direct LLM knowledge" is needed to determine the most reliable and cost-effective method.
+**Decision:**
+- Implement two concurrent scouting pathways:
+    - **Pathway A (Scraping)**: Google Custom Search -> BeautifulSoup Scraping -> LLM Extraction.
+    - **Pathway B (Direct)**: Gemini Model with built-in Search Grounding.
+- Log both results, latency, and success metrics to MLFlow for benchmarking.
+**Consequences:**
+- Pros: Data-driven decision making for metadata sources, fallback robustness.
+- Cons: Increased API cost during the experimentation phase.
+
+### ADR-012: Trope Deduplication via Semantic Similarity (2026-02-06)
+**Context:**
+- Book scouts often return inconsistent tags (e.g., "Enemies-to-Lovers" vs "Enemies to Lovers").
+- We need a way to group these into standardized tropes to avoid sparse vector space and fragmented recommendations.
+**Decision:**
+- Use `text-embedding-004` (Gemini) for trope vectorization.
+- Implement a `TropeManager` that checks for exact name matches first, then uses cosine similarity with a default threshold of `0.85` to deduplicate incoming tags.
+**Consequences:**
+- Pros: Automated standardization, reduces noise in the database, improves recommendation relevance.
+- Cons: Small risk of false positives (merging distinct tropes) if the threshold is too low.
+
+### ADR-013: Hybrid Data Access and Coarse-Grained MCP Tools (2026-02-06)
+**Context:**
+- Need to balance performance for batch ingestion (Flow 1) with agentic flexibility for recommendations (Flow 2).
+- Pure MCP for batch ingestion introduces significant overhead and complex transaction management.
+**Decision:**
+- **Flow 1 (ETL)**: Use direct SQLAlchemy/ORM access for deterministic, high-performance batch processing.
+- **Flow 2 (Agents)**: Use Model Context Protocol (MCP) for agent discovery and interaction.
+- **Tool Design**: Implement "Coarse-Grained" MCP tools that encapsulate complex logic (e.g., search + filter + pgvector math) into single atomic operations.
+**Consequences:**
+- Pros: High performance for data pipelines, reduced latency/cost for agents, robust ACID compliance for complex recommendation transactions.
+- Cons: Duplicate logic definitions (SQLAlchemy models vs MCP schemas), though minimized by sharing core internal scouts/managers.
+
+### ADR-014: Standardized Use of Single With Statements (2026-02-06)
+**Context:**
+- Nested `with` statements (e.g., `with A: with B:`) are less readable and trigger linting errors (SIM117).
+- Consistency across the codebase is required to satisfy pre-commit checks.
+**Decision:**
+- Always use a single `with` statement with multiple contexts separated by commas (e.g., `with A, B:`).
+- This applies to database sessions, file handles, and mock patches.
+**Consequences:**
+- Pros: Cleaner code, guaranteed compliance with `ruff` (SIM117), reduced indentation levels.
+
+### ADR-016: Explicit Session Flushing for Dependency Management (2026-02-06)
+**Context:**
+- In complex transactions, new entities are often created and immediately used as foreign keys for subsequent records (e.g., creating a Work and then checking for its Edition).
+- SQLAlchemy does not populate the `id` field of a new object until the session is flushed to the database.
+**Decision:**
+- Explicitly call `session.flush()` after adding a new entity if its ID is required for a subsequent query or relationship within the same transaction.
+**Consequences:**
+- Pros: Prevents "ID is None" race conditions and data integrity issues.
+- Cons: Minor performance overhead of an extra database round-trip (though usually negligible compared to the risk of data corruption).
+
+### ADR-017: Abstract Scout Architecture (2026-02-06)
+**Context:**
+- As we add more metadata sources (OpenLibrary, StoryGraph, etc.), the monolithic `MultiSourceScout` and loose functions become difficult to maintain and test.
+- Need a standardized way to define new sources with consistent error handling and initialization.
+**Decision:**
+- Adopt a hierarchical abstract architecture:
+    - `BaseScout` (ABC): Core contract and shared utilities.
+    - `APIScout`: Specialized for structured REST/GraphQL APIs.
+    - `LLMScout`: Specialized for unstructured/semantic data using LLMs.
+- All metadata sources MUST be implemented as classes inheriting from this hierarchy.
+- **ScoutManager**: A central coordinator will handle the registration and merging of multiple scouts.
+**Consequences:**
+- Pros: Highly modular, easy to add/remove sources, standardized error handling, better testability via class mocking.
+- Cons: Slightly more boilerplate for simple APIs.
+
+### ADR-015: Prohibition of Broad Except-Pass Blocks (2026-02-06)
+**Context:**
+- The use of `except Exception: pass` (or broad `except: pass`) swallows all errors, including keyboard interrupts and unexpected logic failures, making debugging difficult.
+**Decision:**
+- Broad `except-pass` blocks are strictly prohibited.
+- Error handling must be specific (e.g., `except ValueError`) or log the error before continuing.
+- When using libraries that provide safety flags (like `errors="coerce"` in Pandas), rely on those instead of broad try-except blocks.
+**Consequences:**
+- Pros: Better error visibility, easier debugging, more robust code.
+- Cons: Requires more explicit handling of edge cases.
