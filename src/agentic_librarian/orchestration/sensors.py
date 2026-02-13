@@ -58,6 +58,8 @@ def new_file_sensor(context: SensorEvaluationContext) -> Generator[RunRequest, N
 
     for _, filename in current_batch:
         partition_date = filename.replace(".csv", "")
+        # Explicitly register the partition before yielding the RunRequest
+        context.instance.add_dynamic_partitions("csv_files", [partition_date])
         yield RunRequest(run_key=partition_date, partition_key=partition_date)
 
     # Advance the cursor to the last file processed in this batch

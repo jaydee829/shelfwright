@@ -40,7 +40,7 @@ class HistoryIngestor:
                     if re.search(r"\b\d{4}\b", str(s)):
                         return parsed.year if not pd.isna(parsed) else None
                     return None
-                except Exception:
+                except (ValueError, TypeError):
                     return None
 
             years = df["date_completed"].apply(get_year)

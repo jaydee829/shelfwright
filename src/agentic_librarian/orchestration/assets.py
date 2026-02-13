@@ -109,6 +109,10 @@ def vectorized_tropes(
                     session.flush()  # Ensure author.id is populated
                 authors.append(author)
 
+            if not authors:
+                context.log.warning(f"No author found for '{row['Title']}'. Skipping work creation.")
+                continue
+
             # 2. Work
             work = (
                 session.query(Work)
@@ -177,11 +181,17 @@ def vectorized_tropes(
                 else:
                     context.log.info(f"Reading history already exists for {row['Title']} on {date_completed}")
 
-            # 5. Tropes (Only if enriched)
+            # 2. Tropes (Only if enriched)
             if not row.get("skip_enrichment"):
-                raw_genres = row.get("genres", [])
-                raw_moods = row.get("moods", [])
-                all_tags = set(raw_genres + raw_moods)
+                raw_genres = row.get("genres")
+                if not isinstance(raw_genres, list | set):
+                    raw_genres = []
+
+                raw_moods = row.get("moods")
+                if not isinstance(raw_moods, list | set):
+                    raw_moods = []
+
+                all_tags = set(raw_genres) | set(raw_moods)
 
                 for tag in all_tags:
                     standardized_trope = trope_manager.standardize_trope(tag)

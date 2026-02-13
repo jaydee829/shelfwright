@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
@@ -121,7 +121,7 @@ class Suggestions(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
-    suggested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    suggested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="Suggested", nullable=False)

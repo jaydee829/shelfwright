@@ -74,7 +74,7 @@ class LLMScout(BaseScout):
         # Fallback to GOOGLE_SEARCH_API_KEY if no specific key provided
         key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not key:
-            raise ValueError(f"{self.source_name} requires a Google API key.")
+            raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
         self._client = genai.Client(api_key=self.api_key)
         self.model_name = model_name
@@ -139,7 +139,7 @@ class GoogleBooksScout(APIScout):
             "authors": book.get("authors", []),
             "published_date": book.get("publishedDate"),
             "description": book.get("description", ""),
-            "page_count": book.get("pageCount", 0),
+            "page_count": book.get("pageCount"),  # Default None
             "genres": book.get("categories", []),
             "average_rating": book.get("averageRating"),
             "thumbnail": book.get("imageLinks", {}).get("thumbnail"),
@@ -195,7 +195,7 @@ class HardcoverScout(APIScout):
 
         moods, genres = [], []
         audio_length, pages = None, None
-        book = {}
+        selected_edition = None
 
         for edition in editions:
             raw_moods = edition.get("book", {}).get("moods", [])
@@ -205,26 +205,31 @@ class HardcoverScout(APIScout):
             audio_length = edition.get("audio_seconds") or audio_length
             pages = edition.get("pages") or pages
             if "audiobook" in format_val.lower() and edition.get("audio_seconds"):
-                book = edition.get("book", {})
+                selected_edition = edition
                 break
             if "audiobook" not in format_val.lower() and edition.get("pages"):
-                book = edition.get("book", {})
+                selected_edition = edition
                 break
 
-        authors = [c.get("author", {}).get("name") for c in edition.get("book", {}).get("contributions", [])]
+        # Fallback if no perfect format match found
+        if not selected_edition:
+            selected_edition = editions[0]
+
+        book = selected_edition.get("book", {})
+        authors = [c.get("author", {}).get("name") for c in book.get("contributions", [])]
         authors = [a for a in authors if a]
 
-        edition_release_date = edition.get("release_date")
+        edition_release_date = selected_edition.get("release_date")
         original_release_date = book.get("release_date") or edition_release_date
 
         return {
-            "title": edition.get("title"),
+            "title": selected_edition.get("title"),
             "authors": authors,
-            "edition_format": edition.get("edition_format"),
+            "edition_format": selected_edition.get("edition_format"),
             "page_count": pages,
             "publication_date": edition_release_date,
             "original_publication_date": original_release_date,
-            "isbn_13": edition.get("isbn_13"),
+            "isbn_13": selected_edition.get("isbn_13"),
             "moods": set(moods),
             "genres": set(genres),
             "description": book.get("description", ""),
