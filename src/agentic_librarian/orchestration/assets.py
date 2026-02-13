@@ -30,21 +30,43 @@ def raw_history(context: AssetExecutionContext) -> pd.DataFrame:
 
 
 @asset(partitions_def=csv_partitions)
-def enriched_metadata(context: AssetExecutionContext, raw_history: pd.DataFrame) -> pd.DataFrame:
-    """Enriches reading history with metadata from multiple scouts."""
+def enriched_metadata(
+    context: AssetExecutionContext, raw_history: pd.DataFrame, db_manager: ResourceParam[DatabaseManager]
+) -> pd.DataFrame:
+    """Enriches reading history with metadata from multiple scouts, skipping existing ones."""
     scout = MultiSourceScout()
     enriched_rows = []
 
     mlflow.set_experiment("metadata_enrichment")
-    with mlflow.start_run(run_name=f"enrich_{context.run.run_id}"):
+    with mlflow.start_run(run_name=f"enrich_{context.run.run_id}"), db_manager.get_session() as session:
         for _, row in raw_history.iterrows():
             # Handle split authors: primary author is in Author_1
             primary_author = row.get("Author_1") or row.get("Author")
+            title = row["Title"]
+            fmt = row["format"]
 
-            metadata = scout.scout_metadata(title=row["Title"], author=primary_author, format=row["format"])
-            # Merge original row with metadata
-            combined = {**row.to_dict(), **metadata}
-            enriched_rows.append(combined)
+            # Check if we already have this Edition (Work + Format)
+            # This minimizes API calls
+            existing_edition = (
+                session.query(Edition)
+                .join(Work)
+                .join(Work.authors)
+                .filter(Work.title == title)
+                .filter(Author.name == primary_author)
+                .filter(Edition.format == fmt)
+                .first()
+            )
+
+            if existing_edition:
+                context.log.info(f"Skipping enrichment for existing edition: {title} ({fmt})")
+                # Still include the row for ReadingHistory processing later
+                enriched_rows.append({**row.to_dict(), "skip_enrichment": True})
+            else:
+                context.log.info(f"Enriching new entry: {title} ({fmt})")
+                metadata = scout.scout_metadata(title=title, author=primary_author, format=fmt)
+                # Merge original row with metadata
+                combined = {**row.to_dict(), **metadata, "skip_enrichment": False}
+                enriched_rows.append(combined)
 
     enriched_df = pd.DataFrame(enriched_rows)
     context.add_output_metadata({"enriched_count": len(enriched_df), "columns": list(enriched_df.columns)})
@@ -55,28 +77,46 @@ def enriched_metadata(context: AssetExecutionContext, raw_history: pd.DataFrame)
 def vectorized_tropes(
     context: AssetExecutionContext, enriched_metadata: pd.DataFrame, db_manager: ResourceParam[DatabaseManager]
 ) -> None:
-    """Standardizes tropes and saves metadata to the database."""
+    """Standardizes tropes and saves metadata + reading history to the database."""
+    from agentic_librarian.db.models import ReadingHistory, WorkTrope
+
     with db_manager.get_session() as session:
         trope_manager = TropeManager(session=session)
 
         for _, row in enriched_metadata.iterrows():
-            # 1. Author & Work (using simple mapping for now, ideally would use ingestor.to_models)
-            # But we want to update with enriched facts
+            # 1. Author(s) - Handle multiple authors if present
+            author_names = row.get("authors")
 
-            # This is a bit simplified - in a real app we'd have more robust merging logic
-            author_names = row["authors"]
+            # Ensure author_names is a list and not NaN
+            if isinstance(author_names, float) or author_names is None:
+                author_names = []
+
+            if not author_names:
+                # Fallback to the primary author from the CSV
+                primary = row.get("Author_1") or row.get("Author")
+                author_names = [primary] if primary else []
+
             authors = []
             for name in author_names:
+                if not name or pd.isna(name):
+                    continue
                 author = session.query(Author).filter(Author.name == name).first()
                 if not author:
                     author = Author(name=name)
                     session.add(author)
                 authors.append(author)
 
-            work = session.query(Work).filter(Work.title == row["title"]).first()
+            # 2. Work
+            work = (
+                session.query(Work)
+                .join(Work.authors)
+                .filter(Work.title == row["Title"])
+                .filter(Author.name == (row.get("Author_1") or row.get("Author")))
+                .first()
+            )
             if not work:
                 work = Work(
-                    title=row["title"],
+                    title=row["Title"],
                     authors=authors,
                     original_publication_year=row.get("original_publication_year"),
                     description=row.get("description"),
@@ -84,8 +124,15 @@ def vectorized_tropes(
                     moods=row.get("moods"),
                 )
                 session.add(work)
+            elif not row.get("skip_enrichment"):
+                # Update existing work if new metadata found
+                work.original_publication_year = row.get("original_publication_year") or work.original_publication_year
+                work.description = row.get("description") or work.description
+                work.genres = row.get("genres") or work.genres
+                work.moods = row.get("moods") or work.moods
 
-            edition = session.query(Edition).filter(Edition.isbn_13 == row.get("isbn_13")).first()
+            # 3. Edition
+            edition = session.query(Edition).filter_by(work_id=work.id, format=row["format"]).first()
             if not edition:
                 edition = Edition(
                     work=work,
@@ -96,24 +143,48 @@ def vectorized_tropes(
                     publication_date=row.get("publication_date"),
                 )
                 session.add(edition)
+            elif not row.get("skip_enrichment"):
+                # Update existing edition if new metadata found
+                edition.isbn_13 = row.get("isbn_13") or edition.isbn_13
+                edition.page_count = row.get("page_count") or edition.page_count
+                edition.audio_minutes = row.get("audio_minutes") or edition.audio_minutes
 
-            # 2. Tropes
-            raw_genres = row.get("genres", [])
-            raw_moods = row.get("moods", [])
-            all_tags = set(raw_genres + raw_moods)
+            # 4. Reading History (The actual read event)
+            date_completed = pd.to_datetime(row["date_completed"]).date() if row.get("date_completed") else None
 
-            for tag in all_tags:
-                standardized_trope = trope_manager.standardize_trope(tag)
-                # Link work to trope
-                # Check if link exists
-                from agentic_librarian.db.models import WorkTrope
-
-                existing_link = (
-                    session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
+            if date_completed:
+                # Duplicate Check: Work + Edition + Date Completed
+                existing_history = (
+                    session.query(ReadingHistory)
+                    .filter_by(edition_id=edition.id, date_completed=date_completed)
+                    .first()
                 )
 
-                if not existing_link:
-                    work_trope = WorkTrope(work=work, trope=standardized_trope)
-                    session.add(work_trope)
+                if not existing_history:
+                    history_entry = ReadingHistory(
+                        edition=edition,
+                        date_completed=date_completed,
+                        user_rating=row.get("user_rating"),
+                        user_notes=row.get("user_notes"),
+                    )
+                    session.add(history_entry)
+                    context.log.info(f"Added reading history for {row['Title']} on {date_completed}")
+                else:
+                    context.log.info(f"Reading history already exists for {row['Title']} on {date_completed}")
+
+            # 5. Tropes (Only if enriched)
+            if not row.get("skip_enrichment"):
+                raw_genres = row.get("genres", [])
+                raw_moods = row.get("moods", [])
+                all_tags = set(raw_genres + raw_moods)
+
+                for tag in all_tags:
+                    standardized_trope = trope_manager.standardize_trope(tag)
+                    existing_link = (
+                        session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
+                    )
+                    if not existing_link:
+                        work_trope = WorkTrope(work=work, trope=standardized_trope)
+                        session.add(work_trope)
 
     context.log.info("Successfully vectorized tropes and updated database.")

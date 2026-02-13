@@ -51,3 +51,8 @@ This file tracks work history and ticket references.
 - **Status**: Completed
 - **Description**: Orchestrated the ETL flow with Dagster using modular assets (`raw_history`, `enriched_metadata`, `vectorized_tropes`). Integrated `MultiSourceScout` and `TropeManager`.
 - **URL**: N/A
+
+### 2026-02-06 - ARC-008: Coarse-Grained MCP Strategy
+- **Status**: Completed
+- **Description**: Refined Phase 3 architecture to use a Hybrid Data Access model and Coarse-Grained MCP tools to handle complex transactions in Flow 2.
+- **URL**: N/A

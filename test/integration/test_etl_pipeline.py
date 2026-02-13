@@ -1,17 +1,49 @@
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.orchestration.definitions import defs
-from dagster import DagsterInstance
+
+# Mock credentials before importing defs to prevent DatabaseManager from raising ValueError in CI
+with patch.dict(
+    os.environ,
+    {"POSTGRES_USER": "mock_user", "POSTGRES_PASSWORD": "mock_password", "GOOGLE_SEARCH_API_KEY": "mock_key"},
+):
+    from agentic_librarian.db.models import Edition, ReadingHistory, Work
+    from agentic_librarian.db.session import DatabaseManager
+    from agentic_librarian.orchestration.definitions import defs
+    from dagster import DagsterInstance
 
 
-@pytest.fixture
-def mock_db_manager():
-    manager = MagicMock(spec=DatabaseManager)
+def create_mock_session(existing_edition=None):
     session = MagicMock()
-    manager.get_session.return_value.__enter__.return_value = session
-    return manager
+
+    # We need a stable mock for the query chain
+    mock_q = MagicMock()
+    mock_q.join.return_value = mock_q
+    mock_q.filter.return_value = mock_q
+    mock_q.filter_by.return_value = mock_q
+
+    if existing_edition:
+        # Side effect for .first()
+        # Row 1 (Kings): Enriched check (existing_edition), Work check, Edition check, History check
+        # Row 2 (Hail Mary): Enriched check (None), Work check, Edition check, History check
+        def first_side_effect():
+            if not hasattr(first_side_effect, "calls"):
+                first_side_effect.calls = 0
+
+            val = None
+            if first_side_effect.calls == 0:
+                val = existing_edition
+
+            first_side_effect.calls += 1
+            return val
+
+        mock_q.first.side_effect = first_side_effect
+    else:
+        mock_q.first.return_value = None
+
+    session.query.return_value = mock_q
+    return session
 
 
 @pytest.fixture
@@ -36,37 +68,59 @@ def mock_trope_manager():
         yield tm_inst
 
 
-...
-
-
 @pytest.fixture
 def mock_mlflow():
     with patch("agentic_librarian.orchestration.assets.mlflow") as mock:
         yield mock
 
 
-def test_enhance_job_integration(mock_db_manager, mock_scout, mock_trope_manager, mock_mlflow):
-    # Resolve the job from definitions
+@pytest.mark.slow
+def test_enhance_job_integration_all_new(mock_scout, mock_trope_manager, mock_mlflow):
     job_def = defs.get_job_def("enhance_job")
-
-    # Need an instance to handle dynamic partitions
     instance = DagsterInstance.ephemeral()
     instance.add_dynamic_partitions("csv_files", ["test_sample"])
 
-    # Execute the job in-process
+    session = create_mock_session(existing_edition=None)
+    mock_db_manager = MagicMock(spec=DatabaseManager)
+    mock_db_manager.get_session.return_value.__enter__.return_value = session
+
+    result = job_def.execute_in_process(
+        partition_key="test_sample", resources={"db_manager": mock_db_manager}, instance=instance
+    )
+
+    assert result.success
+    added_objects = [call[0][0] for call in session.add.call_args_list]
+
+    history_entries = [obj for obj in added_objects if isinstance(obj, ReadingHistory)]
+    assert len(history_entries) == 2
+    assert mock_scout.scout_metadata.call_count == 2
+
+
+@pytest.mark.slow
+def test_enhance_job_deduplication(mock_scout, mock_trope_manager, mock_mlflow):
+    """Deduplication path: One book exists, one is new."""
+    job_def = defs.get_job_def("enhance_job")
+    instance = DagsterInstance.ephemeral()
+    instance.add_dynamic_partitions("csv_files", ["test_sample"])
+
+    # Setup specific mock session for this test
+    existing_work = Work(title="The Way of Kings", id="existing-work-id")
+    existing_edition = Edition(work=existing_work, format="hardcover", id="existing-edition-id")
+
+    session = create_mock_session(existing_edition=existing_edition)
+    mock_db_manager = MagicMock(spec=DatabaseManager)
+    mock_db_manager.get_session.return_value.__enter__.return_value = session
+
     result = job_def.execute_in_process(
         partition_key="test_sample", resources={"db_manager": mock_db_manager}, instance=instance
     )
 
     assert result.success
 
-    # Verify assets were executed
-    # raw_history -> enriched_metadata -> vectorized_tropes
-    assert result.output_for_node("raw_history") is not None
-    assert result.output_for_node("enriched_metadata") is not None
+    # Verify scout only called for the second (new) row
+    assert mock_scout.scout_metadata.call_count == 1
 
-    # Verify DB manager was used
-    mock_db_manager.get_session.assert_called()
-
-    # Verify scout was called
-    assert mock_scout.scout_metadata.call_count == 2  # Two rows in test_sample.csv
+    # Verify both rows got a ReadingHistory record
+    added_objects = [call[0][0] for call in session.add.call_args_list]
+    history_entries = [obj for obj in added_objects if isinstance(obj, ReadingHistory)]
+    assert len(history_entries) == 2

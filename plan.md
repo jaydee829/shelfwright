@@ -29,19 +29,20 @@
 
 ## Phase 3: Flow 2 - Recommendation Engine (A2A & MCP)
 **Goal**: Build a user-facing agentic system using A2A for collaboration and MCP for data tools.
+*   **Architecture Strategy**:
+    - **Hybrid Access**: Flow 1 (ETL) remains on direct SQLAlchemy for performance. Flow 2 (Agents) uses MCP.
+    - **Coarse-Grained Tools**: MCP tools encapsulate complex logic (e.g., Search + Filter in one call) to ensure ACID compliance and reduce agent-tool chatter.
 *   **Order of Work**:
     1.  **MCP Server Implementation**:
         -   Expose the Postgres/pgvector database as an MCP server.
-        -   Add tools for checking `Suggestions` and `ReadingHistory`.
+        -   Implement coarse-grained tools like `find_recommendations` and `log_suggestion`.
     2.  **Experiment: Search Strategies**:
         -   Implement internal search tool using `google-genai`.
         -   Implement standalone search service with A2A interface.
         -   Compare results in MLFlow.
     3.  **Intelligent Filter Agent**:
-        -   Implement Re-read logic (Time-based decay on history).
-        -   Implement duplicate avoidance using the `Suggestions` table.
+        -   Implement re-read logic and duplicate avoidance via `find_recommendations`.
     4.  **Trope-RAG Justification Engine**:
-        -   Implement retrieval logic to pull trope descriptions for the top N matches.
         -   Build "Justification Prompts" that anchor the LLM's reasoning in retrieved trope facts.
     5.  **A2A Agent Mesh**:
         -   Coordinate Search, Filter, Rank agents via A2A messaging.

@@ -131,3 +131,25 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Automated standardization, reduces noise in the database, improves recommendation relevance.
 - Cons: Small risk of false positives (merging distinct tropes) if the threshold is too low.
+
+### ADR-013: Hybrid Data Access and Coarse-Grained MCP Tools (2026-02-06)
+**Context:**
+- Need to balance performance for batch ingestion (Flow 1) with agentic flexibility for recommendations (Flow 2).
+- Pure MCP for batch ingestion introduces significant overhead and complex transaction management.
+**Decision:**
+- **Flow 1 (ETL)**: Use direct SQLAlchemy/ORM access for deterministic, high-performance batch processing.
+- **Flow 2 (Agents)**: Use Model Context Protocol (MCP) for agent discovery and interaction.
+- **Tool Design**: Implement "Coarse-Grained" MCP tools that encapsulate complex logic (e.g., search + filter + pgvector math) into single atomic operations.
+**Consequences:**
+- Pros: High performance for data pipelines, reduced latency/cost for agents, robust ACID compliance for complex recommendation transactions.
+- Cons: Duplicate logic definitions (SQLAlchemy models vs MCP schemas), though minimized by sharing core internal scouts/managers.
+
+### ADR-014: Standardized Use of Single With Statements (2026-02-06)
+**Context:**
+- Nested `with` statements (e.g., `with A: with B:`) are less readable and trigger linting errors (SIM117).
+- Consistency across the codebase is required to satisfy pre-commit checks.
+**Decision:**
+- Always use a single `with` statement with multiple contexts separated by commas (e.g., `with A, B:`).
+- This applies to database sessions, file handles, and mock patches.
+**Consequences:**
+- Pros: Cleaner code, guaranteed compliance with `ruff` (SIM117), reduced indentation levels.
