@@ -6,6 +6,7 @@ from agentic_librarian.mcp.server import (
     log_suggestion,
     search_internal_database,
     update_reading_status,
+    update_suggestion_status,
 )
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool, FunctionTool
@@ -14,16 +15,19 @@ from google.adk.tools import AgentTool, FunctionTool
 
 
 class AnalystAgent(LlmAgent):
-    """The Strategist. Decomposes vibes into structured tropes and manages User Profile."""
+    """The Strategist. Decomposes vibes into structured tropes/styles and manages User Profile."""
 
     def __init__(self):
         super().__init__(
             name="Analyst",
             description="Specializes in extracting structured book attributes and analyzing user taste.",
             instruction="""
-            You are a literary analyst. Your job is to extract semantic concepts (tropes, genres, moods) from user requests.
+            You are a literary analyst. Your job is to extract semantic concepts from user requests.
+            1. Identify 'Target Vibes' (Tropes/Styles the user wants).
+            2. Identify 'Session Constraints' (Moods/Tropes the user wants to avoid *just for now*, e.g., "Nothing too violent today").
+            3. Identify 'Permanent Negative Signals' (Things the user explicitly says they always hate).
+
             Use the 'get_user_trope_preferences' tool to understand the user's historical taste.
-            Identify 'Negative Signals' (things the user wants to avoid) based on feedback.
             """,
             tools=[FunctionTool(get_user_trope_preferences)],
         )
@@ -54,11 +58,17 @@ class CriticAgent(LlmAgent):
             name="Critic",
             description="Ranks book candidates using vector similarity and ensures no duplicates in history.",
             instruction="""
-            You are a book critic. You receive a list of candidate books.
-            1. Use 'search_internal_database' to find similar existing books.
+            You are a book critic. You receive a list of candidate books and target vibes (tropes/styles).
+            1. Use 'search_internal_database' with both target tropes and target styles.
             2. Use 'get_work_details' to see deep metadata for candidates.
-            3. Use 'check_reading_history' to ensure you don't recommend something already read.
-            4. Provide a ranked list with brief justifications based on trope matches.
+            3. Use 'check_reading_history' to check re-read eligibility (>2 years).
+            4. Rank candidates by similarity to Target Vibes.
+            5. APPLY PENALTY: If a candidate matches a 'Session Constraint', lower its rank.
+
+            6. JUSTIFY (Trope-RAG): For each recommended book, provide a grounded justification.
+               - Anchor your reasoning in the 'name' and 'description' of the top-matching tropes.
+               - Include the 'justification' (evidence) from the database to explain how the trope manifests in that specific book.
+               - Format: "I recommend [Title] because it features [Trope Name] ([Description]). Specifically, [Justification Evidence]."
             """,
             tools=[
                 FunctionTool(search_internal_database),
@@ -82,14 +92,16 @@ class LibrarianAgent(LlmAgent):
             You are the Head Librarian. You provide personalized book recommendations and manage history.
 
             DELEGATION STRATEGY:
-            1. Call the 'Analyst' to turn user vibes into structured tropes.
-            2. Call 'get_unacted_suggestions' to see if we already have good unread matches.
+            1. Call the 'Analyst' to turn user vibes into structured targets and session constraints.
+            2. Call 'get_unacted_suggestions' with target vibes to see if we have good matches.
             3. If new discovery is needed, call the 'Explorer'.
-            4. Pass all candidates to the 'Critic' for final ranking and history checks.
+            4. Pass all candidates, targets, and session constraints to the 'Critic' for final ranking.
+               - NOTE: Books read >2 years ago are eligible for re-read suggestions.
 
             FEEDBACK HANDLING:
-            - If user says "I read that", use 'update_reading_status'.
-            - If user provides social feedback (friend's opinion), pass it to the Critic.
+            - If user says "I read that", use 'update_reading_status' AND 'update_suggestion_status(Already Read)'.
+            - If user says "Not for me" or "I hate this", use 'update_suggestion_status(Dismissed)'.
+            - If user provides mood feedback ("Not in the mood for X"), pass it to the Analyst/Critic.
 
             Always log the final result using 'log_suggestion'.
             """,
@@ -99,6 +111,7 @@ class LibrarianAgent(LlmAgent):
                 AgentTool(critic),
                 FunctionTool(get_unacted_suggestions),
                 FunctionTool(update_reading_status),
+                FunctionTool(update_suggestion_status),
                 FunctionTool(log_suggestion),
             ],
         )

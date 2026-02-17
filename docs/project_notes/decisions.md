@@ -271,3 +271,38 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Better IDE support, predictable load order.
 - Cons: Requires careful management of model dependencies.
+
+### ADR-026: Temporal Re-read Decay Logic (2026-02-17)
+**Context:**
+- Need to allow recommendations of previously read books without spamming the user with recent reads.
+**Decision:**
+- Implement a 2.0-year "decay" threshold. Books read >2 years ago are marked as `is_re_read_candidate`.
+**Consequences:**
+- Pros: Surfaces beloved classics while maintaining discovery of new titles.
+
+### ADR-027: Hybrid Trope-Style Semantic Search (2026-02-17)
+**Context:**
+- Recommendations based on tropes alone are too plot-focused; styles alone are too vibe-focused.
+**Decision:**
+- Combine Trope and Style vector similarity into a single discovery tool (`search_internal_database`).
+- Average vectors within categories and merge candidate sets.
+**Consequences:**
+- Pros: Recommendations that match both the "what" (plot) and "how" (prose/tone) of user taste.
+
+### ADR-028: Tiered Feedback (Mood vs. Preference) (2026-02-17)
+**Context:**
+- User mood ("not in the mood for violence") shouldn't permanently block tropes or books.
+**Decision:**
+- Handle "Moods" as transient session constraints passed to the Critic for rank penalties.
+- Handle "Preferences" (Already Read, Dismissed) as persistent database status updates.
+**Consequences:**
+- Pros: Responsive to immediate state without losing long-term accuracy.
+
+### ADR-029: Trope-RAG Justification (2026-02-17)
+**Context:**
+- Users need to know *why* a book was suggested to build trust in the agent.
+**Decision:**
+- Retrieve trope names, general descriptions, and book-specific "justification" evidence from the DB.
+- Force the Critic agent to anchor its reasoning in these specific facts.
+**Consequences:**
+- Pros: Transparent, grounded, and evidence-based recommendations.
