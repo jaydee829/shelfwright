@@ -1,6 +1,6 @@
 import mlflow
 import pandas as pd
-from agentic_librarian.db.models import Author, Edition, Work
+from agentic_librarian.db.models import Author, Edition, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.ingest import HistoryIngestor
 from agentic_librarian.scouts.metadata_scout import ScoutManager
@@ -52,7 +52,8 @@ def enriched_metadata(
             existing_edition = (
                 session.query(Edition)
                 .join(Work)
-                .join(Work.authors)
+                .join(WorkContributor)
+                .join(Author)
                 .filter(Work.title == title)
                 .filter(Author.name == primary_author)
                 .filter(Edition.format == fmt)
@@ -86,37 +87,40 @@ def vectorized_tropes(
         trope_manager = TropeManager(session=session)
 
         for _, row in enriched_metadata.iterrows():
-            # 1. Author(s) - Handle multiple authors if present
-            author_names = row.get("authors")
+            # 1. Contributors (Name + Role)
+            # Use enriched contributors if available, otherwise fallback to CSV authors
+            raw_contributors = row.get("contributors")
+            if not isinstance(raw_contributors, list):
+                # Fallback: Extract from Author_X columns
+                author_cols = [c for c in enriched_metadata.columns if c.startswith("Author_")]
+                raw_contributors = []
+                for col in author_cols:
+                    name = row[col]
+                    if name and not pd.isna(name):
+                        raw_contributors.append({"name": name, "role": "Author"})
 
-            # Ensure author_names is a list and not NaN
-            if isinstance(author_names, float) or author_names is None:
-                author_names = []
+            if not raw_contributors:
+                context.log.warning(f"No contributors found for '{row['Title']}'. Skipping work creation.")
+                continue
 
-            if not author_names:
-                # Fallback to the primary author from the CSV
-                primary = row.get("Author_1") or row.get("Author")
-                author_names = [primary] if primary else []
-
-            authors = []
-            for name in author_names:
-                if not name or pd.isna(name):
-                    continue
+            # Resolve/Create Authors and create WorkContributor objects
+            work_contributors_list = []
+            for c_data in raw_contributors:
+                name = c_data["name"]
+                role = c_data["role"]
                 author = session.query(Author).filter(Author.name == name).first()
                 if not author:
                     author = Author(name=name)
                     session.add(author)
-                    session.flush()  # Ensure author.id is populated
-                authors.append(author)
+                    session.flush()
 
-            if not authors:
-                context.log.warning(f"No author found for '{row['Title']}'. Skipping work creation.")
-                continue
+                work_contributors_list.append(WorkContributor(author=author, role=role))
 
             # 2. Work
             work = (
                 session.query(Work)
-                .join(Work.authors)
+                .join(WorkContributor)
+                .join(Author)
                 .filter(Work.title == row["Title"])
                 .filter(Author.name == (row.get("Author_1") or row.get("Author")))
                 .first()
@@ -124,14 +128,14 @@ def vectorized_tropes(
             if not work:
                 work = Work(
                     title=row["Title"],
-                    authors=authors,
+                    contributors=work_contributors_list,
                     original_publication_year=row.get("original_publication_year"),
                     description=row.get("description"),
                     genres=row.get("genres"),
                     moods=row.get("moods"),
                 )
                 session.add(work)
-                session.flush()  # Ensure work.id is populated for Edition check
+                session.flush()
             elif not row.get("skip_enrichment"):
                 # Update existing work if new metadata found
                 work.original_publication_year = row.get("original_publication_year") or work.original_publication_year

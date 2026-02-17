@@ -132,11 +132,13 @@ class GoogleBooksScout(APIScout):
                 isbn_13 = id_obj.get("identifier")
                 break
 
+        contributors = [{"name": a, "role": "Author"} for a in book.get("authors", [])]
+
         return {
             "google_id": data["items"][0]["id"],
             "isbn_13": isbn_13,
             "title": book.get("title"),
-            "authors": book.get("authors", []),
+            "contributors": contributors,
             "published_date": book.get("publishedDate"),
             "description": book.get("description", ""),
             "page_count": book.get("pageCount"),  # Default None
@@ -170,6 +172,9 @@ class HardcoverScout(APIScout):
                     book {
                     contributions {
                         author {
+                        name
+                        }
+                        author_role {
                         name
                         }
                     }
@@ -216,15 +221,19 @@ class HardcoverScout(APIScout):
             selected_edition = editions[0]
 
         book = selected_edition.get("book", {})
-        authors = [c.get("author", {}).get("name") for c in book.get("contributions", [])]
-        authors = [a for a in authors if a]
+        contributors = []
+        for c in book.get("contributions", []):
+            name = c.get("author", {}).get("name")
+            role = c.get("author_role", {}).get("name") or "Author"
+            if name:
+                contributors.append({"name": name, "role": role})
 
         edition_release_date = selected_edition.get("release_date")
         original_release_date = book.get("release_date") or edition_release_date
 
         return {
             "title": selected_edition.get("title"),
-            "authors": authors,
+            "contributors": contributors,
             "edition_format": selected_edition.get("edition_format"),
             "page_count": pages,
             "publication_date": edition_release_date,
@@ -351,7 +360,7 @@ class ScoutManager:
         """Aggregates metadata from all registered scouts."""
         merged_data = {
             "title": title,
-            "authors": [author],
+            "contributors": [{"name": author, "role": "Author"}],
             "genres": set(),
             "moods": set(),
             "source_priority": [],
@@ -381,6 +390,13 @@ class ScoutManager:
             # Additive fields (Sets)
             merged_data["genres"].update(res.get("genres", []))
             merged_data["moods"].update(res.get("moods", []))
+
+            # Merge Contributors (Maintain uniqueness by name + role)
+            existing_contributors = {(c["name"], c["role"]) for c in merged_data["contributors"]}
+            for new_c in res.get("contributors", []):
+                if (new_c["name"], new_c["role"]) not in existing_contributors:
+                    merged_data["contributors"].append(new_c)
+                    existing_contributors.add((new_c["name"], new_c["role"]))
 
             # Single-value fields loop
             for key in [

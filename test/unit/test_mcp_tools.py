@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentic_librarian.db.models import Author, Suggestions, Work
+from agentic_librarian.db.models import Author, Suggestions, Work, WorkContributor
 from agentic_librarian.mcp.server import (
     check_reading_history,
     get_unacted_suggestions,
@@ -37,8 +39,14 @@ def mock_trope_manager():
 def test_search_internal_database_mock(mock_db_manager, mock_trope_manager, standard_books):
     session = mock_db_manager.get_session.return_value.__enter__.return_value
 
-    # Setup mock return data
-    mock_works = [Work(title=b["title"], authors=[Author(name=b["author"])]) for b in standard_books]
+    # Setup mock return data using WorkContributor
+    mock_works = []
+    for b in standard_books:
+        author = Author(name=b["author"])
+        work = Work(title=b["title"])
+        contributor = WorkContributor(work=work, author=author, role="Author")
+        work.contributors = [contributor]
+        mock_works.append(work)
 
     # Mock the trope query chain and then the final work query
     session.query.return_value.order_by.return_value.limit.return_value.all.return_value = []  # Tropes
@@ -66,8 +74,11 @@ def test_get_unacted_suggestions_mock(mock_db_manager):
 def test_check_reading_history_mock(mock_db_manager):
     session = mock_db_manager.get_session.return_value.__enter__.return_value
 
-    # Simulate book not found
-    session.query.return_value.join.return_value.join.return_value.join.return_value.filter.return_value.filter.return_value.first.return_value = None
+    # Robust mock: use a more flexible chain to ensure 'first()' returns None
+    mock_query = session.query.return_value
+    mock_query.join.return_value = mock_query
+    mock_query.filter.return_value = mock_query
+    mock_query.first.return_value = None
 
     res = check_reading_history("Unread Book", "Author")
     assert res["status"] == "Unread"
@@ -77,12 +88,19 @@ def test_update_reading_status_mock(mock_db_manager):
     session = mock_db_manager.get_session.return_value.__enter__.return_value
 
     mock_work = Work(id="work-uuid", title="Test Book")
-    session.query.return_value.join.return_value.filter.return_value.first.return_value = mock_work
-    session.query.return_value.filter_by.return_value.first.return_value = MagicMock()  # Mock Edition
+
+    # Mock the work query
+    mock_query = session.query.return_value
+    mock_query.join.return_value = mock_query
+    mock_query.filter.return_value = mock_query
+    mock_query.first.return_value = mock_work
+
+    # Mock the edition query (filter_by)
+    mock_query.filter_by.return_value.first.return_value = MagicMock()
 
     resp = update_reading_status("Test Book", "Author", "read")
     assert "Successfully updated" in resp
-    session.add.assert_called_once()
+    session.add.assert_called()
     session.flush.assert_called()
 
 

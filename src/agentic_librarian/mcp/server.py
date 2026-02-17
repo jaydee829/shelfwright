@@ -1,7 +1,18 @@
+from __future__ import annotations
+
 from datetime import date
 
 import numpy as np
-from agentic_librarian.db.models import Author, Edition, ReadingHistory, Suggestions, Trope, Work, WorkTrope
+from agentic_librarian.db.models import (
+    Author,
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Trope,
+    Work,
+    WorkContributor,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from sqlalchemy import func, select
@@ -55,7 +66,7 @@ def search_internal_database(target_tropes: list[str], limit: int = 10) -> list[
             {
                 "id": str(w.id),
                 "title": w.title,
-                "authors": [a.name for a in w.authors],
+                "authors": [c.author.name for c in w.contributors],
                 "genres": w.genres,
                 "description": w.description,
             }
@@ -89,7 +100,8 @@ def check_reading_history(title: str, author: str) -> dict:
             session.query(ReadingHistory)
             .join(Edition)
             .join(Work)
-            .join(Work.authors)
+            .join(WorkContributor)
+            .join(Author)
             .filter(Work.title == title)
             .filter(Author.name == author)
             .first()
@@ -101,12 +113,18 @@ def check_reading_history(title: str, author: str) -> dict:
 
 
 @mcp.tool()
-def update_reading_status(title: str, author: str, status: str, notes: str = None) -> str:
+def update_reading_status(title: str, author: str, status: str, notes: str | None = None) -> str:
     """Updates history based on feedback (e.g. 'I read that years ago')."""
     try:
         with db_manager.get_session() as session:
             # Find the work/edition first
-            work = session.query(Work).join(Work.authors).filter(Work.title == title, Author.name == author).first()
+            work = (
+                session.query(Work)
+                .join(WorkContributor)
+                .join(Author)
+                .filter(Work.title == title, Author.name == author)
+                .first()
+            )
             if not work:
                 return f"Work '{title}' by {author} not found in database."
 
@@ -133,7 +151,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str = Non
 
 
 @mcp.tool()
-def log_suggestion(work_id: str, context: str, justification: str, conversation_id: str = None) -> str:
+def log_suggestion(work_id: str, context: str, justification: str, conversation_id: str | None = None) -> str:
     """Logs a new recommendation to the Suggestions table."""
     try:
         with db_manager.get_session() as session:

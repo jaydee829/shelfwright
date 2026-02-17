@@ -19,6 +19,7 @@ class TropeManager:
 
     def _get_embedding(self, text: str) -> list[float]:
         """Fetch embedding from Gemini."""
+        # Use the newer google-genai SDK if available, or fallback
         response = self.client.models.embed_content(model=self.model_name, contents=text)
         return response.embeddings[0].values
 

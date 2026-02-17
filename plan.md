@@ -9,6 +9,11 @@
 ## Phase 2.5: Abstract Scout Refactor
 **Goal**: Migrate metadata scouts to a hierarchical Strategy Pattern. [COMPLETED]
 
+## Phase 2.6: ETL Hardening & Style Enrichment
+**Goal**: Resolve identified gaps in Flow 1 metadata and ingestion logic.
+1.  **Contributor Role Support**: Refactor `HistoryIngestor` and scouts to map roles (Editor, Translator, etc.) into the `work_contributors` table.
+2.  **Deep Style Scouting**: Implement a specialized `LLMScout` to populate `style_attributes` (JSONB) for Authors and Narrators (pacing, tone, voice differentiation).
+
 ## Phase 3: Flow 2 - Recommendation Engine (A2A Mesh)
 **Goal**: Build a cognitive mesh of specialized agents using the **Google AI Agent SDK**.
 
@@ -22,16 +27,19 @@
 1.  **MCP Server Implementation**:
     -   Expose Postgres/pgvector as an MCP server.
     -   Implement tools for `search_internal_database`, `get_unacted_suggestions`, and `update_reading_status`.
+    -   **Enhancement**: Update `check_reading_history` to include temporal re-read logic (>2 years since `date_completed`).
 2.  **Agent SDK Foundation**:
     -   Initialize the **Google AI Agent SDK** framework.
     -   Define the 4 Agent Services and their communication contracts.
 3.  **Memory & Logic**:
     -   Implement "Re-read Decay" logic in the Librarian.
     -   Implement "Persistence Logic" (re-prioritizing unread suggestions) in the Librarian.
-4.  **Feedback Loop**:
+4.  **Style-Based Ranking**:
+    -   Enhance `Critic` and `search_internal_database` to query and weight results by Author/Narrator `style_attributes` (satisfying Level 5 Use Cases).
+5.  **Feedback Loop**:
     -   Implement "Conversational Correction" (UC6.1) and "Social Signals" (UC6.2) handling.
-5.  **Trope-RAG Justification**:
-    -   Build prompt templates that anchor final recommendations in retrieved trope facts.
+6.  **Trope-RAG Justification**:
+    -   Build prompt templates that anchor final recommendations in retrieved trope **names and descriptions** for evidence-based grounding.
 
 ## Phase 4: Web Interface & Analysis
 **Goal**: Visualize the reading history and interact with the Librarian.
@@ -46,4 +54,5 @@
 *   **Order of Work**:
     1.  Log agent mesh performance (latency, delegation success) to MLFlow.
     2.  Implement a drift detection script for the `Tropes` table to monitor semantic consistency.
-    3.  Final System E2E test: From raw CSV update to verified recommendation.
+    3.  **E2E Testing**: Initialize `test/e2e/` with Playwright to verify full system flows (e.g., UC3.1, UC6.1).
+    4.  Final System E2E test: From raw CSV update to verified recommendation.

@@ -7,19 +7,23 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+UTC = UTC
+
 
 class Base(DeclarativeBase):
     pass
 
 
-# Junction table for Work and Author
-work_contributors = Table(
-    "work_contributors",
-    Base.metadata,
-    Column("work_id", ForeignKey("works.id"), primary_key=True),
-    Column("author_id", ForeignKey("authors.id"), primary_key=True),
-    Column("role", String, default="Primary"),
-)
+class WorkContributor(Base):
+    __tablename__ = "work_contributors"
+
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True)
+    author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True)
+    role: Mapped[str] = mapped_column(String, default="Primary", primary_key=True)
+
+    work: Mapped["Work"] = relationship(back_populates="contributors")
+    author: Mapped["Author"] = relationship(back_populates="contributions")
+
 
 # Junction table for Edition and Narrator
 edition_narrators = Table(
@@ -38,7 +42,7 @@ class Author(Base):
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     style_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
-    works: Mapped[list["Work"]] = relationship(secondary=work_contributors, back_populates="authors")
+    contributions: Mapped[list["WorkContributor"]] = relationship(back_populates="author")
 
 
 class Work(Base):
@@ -51,7 +55,7 @@ class Work(Base):
     genres: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     moods: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 
-    authors: Mapped[list["Author"]] = relationship(secondary=work_contributors, back_populates="works")
+    contributors: Mapped[list["WorkContributor"]] = relationship(back_populates="work", cascade="all, delete-orphan")
     editions: Mapped[list["Edition"]] = relationship(back_populates="work")
     tropes: Mapped[list["WorkTrope"]] = relationship(back_populates="work")
     suggestions: Mapped[list["Suggestions"]] = relationship(back_populates="work")

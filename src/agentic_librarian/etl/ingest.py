@@ -66,16 +66,22 @@ class HistoryIngestor:
             self.clean()
 
         for _, row in self.cleaned_df.iterrows():
-            # 1. Author(s)
-            authors = []
+            # 1. Author(s) mapping to WorkContributors
+            contributors = []
             author_cols = [c for c in self.cleaned_df.columns if c.startswith("Author_")]
             for col in author_cols:
                 name = row[col]
                 if name and not pd.isna(name):
-                    authors.append(Author(name=name))
+                    author = Author(name=name)
+                    # Use the association object to support roles
+                    from agentic_librarian.db.models import WorkContributor
+
+                    contributor = WorkContributor(author=author, role="Author")
+                    contributors.append(contributor)
+                    yield author
 
             # 2. Work
-            work = Work(title=row["Title"], authors=authors)
+            work = Work(title=row["Title"], contributors=contributors)
 
             # 3. Edition
             edition = Edition(
@@ -95,5 +101,4 @@ class HistoryIngestor:
             # The plan says "map rows into internal objects".
 
             yield work
-            yield from authors
             yield edition
