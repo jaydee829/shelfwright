@@ -51,3 +51,16 @@ This document defines standardized use cases to guide the development and testin
 - **UC5.2: Authorial Style Match**
     - **Prompt:** "I love the 'dry wit' and 'fast pacing' of Andy Weir. What other authors share that style?"
     - **Expected Outcome:** Authors like Martha Wells or John Scalzi.
+
+## Level 6: Feedback & Evolution
+*Focus: Long-term memory, corrections, and social signals.*
+
+- **UC6.1: Historical Correction**
+    - **Scenario:** User is suggested 'The Martian' and replies "I've already read that, but it was before I started this list."
+    - **Expected Outcome:** System calls `update_reading_status` to add the book to history and removes it from the current suggestion set.
+- **UC6.2: Social Signal Processing**
+    - **Prompt:** "My friend who likes the same books as me said 'Red Rising' was way too violent for their taste right now."
+    - **Expected Outcome:** Analyst extracts 'Violence' as a negative weight; Critic lowers the rank of 'Red Rising' and similar high-violence titles for the current session.
+- **UC6.3: Suggestion Persistence**
+    - **Scenario:** User asks for a heist book. System previously suggested 'Six of Crows' (unread).
+    - **Expected Outcome:** System identifies 'Six of Crows' as a high-match unacted suggestion and prioritizes it in the new response.

@@ -23,9 +23,10 @@ This file tracks important project configuration, constants, and environment det
   - **Dagster Partitions**:
     - `csv_files`: Dynamic partitions based on raw CSV filenames.
 - **Interface**: Web UI (Vite/React/Next.js), FastAPI (Backend)
-- **AI/LLM**: `google-genai` (Gemini), LangChain, FastMCP
-- **Protocols**: MCP (Data Access), A2A (Agent Collaboration)
+- **AI/LLM**: `google-genai` (Gemini), Google AI Agent SDK, LangChain
+- **Protocols**: MCP (Data Access), A2A (Agent Mesh)
   - **Data Access Strategy**: Hybrid (Direct ORM for Flow 1 Ingest; Coarse-Grained MCP for Flow 2 Agents).
+  - **Agent Mesh**: 4-Agent Specialist Model (Librarian, Analyst, Explorer, Critic).
 - **Testing**: Pytest (Unit, Integration), Playwright (E2E)
 - **Containerization**: Docker, Docker Compose
   - **Ports**:

@@ -189,3 +189,38 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Better error visibility, easier debugging, more robust code.
 - Cons: Requires more explicit handling of edge cases.
+
+### ADR-018: Dual-Verification Pattern for Environment-Dependent Logic (2026-02-06)
+**Context:**
+- Development occurs in varied environments (Local Windows without Docker vs Docker-ready containers).
+- Database-dependent logic (vector search, complex SQL) is difficult to verify without a live instance.
+**Decision:**
+- Adopt a **Dual-Verification Pattern** for all database-dependent components:
+    1.  **Mock Verification**: Use unit tests with mocks to verify code logic and flow. These must run in all CI environments.
+    2.  **Live Verification**: Use `@pytest.mark.db_integration` tests to verify actual SQL and data behavior. These run only when a database is reachable.
+- Both test types must be implemented simultaneously to ensure parity.
+**Consequences:**
+- Pros: Guaranteed logic verification in CI, robust data verification in staging/local-docker, clear documentation of environmental dependencies.
+- Cons: Increased testing overhead (writing tests twice).
+
+### ADR-019: 4-Agent Specialist Mesh (2026-02-13)
+**Context:**
+- Monolithic agents are difficult to tune and suffer from "prompt bloat."
+- Need to separate "Strategic Planning" from "Data Scouting" and "Nuanced Ranking."
+**Decision:**
+- Adopt a 4-agent cognitive mesh:
+    1. **Librarian**: Orchestrator (Delegation).
+    2. **Analyst**: Strategist (Parameter extraction).
+    3. **Explorer**: Scout (External discovery).
+    4. **Critic**: Matchmaker (Ranking & Feedback).
+**Consequences:**
+- Pros: Specialized tuning for each agent, modular reasoning, easier to debug failure points.
+
+### ADR-020: Google AI Agent SDK for Mesh Communication (2026-02-13)
+**Context:**
+- Need a standardized protocol for discovery and delegation between agents.
+- The project is already in the Google/Gemini ecosystem.
+**Decision:**
+- Use the **Google AI Agent SDK** (implements the A2A protocol) to power the agent services.
+**Consequences:**
+- Pros: Native A2A support, seamless Gemini integration, scalable to Vertex AI Agent Engine.

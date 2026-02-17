@@ -1,0 +1,22 @@
+[
+  {
+    "title": "The Way of Kings",
+    "author": "Brandon Sanderson",
+    "year": 2010,
+    "format": "hardcover",
+    "isbn_13": "9780765326355",
+    "genres": ["Fantasy", "Epic"],
+    "moods": ["Epic", "Adventurous"],
+    "tropes": ["High Magic", "World Building"]
+  },
+  {
+    "title": "Project Hail Mary",
+    "author": "Andy Weir",
+    "year": 2021,
+    "format": "audiobook",
+    "isbn_13": "9780593135204",
+    "genres": ["Sci-Fi"],
+    "moods": ["Witty", "Hopeful"],
+    "tropes": ["Competence Porn", "First Contact"]
+  }
+]

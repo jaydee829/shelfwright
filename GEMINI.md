@@ -18,6 +18,9 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 - **Single With Statements**: Always combine multiple context managers into a single `with` statement (e.g., `with A, B:`) to avoid SIM117 errors.
 - **No Broad Except-Pass**: Never use `except Exception: pass`. Handle specific exceptions or log errors to ensure visibility of failures.
 - **Explicit Flushing**: Always call `session.flush()` after adding new database entities if their generated IDs are needed for subsequent logic in the same transaction.
+- **Technical Debt & Parity**: When implementing logic without a live database, you MUST create both a Mock test and a corresponding `db_integration` test. To ensure parity, you MUST use shared JSON fixtures from `test/data/` to seed both the mocks and the real database. Any technical debt (missing live verification) MUST be logged in `docs/project_notes/bugs.md`.
+- **Adding Data Sources**: New metadata sources MUST be implemented as classes inheriting from `APIScout` or `LLMScout` and registered in the `ScoutManager`.
+- **Agent Mesh**: Multi-agent interactions MUST follow the 4-agent specialist mesh (Librarian, Analyst, Explorer, Critic) using the Google AI Agent SDK.
 
 **Before proposing architectural changes:**
 - Check `docs/project_notes/decisions.md` for existing decisions
