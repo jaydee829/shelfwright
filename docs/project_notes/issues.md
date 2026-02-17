@@ -69,3 +69,9 @@ This file tracks work history and ticket references.
 - **Status**: Completed
 - **Description**: Refactored the Agent Mesh to use the Google ADK "Reasoning Dispatcher" pattern. Librarian now delegates to Analyst, Explorer, and Critic via `AgentTool`. Integrated coarse-grained MCP tools as specialist capabilities.
 - **URL**: N/A
+
+### 2026-02-17 - ARC-012: Phase 2.6 - ETL Hardening & Style Enrichment
+- **Status**: Completed
+- **Description**: Refactored contributor roles, implemented structured Style/Trope models with vectorization, and added "Informed Scouting" context.
+- **URL**: N/A
+- **Notes**: Includes `LLMTropeScout` and `StyleScout` with 9 author attributes.

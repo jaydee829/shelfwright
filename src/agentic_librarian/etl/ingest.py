@@ -2,7 +2,7 @@ import re
 from collections.abc import Generator
 
 import pandas as pd
-from agentic_librarian.db.models import Author, Base, Edition, ReadingHistory, Work
+from agentic_librarian.db.models import Author, Base, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.etl import cleaning
 
 
@@ -74,7 +74,6 @@ class HistoryIngestor:
                 if name and not pd.isna(name):
                     author = Author(name=name)
                     # Use the association object to support roles
-                    from agentic_librarian.db.models import WorkContributor
 
                     contributor = WorkContributor(author=author, role="Author")
                     contributors.append(contributor)

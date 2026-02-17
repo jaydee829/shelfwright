@@ -224,3 +224,50 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Use the **Google AI Agent SDK** (implements the A2A protocol) to power the agent services.
 **Consequences:**
 - Pros: Native A2A support, seamless Gemini integration, scalable to Vertex AI Agent Engine.
+
+### ADR-021: Association Object for Contributor Roles (2026-02-17)
+**Context:**
+- Need to support multiple roles per work (e.g., Author, Editor, Translator) which a simple junction table or direct relationship cannot handle well.
+**Decision:**
+- Refactor `work_contributors` into a full association object `WorkContributor` with a `role` field.
+**Consequences:**
+- Pros: Robust support for anthologies and translated works.
+- Cons: Slightly more complex queries (extra join).
+
+### ADR-022: Relational Style Model & Vectorization (2026-02-17)
+**Context:**
+- Literary and performance styles (pacing, tone, voice diff) were stored in `JSONB` blobs, making them difficult to deduplicate or use for vector similarity.
+**Decision:**
+- Create a standardized `Style` model with embeddings.
+- Link Authors, Narrators, and Works to this model via association tables (`AuthorStyle`, `NarratorStyle`, `WorkStyle`).
+**Consequences:**
+- Pros: Semantic deduplication via `StyleManager`, enabling high-precision vector-based recommendations.
+
+### ADR-023: Informed Scouting (Contextual baseline) (2026-02-17)
+**Context:**
+- Scouting a book's style without knowing the author's general profile leads to redundant or inconsistent "deltas."
+**Decision:**
+- Pass the existing Author's styles from the database into the LLM prompt as a "baseline."
+- Instruct the LLM to only report stylistic deviations (deltas) from this baseline for the specific work.
+**Consequences:**
+- Pros: Cleaner work-specific metadata, higher accuracy in identifying "stylistic drift."
+
+### ADR-024: Style Inheritance & Override Pattern (2026-02-17)
+**Context:**
+- Most books by an author share their core style, but some vary (e.g., Running Man vs The Stand).
+**Decision:**
+- Implement an inheritance pattern in MCP tools (`get_work_details`):
+    1. Retrieve `WorkStyle` overrides first.
+    2. Inherit missing attributes from the primary `AuthorStyle` profile.
+**Consequences:**
+- Pros: Most granular data is always used; avoids massive data duplication.
+
+### ADR-025: Strict Import Hierarchy (2026-02-17)
+**Context:**
+- Circular dependencies were common between Models, Scouts, and Assets.
+**Decision:**
+- Move most just-in-time (JIT) imports to the top level to establish a clear hierarchy (Models -> Managers -> Scouts -> Assets).
+- Use service layers or manual `sys.path` injection only where absolutely necessary to maintain tool alignment.
+**Consequences:**
+- Pros: Better IDE support, predictable load order.
+- Cons: Requires careful management of model dependencies.

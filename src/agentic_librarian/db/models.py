@@ -3,7 +3,6 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -40,9 +39,9 @@ class Author(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
-    style_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     contributions: Mapped[list["WorkContributor"]] = relationship(back_populates="author")
+    styles: Mapped[list["AuthorStyle"]] = relationship(back_populates="author", cascade="all, delete-orphan")
 
 
 class Work(Base):
@@ -59,6 +58,7 @@ class Work(Base):
     editions: Mapped[list["Edition"]] = relationship(back_populates="work")
     tropes: Mapped[list["WorkTrope"]] = relationship(back_populates="work")
     suggestions: Mapped[list["Suggestions"]] = relationship(back_populates="work")
+    styles: Mapped[list["WorkStyle"]] = relationship(back_populates="work", cascade="all, delete-orphan")
 
 
 class Narrator(Base):
@@ -66,7 +66,57 @@ class Narrator(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
-    style_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    styles: Mapped[list["NarratorStyle"]] = relationship(back_populates="narrator", cascade="all, delete-orphan")
+
+
+class Style(Base):
+    """Standardized attributes for Authors (pacing, tone) or Narrators (voice diff, accent)."""
+
+    __tablename__ = "styles"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)  # 'Author', 'Narrator', or 'Work'
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding: Mapped[Vector | None] = mapped_column(Vector(1536), nullable=True)
+
+    author_links: Mapped[list["AuthorStyle"]] = relationship(back_populates="style")
+    narrator_links: Mapped[list["NarratorStyle"]] = relationship(back_populates="style")
+    work_links: Mapped[list["WorkStyle"]] = relationship(back_populates="style")
+
+
+class AuthorStyle(Base):
+    __tablename__ = "author_styles"
+
+    author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'pacing', 'tone', 'style', 'humor', etc.
+
+    author: Mapped["Author"] = relationship(back_populates="styles")
+    style: Mapped["Style"] = relationship(back_populates="author_links")
+
+
+class NarratorStyle(Base):
+    __tablename__ = "narrator_styles"
+
+    narrator_id: Mapped[UUID] = mapped_column(ForeignKey("narrators.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'voice_differentiation', etc.
+
+    narrator: Mapped["Narrator"] = relationship(back_populates="styles")
+    style: Mapped["Style"] = relationship(back_populates="narrator_links")
+
+
+class WorkStyle(Base):
+    __tablename__ = "work_styles"
+
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'perspective', 'interiority', etc.
+
+    work: Mapped["Work"] = relationship(back_populates="styles")
+    style: Mapped["Style"] = relationship(back_populates="work_links")
 
 
 class Trope(Base):
@@ -86,6 +136,7 @@ class WorkTrope(Base):
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True, nullable=False)
     trope_id: Mapped[UUID] = mapped_column(ForeignKey("tropes.id"), primary_key=True, nullable=False)
     relevance_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+    justification: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     work: Mapped["Work"] = relationship(back_populates="tropes")
     trope: Mapped["Trope"] = relationship(back_populates="works")

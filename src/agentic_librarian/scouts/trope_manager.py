@@ -53,7 +53,7 @@ class TropeManager:
 
         return None
 
-    def standardize_trope(self, raw_tag: str, threshold: float = 0.85) -> Trope:
+    def standardize_trope(self, raw_tag: str, threshold: float = 0.85, description: str = None) -> Trope:
         """
         Maps a raw tag to a standardized Trope.
         Checks for exact name match first, then semantic similarity.
@@ -62,6 +62,8 @@ class TropeManager:
         # 1. Exact Name Match
         existing = self.session.query(Trope).filter(Trope.name == raw_tag).first()
         if existing:
+            if description and not existing.description:
+                existing.description = description
             return existing
 
         # 2. Semantic Match
@@ -69,10 +71,12 @@ class TropeManager:
         similar = self.find_similar_trope(embedding, threshold=threshold)
 
         if similar:
+            if description and not similar.description:
+                similar.description = description
             return similar
 
         # 3. Create New
-        new_trope = Trope(name=raw_tag, embedding=embedding)
+        new_trope = Trope(name=raw_tag, embedding=embedding, description=description)
         self.session.add(new_trope)
         self.session.flush()  # Ensure ID is populated for the caller
         # We don't commit here, let the caller handle it or use a flush

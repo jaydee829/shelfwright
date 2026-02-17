@@ -1,0 +1,66 @@
+from unittest.mock import MagicMock, patch
+
+import pytest
+from agentic_librarian.db.models import Style
+from agentic_librarian.scouts.style_manager import StyleManager
+
+
+@pytest.fixture
+def mock_session():
+    return MagicMock()
+
+
+@pytest.fixture
+def mock_genai_client():
+    with patch("agentic_librarian.scouts.style_manager.genai.Client") as mock:
+        client_inst = mock.return_value
+        # Default embedding return
+        mock_embedding = MagicMock()
+        mock_embedding.values = [0.1] * 1536
+        client_inst.models.embed_content.return_value.embeddings = [mock_embedding]
+        yield client_inst
+
+
+def test_standardize_style_exact_match(mock_session, mock_genai_client):
+    manager = StyleManager(session=mock_session, api_key="fake-key")
+
+    # Mock exact match
+    existing_style = Style(name="fast-paced", category="Author")
+    mock_session.query.return_value.filter.return_value.first.return_value = existing_style
+
+    result = manager.standardize_style("fast-paced", category="Author")
+
+    assert result == existing_style
+    # Ensure no embedding was fetched since exact match found
+    mock_genai_client.models.embed_content.assert_not_called()
+
+
+def test_standardize_style_semantic_match(mock_session, mock_genai_client):
+    manager = StyleManager(session=mock_session, api_key="fake-key")
+
+    # 1. No exact match
+    mock_session.query.return_value.filter.return_value.first.return_value = None
+
+    # 2. Similar match exists
+    similar_style = Style(name="brisk", category="Author", embedding=[0.1] * 1536)
+    mock_session.query.return_value.filter.return_value.all.return_value = [similar_style]
+
+    result = manager.standardize_style("fast", category="Author")
+
+    assert result == similar_style
+    mock_genai_client.models.embed_content.assert_called_once()
+
+
+def test_standardize_style_create_new(mock_session, mock_genai_client):
+    manager = StyleManager(session=mock_session, api_key="fake-key")
+
+    # No exact or similar match
+    mock_session.query.return_value.filter.return_value.first.return_value = None
+    mock_session.query.return_value.filter.return_value.all.return_value = []
+
+    result = manager.standardize_style("unique-style", category="Narrator")
+
+    assert result.name == "unique-style"
+    assert result.category == "Narrator"
+    mock_session.add.assert_called_once()
+    mock_session.flush.assert_called_once()

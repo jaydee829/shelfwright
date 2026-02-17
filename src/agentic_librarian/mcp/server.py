@@ -190,15 +190,40 @@ def get_user_trope_preferences(limit: int = 20) -> list[str]:
 
 @mcp.tool()
 def get_work_details(work_id: str) -> dict:
-    """Returns metadata and tropes for a work."""
+    """Returns metadata, tropes, and merged style profile for a work."""
     with db_manager.get_session() as session:
         work = session.query(Work).filter_by(id=work_id).first()
         if not work:
             return {}
 
-        tropes = [{"name": wt.trope.name, "description": wt.trope.description} for wt in work.tropes]
+        tropes = [
+            {"name": wt.trope.name, "description": wt.trope.description, "relevance": wt.relevance_score}
+            for wt in work.tropes
+        ]
 
-        return {"title": work.title, "description": work.description, "genres": work.genres, "tropes": tropes}
+        # Style Inheritance/Override Logic:
+        # 1. Start with Work-specific styles
+        merged_styles = {ws.attribute_type: ws.style.name for ws in work.styles}
+
+        # 2. Inherit from Primary Author for missing attributes
+        # Find primary author (role='Author' or first contributor)
+        primary_contributor = next((c for c in work.contributors if c.role == "Author"), None)
+        if not primary_contributor and work.contributors:
+            primary_contributor = work.contributors[0]
+
+        if primary_contributor:
+            author = primary_contributor.author
+            for ads in author.styles:
+                if ads.attribute_type not in merged_styles:
+                    merged_styles[ads.attribute_type] = ads.style.name
+
+        return {
+            "title": work.title,
+            "description": work.description,
+            "genres": work.genres,
+            "tropes": tropes,
+            "styles": merged_styles,
+        }
 
 
 if __name__ == "__main__":

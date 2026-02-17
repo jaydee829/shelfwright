@@ -283,7 +283,7 @@ class AudiobookScout(LLMScout):
         prompt = f"""
         Extract the following fields from the text. Return ONLY a raw JSON object.
         - title (string)
-        - narrator (string)
+        - narrators (list of strings)
         - length_minutes (int): convert "X hrs Y mins" to total minutes
         Input: {text_content[:30000]}
 
@@ -295,6 +295,13 @@ class AudiobookScout(LLMScout):
         if data is None:
             response = self._client.models.generate_content(model=self.model_name, contents=prompt + "\nJSON ONLY.")
             data = self._safe_extract_json(response.text, title, author, retry_count=1)
+
+        # Normalize keys
+        if data and "narrators" in data:
+            data["narrator_names"] = data.pop("narrators")
+        if data and "length_minutes" in data:
+            data["audio_minutes"] = data.pop("length_minutes")
+
         return data or {}
 
 
@@ -307,13 +314,13 @@ class DirectKnowledgeScout(LLMScout):
     def scout_audiobook(self, title: str, author: str) -> dict:
         """Uses Gemini with search grounding to find audiobook details."""
         prompt = f"""
-        Find the official audiobook duration and narrator for:
+        Find the official audiobook duration and narrators for:
         Title: {title}
         Author: {author}
 
         Return ONLY a raw JSON object with:
         - title (string)
-        - narrator (string)
+        - narrators (list of strings)
         - audio_minutes (int)
 
         CRITICAL: Use the provided search results to verify these facts.
@@ -339,7 +346,142 @@ class DirectKnowledgeScout(LLMScout):
             )
             data = self._safe_extract_json(response.text, title, author, retry_count=1)
 
+        if data and "narrators" in data:
+            data["narrator_names"] = data.pop("narrators")
+
         return data or {}
+
+
+class StyleScout(LLMScout):
+    """Scouts deep style attributes for authors and narrators using LLM knowledge."""
+
+    def search(self, title: str, author: str, **kwargs) -> dict:
+        """
+        In the context of a work, we might want to scout the style of its primary author,
+        the specific style of the work itself, and its narrators.
+        """
+        style_data = {"author_style": {}, "narrator_styles": {}, "work_style": {}}
+        author_baseline = kwargs.get("author_styles", {})
+
+        # 1. Scout Author Style
+        style_data["author_style"] = self.scout_author_style(author)
+
+        # 2. Scout Work Specific Style (Informed by author baseline)
+        style_data["work_style"] = self.scout_work_style(title, author, author_baseline=author_baseline)
+
+        # 3. Scout Narrator Styles (if provided in kwargs)
+        narrators = kwargs.get("narrators", [])
+        for n in narrators:
+            style_data["narrator_styles"][n] = self.scout_narrator_style(n)
+
+        return style_data
+
+    def scout_work_style(self, title: str, author: str, author_baseline: dict = None) -> dict:
+        """Extracts style attributes specific to a single work, informed by author's usual style."""
+        baseline_str = ", ".join([f"{k}: {v}" for k, v in author_baseline.items()]) if author_baseline else "Unknown"
+
+        prompt = f"""
+        Analyze the literary style of the book: '{title}' by {author}
+
+        The author's typical style baseline is: [{baseline_str}]
+
+        Focus on work-specific attributes:
+        - perspective: (e.g., 1st person, 3rd person limited, omniscient)
+        - interiority: (e.g., deep character thoughts, external/plot-focused)
+        - thematic_depth: (e.g., light/entertainment, moderate, heavy/philosophical)
+
+        Also identify any attributes where this specific book DIFFERS from the author's usual baseline:
+        - pacing, tone, style, prose_density, humor, etc.
+
+        Return ONLY a raw JSON object with these keys.
+        If an attribute is identical to the author's general baseline, omit it from the JSON.
+        """
+        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
+        response = self._client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config={"tools": [{"google_search": {}}] if use_grounding else []},
+        )
+        return self._safe_extract_json(response.text, "Work Style", title) or {}
+
+    def scout_author_style(self, name: str) -> dict:
+        """Extracts style attributes for an author."""
+        prompt = f"""
+        Analyze the literary style of the author: {name}
+        Focus on:
+        - pacing: (e.g., fast-paced, slow-burn, brisk)
+        - tone: (e.g., cynical, optimistic, atmospheric, clinical)
+        - style: (e.g., lyrical, minimalist, technical, humorous)
+        - prose_density: (e.g., minimalist, flowery, dense, accessible)
+        - dialogue_style: (e.g., naturalistic, formal, witty, sparse)
+        - lexicon: (e.g., archaic, academic, simple, specialized)
+        - humor: (e.g., dry, satirical, slapstick, none)
+        - world_building: (e.g., immersive, heavy, seamless, minimalist)
+        - emotional_distance: (e.g., intimate, clinical, detached, warm)
+
+        Return ONLY a raw JSON object with these nine keys.
+        If unknown, return empty strings for those keys.
+        """
+        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
+        response = self._client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config={"tools": [{"google_search": {}}] if use_grounding else []},
+        )
+        return self._safe_extract_json(response.text, "Author Style", name) or {}
+
+    def scout_narrator_style(self, name: str) -> dict:
+        """Extracts performance attributes for an audiobook narrator."""
+        prompt = f"""
+        Analyze the performance style of the audiobook narrator: {name}
+        Provide values for:
+        - pacing: (speed and rhythm)
+        - voice_differentiation: (ability to create distinct characters)
+        - accent_dialect: (accuracy/consistency of accents)
+        - pitch_tone: (musicality/depth of voice)
+        - consistency: (maintenance of tone/voices over time)
+        - emotional_range: (conveying complex emotions)
+        - gender_range: (believability of cross-gender performance)
+        - production_quality: (clarity and technical quality)
+
+        Return ONLY a raw JSON object with these keys. Use short descriptive phrases (3-5 words max).
+        If unknown, return empty strings for those keys.
+        """
+        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
+        response = self._client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config={"tools": [{"google_search": {}}] if use_grounding else []},
+        )
+        return self._safe_extract_json(response.text, "Narrator Style", name) or {}
+
+
+class LLMTropeScout(LLMScout):
+    """Scouts deep literary tropes for a work using LLM knowledge."""
+
+    def search(self, title: str, author: str, **kwargs) -> dict:
+        """Finds tropes for a specific work."""
+        prompt = f"""
+        Identify the top 5-10 literary tropes, narrative patterns, or character archetypes for the book:
+        Title: {title}
+        Author: {author}
+
+        For each trope, provide:
+        - trope_name: (standard name, e.g., 'The Chosen One', 'Found Family')
+        - description: (general definition of the trope)
+        - relevance_score: (float 0.0-1.0 indicating how central it is to this specific book)
+        - justification: (how this trope manifests in this specific book)
+
+        CRITICAL: Focus on narrative devices and archetypes. Avoid broad genres (Fantasy, Sci-Fi) or simple moods.
+        Return ONLY a raw JSON object with a 'tropes' key containing a list of these trope objects.
+        """
+        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
+        response = self._client.models.generate_content(
+            model=self.model_name,
+            contents=prompt,
+            config={"tools": [{"google_search": {}}] if use_grounding else []},
+        )
+        return self._safe_extract_json(response.text, "Tropes", title) or {"tropes": []}
 
 
 # --- THE MANAGER ---
@@ -356,7 +498,7 @@ class ScoutManager:
         self.scouts.append((scout, priority))
         self.scouts.sort(key=lambda x: x[1])
 
-    def enrich(self, title: str, author: str, format: str = "Paperback") -> dict:
+    def enrich(self, title: str, author: str, format: str = "Paperback", **kwargs) -> dict:
         """Aggregates metadata from all registered scouts."""
         merged_data = {
             "title": title,
@@ -364,6 +506,11 @@ class ScoutManager:
             "genres": set(),
             "moods": set(),
             "source_priority": [],
+            "author_style": {},
+            "narrator_styles": {},
+            "work_style": {},
+            "narrator_names": [],
+            "enriched_tropes": [],
         }
 
         for scout, _ in self.scouts:
@@ -371,7 +518,7 @@ class ScoutManager:
             if isinstance(scout, AudiobookScout | DirectKnowledgeScout) and "audiobook" not in format.lower():
                 continue
 
-            res = scout.search(title, author, format=format)
+            res = scout.search(title, author, format=format, narrators=merged_data["narrator_names"], **kwargs)
             if not res:
                 continue
 
@@ -391,12 +538,30 @@ class ScoutManager:
             merged_data["genres"].update(res.get("genres", []))
             merged_data["moods"].update(res.get("moods", []))
 
+            # Merge Tropes (LLMTropeScout specific)
+            if new_tropes := res.get("tropes"):
+                merged_data["enriched_tropes"].extend(new_tropes)
+
             # Merge Contributors (Maintain uniqueness by name + role)
             existing_contributors = {(c["name"], c["role"]) for c in merged_data["contributors"]}
             for new_c in res.get("contributors", []):
                 if (new_c["name"], new_c["role"]) not in existing_contributors:
                     merged_data["contributors"].append(new_c)
                     existing_contributors.add((new_c["name"], new_c["role"]))
+
+            # Merge Styles (StyleScout specific)
+            if style_data := res.get("author_style"):
+                merged_data["author_style"].update(style_data)
+            if w_style := res.get("work_style"):
+                merged_data["work_style"].update(w_style)
+            if n_styles := res.get("narrator_styles"):
+                merged_data["narrator_styles"].update(n_styles)
+
+            # Update Narrators list for StyleScout
+            if new_narrators := res.get("narrator_names"):
+                for n in new_narrators:
+                    if n not in merged_data["narrator_names"]:
+                        merged_data["narrator_names"].append(n)
 
             # Single-value fields loop
             for key in [
