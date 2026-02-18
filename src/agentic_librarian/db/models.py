@@ -6,8 +6,6 @@ from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-UTC = UTC
-
 
 class Base(DeclarativeBase):
     pass
@@ -91,7 +89,7 @@ class AuthorStyle(Base):
 
     author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True)
     style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
-    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'pacing', 'tone', 'style', 'humor', etc.
+    attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'pacing', 'tone', 'style', 'humor', etc.
 
     author: Mapped["Author"] = relationship(back_populates="styles")
     style: Mapped["Style"] = relationship(back_populates="author_links")
@@ -102,7 +100,7 @@ class NarratorStyle(Base):
 
     narrator_id: Mapped[UUID] = mapped_column(ForeignKey("narrators.id"), primary_key=True)
     style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
-    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'voice_differentiation', etc.
+    attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'voice_differentiation', etc.
 
     narrator: Mapped["Narrator"] = relationship(back_populates="styles")
     style: Mapped["Style"] = relationship(back_populates="narrator_links")
@@ -113,7 +111,7 @@ class WorkStyle(Base):
 
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True)
     style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
-    attribute_type: Mapped[str] = mapped_column(String, nullable=False)  # 'perspective', 'interiority', etc.
+    attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'perspective', 'interiority', etc.
 
     work: Mapped["Work"] = relationship(back_populates="styles")
     style: Mapped["Style"] = relationship(back_populates="work_links")

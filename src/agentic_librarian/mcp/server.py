@@ -20,6 +20,7 @@ from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload, selectinload
 
 from mcp.server.fastmcp import FastMCP
 
@@ -51,11 +52,6 @@ def get_server_status() -> str:
 def search_internal_database(target_tropes: list[str], target_styles: list[str] = None, limit: int = 10) -> list[dict]:
     """
     Performs a pgvector similarity search across tropes and literary styles.
-
-    Args:
-        target_tropes: List of trope names to search for.
-        target_styles: Optional list of style attributes (e.g. 'fast-paced', 'grimdark').
-        limit: Max number of results to return.
     """
     with db_manager.get_session() as session:
         tm = TropeManager(session=session)
@@ -104,7 +100,14 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
         if not candidate_work_ids:
             return []
 
-        works = session.query(Work).filter(Work.id.in_(list(candidate_work_ids))).limit(limit).all()
+        # Eager load contributors/authors for the final list
+        works = (
+            session.query(Work)
+            .options(joinedload(Work.contributors).joinedload(WorkContributor.author))
+            .filter(Work.id.in_(list(candidate_work_ids)))
+            .limit(limit)
+            .all()
+        )
 
         return [
             {
@@ -125,16 +128,27 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     ranked by similarity to current target vibes.
     """
     with db_manager.get_session() as session:
-        # 1. Get all unacted suggestions
-        query = session.query(Suggestions).filter(Suggestions.status == "Suggested").join(Work)
+        # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
+        query = (
+            session.query(Suggestions)
+            .filter(Suggestions.status == "Suggested")
+            .options(
+                joinedload(Suggestions.work).options(
+                    selectinload(Work.tropes).joinedload(WorkTrope.trope),
+                    selectinload(Work.styles).joinedload(WorkStyle.style),
+                    selectinload(Work.contributors)
+                    .joinedload(WorkContributor.author)
+                    .selectinload(Author.styles)
+                    .joinedload(AuthorStyle.style),
+                )
+            )
+        )
         suggestions = query.all()
 
         if not suggestions:
             return []
 
         # 2. Rank them semantically if targets are provided
-        # (For simplicity in this tool, we'll return them all if no targets,
-        # or perform a basic filter/rank if they are)
         if not target_tropes and not target_styles:
             return [
                 {

@@ -72,17 +72,18 @@ def test_search_internal_database_mock(mock_db_manager, mock_trope_manager, mock
     mock_query.join.return_value = mock_query
     mock_query.filter.return_value = mock_query
     mock_query.distinct.return_value = mock_query
+    mock_query.options.return_value = mock_query  # Support .options()
 
     # Now set the 'all' results based on the context
     # This is tricky with simple mocks. Let's simplify:
     # Just ensure candidate_work_ids gets something.
     mock_query.all.side_effect = [
-        [mock_trope],  # Tropes
-        [(mock_works[0].id,)],  # Trope Works (returning ID tuples as .all() on Work.id does)
-        [mock_style],  # Styles
-        [(mock_works[1].id,)],  # Author Styles
-        [],  # Work Styles
-        mock_works,  # Final Works
+        [mock_trope],  # search_internal_database (tropes similarity)
+        [(mock_works[0].id,)],  # search_internal_database (trope_works)
+        [mock_style],  # search_internal_database (styles similarity)
+        [(mock_works[1].id,)],  # search_internal_database (author_works)
+        [],  # search_internal_database (work_styles)
+        mock_works,  # search_internal_database (Final Works retrieval)
     ]
 
     results = search_internal_database(target_tropes=["fantasy"], target_styles=["grimdark"])
@@ -100,6 +101,7 @@ def test_get_unacted_suggestions_mock(mock_db_manager, mock_trope_manager, mock_
     session.query.return_value = mock_query
     mock_query.filter.return_value = mock_query
     mock_query.join.return_value = mock_query
+    mock_query.options.return_value = mock_query  # Support .options()
     mock_query.all.return_value = [mock_suggestion]
 
     results = get_unacted_suggestions(target_tropes=["fantasy"], target_styles=["grimdark"])

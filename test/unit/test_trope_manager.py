@@ -48,11 +48,21 @@ def trope_manager(mock_session, mock_genai_client):
     ],
 )
 def test_find_similar_trope_parameterized(trope_manager, existing_tropes, target_embedding, threshold, expected_found):
-    trope_manager.session.query.return_value.all.return_value = existing_tropes
+    # Setup mock chain for find_similar_trope
+    mock_query = trope_manager.session.query.return_value
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+
+    if expected_found:
+        # Return the "found" one (the last one with valid embedding in Case 3)
+        found_trope = [t for t in existing_tropes if t.embedding is not None][0]
+        mock_query.first.return_value = found_trope
+    else:
+        mock_query.first.return_value = None
+
     similar = trope_manager.find_similar_trope(target_embedding, threshold=threshold)
     if expected_found:
         assert similar is not None
-        # Check if it matches one of the provided ones
         assert similar.name in [t.name for t in existing_tropes]
     else:
         assert similar is None
@@ -63,8 +73,12 @@ def test_standardize_trope_new(trope_manager, mock_genai_client):
     mock_response.embeddings = [MagicMock(values=[0.5] * 1536)]
     mock_genai_client.models.embed_content.return_value = mock_response
 
-    trope_manager.session.query.return_value.filter.return_value.first.return_value = None
-    trope_manager.session.query.return_value.all.return_value = []
+    # Setup mock chain for standardize_trope
+    mock_query = trope_manager.session.query.return_value
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    # Return None for both exact name match check and semantic match check
+    mock_query.first.side_effect = [None, None]
 
     standardized = trope_manager.standardize_trope("Shiny New Trope")
     assert standardized.name == "Shiny New Trope"

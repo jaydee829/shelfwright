@@ -316,3 +316,33 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Safe imports across all environments, improved testability.
 - Cons: Slightly more complex internal state management.
+
+### ADR-031: Composite Primary Keys for Style Link Tables (2026-02-18)
+**Context:**
+- An author or work can have multiple style attributes (e.g., 'pacing' and 'tone') associated with the same `style_id` or different ones.
+- The previous schema `(author_id, style_id)` as the primary key prevented linking the same style to different attributes for the same entity.
+**Decision:**
+- Include `attribute_type` in the primary key for `AuthorStyle`, `NarratorStyle`, and `WorkStyle`.
+- The new composite primary key is `(entity_id, style_id, attribute_type)`.
+**Consequences:**
+- Pros: Enables rich, multi-dimensional style tagging; aligns with the `WorkContributor` pattern.
+- Cons: Requires database migration for existing installations.
+
+### ADR-032: SQL-Level Vector Similarity with pgvector (2026-02-18)
+**Context:**
+- Calculating cosine similarity in-memory by loading all tropes or styles is a performance bottleneck as the database grows.
+**Decision:**
+- Use `pgvector`'s `cosine_distance` operator directly in SQLAlchemy queries (`.order_by(Style.embedding.cosine_distance(vec))`).
+- Implement an `lru_cache` for embedding generation to reduce API costs and latency.
+**Consequences:**
+- Pros: Significant performance gains (uses database indexing), lower memory usage, reduced API costs.
+- Cons: Tightens dependency on `pgvector` functionality.
+
+### ADR-033: Eager Loading to Prevent N+1 Queries in Agent Tools (2026-02-18)
+**Context:**
+- MCP tools like `get_unacted_suggestions` were performing recursive queries for work metadata, tropes, and styles within loops.
+**Decision:**
+- Use SQLAlchemy `joinedload` and `selectinload` to eagerly fetch all required relationships in a single optimized query.
+**Consequences:**
+- Pros: Massive reduction in database round-trips; improved response time for the Librarian agent.
+- Cons: Slightly more complex query definitions.

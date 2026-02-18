@@ -38,12 +38,15 @@ def test_standardize_style_exact_match(mock_session, mock_genai_client):
 def test_standardize_style_semantic_match(mock_session, mock_genai_client):
     manager = StyleManager(session=mock_session, api_key="fake-key")
 
-    # 1. No exact match
-    mock_session.query.return_value.filter.return_value.first.return_value = None
-
-    # 2. Similar match exists
+    # 1. No exact match (first call to first())
+    # 2. Similar match exists (second call to first() through find_similar_style)
     similar_style = Style(name="brisk", category="Author", embedding=[0.1] * 1536)
-    mock_session.query.return_value.filter.return_value.all.return_value = [similar_style]
+
+    # Configure the chain for find_similar_style
+    mock_query = mock_session.query.return_value
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.first.side_effect = [None, similar_style]
 
     result = manager.standardize_style("fast", category="Author")
 
@@ -54,9 +57,11 @@ def test_standardize_style_semantic_match(mock_session, mock_genai_client):
 def test_standardize_style_create_new(mock_session, mock_genai_client):
     manager = StyleManager(session=mock_session, api_key="fake-key")
 
-    # No exact or similar match
-    mock_session.query.return_value.filter.return_value.first.return_value = None
-    mock_session.query.return_value.filter.return_value.all.return_value = []
+    # Configure the chain to return None for both exact and similar match
+    mock_query = mock_session.query.return_value
+    mock_query.filter.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.first.return_value = None
 
     result = manager.standardize_style("unique-style", category="Narrator")
 

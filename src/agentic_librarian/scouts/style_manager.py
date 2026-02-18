@@ -1,7 +1,7 @@
 import os
 
-import numpy as np
 from agentic_librarian.db.models import Style
+from agentic_librarian.scouts.utils import get_cached_embedding
 from google import genai
 from sqlalchemy.orm import Session
 
@@ -18,35 +18,25 @@ class StyleManager:
         self.model_name = "text-embedding-004"
 
     def _get_embedding(self, text: str) -> list[float]:
-        """Fetch embedding from Gemini."""
-        response = self.client.models.embed_content(model=self.model_name, contents=text)
-        return response.embeddings[0].values
+        """Fetch embedding from Gemini. Uses shared module-level cache."""
+        return get_cached_embedding(self.client, self.model_name, text)
 
     def find_similar_style(self, embedding: list[float], category: str, threshold: float = 0.85) -> Style | None:
-        """Find an existing style in the same category with cosine similarity above threshold."""
-        existing_styles = self.session.query(Style).filter(Style.category == category).all()
-        if not existing_styles:
-            return None
+        """Find an existing style in the same category with cosine similarity above threshold using SQL-level search."""
+        # pgvector cosine_distance is (1 - cosine_similarity)
+        # So similarity >= 0.85 is distance <= 0.15
+        max_distance = 1.0 - threshold
 
-        target = np.array(embedding)
-        best_match = None
-        highest_sim = -1.0
+        # Using pgvector's cosine_distance operator directly in SQL
+        similar_style = (
+            self.session.query(Style)
+            .filter(Style.category == category)
+            .filter(Style.embedding.cosine_distance(embedding) <= max_distance)
+            .order_by(Style.embedding.cosine_distance(embedding))
+            .first()
+        )
 
-        for style in existing_styles:
-            if style.embedding is None:
-                continue
-
-            existing = np.array(style.embedding)
-            similarity = np.dot(target, existing) / (np.linalg.norm(target) * np.linalg.norm(existing))
-
-            if similarity > highest_sim:
-                highest_sim = similarity
-                best_match = style
-
-        if highest_sim >= threshold:
-            return best_match
-
-        return None
+        return similar_style
 
     def standardize_style(self, raw_tag: str, category: str, threshold: float = 0.85) -> Style:
         """
