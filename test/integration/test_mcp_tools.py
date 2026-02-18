@@ -9,6 +9,7 @@ from agentic_librarian.mcp.server import (
     get_unacted_suggestions,
     log_suggestion,
     search_internal_database,
+    set_db_manager,
     update_reading_status,
 )
 from sqlalchemy import text
@@ -23,9 +24,10 @@ def standard_books():
 @pytest.mark.db_integration
 def test_mcp_discovery_and_filtering_real_db(db_url, standard_books):
     """Verify high-level MCP tool interactions using a real database."""
-    db_manager = DatabaseManager(db_url)
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
 
-    with db_manager.get_session() as session:
+    with test_db_manager.get_session() as session:
         session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
         # 1. Seed DB
@@ -64,8 +66,9 @@ def test_mcp_discovery_and_filtering_real_db(db_url, standard_books):
 
 @pytest.mark.db_integration
 def test_suggestion_persistence_real_db(db_url, standard_books):
-    db_manager = DatabaseManager(db_url)
-    with db_manager.get_session() as session:
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    with test_db_manager.get_session() as session:
         # Create a work to suggest
         author = Author(name="Persistence Author")
         session.add(author)

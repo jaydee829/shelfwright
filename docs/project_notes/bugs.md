@@ -29,3 +29,9 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
 - **Root Cause**: Tooling was defaulting to system Python 3.9 instead of the project's Conda environment (Python 3.12).
 - **Solution**: Explicitly targeted the environment binary (`.../.conda/envs/agentic_librarian/python.exe`) for all test runs and verified 3.12 compatibility.
 - **Prevention**: Always use the full path to the environment's python executable or ensure `conda run -n` is correctly resolving the local binary.
+
+### 2026-02-17 - Module-Level DB Initialization Crash in CI
+- **Issue**: Github CI failed during test collection with `ValueError: Database credentials not found`.
+- **Root Cause**: `DatabaseManager` was validating credentials in `__init__`, and `mcp/server.py` was instantiating a global manager at the module level. This caused crashes on import in any environment without a live DB.
+- **Solution**: Implemented lazy initialization in `DatabaseManager`. Engine and SessionFactory creation are now deferred until the first session request.
+- **Prevention**: Avoid heavy side effects (network, FS, cred validation) in `__init__` for global service managers.

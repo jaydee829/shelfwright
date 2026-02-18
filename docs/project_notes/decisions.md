@@ -306,3 +306,13 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Force the Critic agent to anchor its reasoning in these specific facts.
 **Consequences:**
 - Pros: Transparent, grounded, and evidence-based recommendations.
+
+### ADR-030: Lazy Initialization for Global Service Managers (2026-02-17)
+**Context:**
+- Instantiating global managers (like `DatabaseManager`) at the module level caused crashes during test collection in environments without full configuration (CI).
+**Decision:**
+- Use lazy initialization for all heavy service managers. Defer credential validation and resource allocation until the first actual use.
+- Add override hooks (`set_db_manager`) to allow test-time dependency injection.
+**Consequences:**
+- Pros: Safe imports across all environments, improved testability.
+- Cons: Slightly more complex internal state management.

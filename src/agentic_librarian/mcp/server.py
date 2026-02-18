@@ -30,6 +30,12 @@ mcp = FastMCP("agentic_librarian")
 db_manager = DatabaseManager()
 
 
+def set_db_manager(new_manager: DatabaseManager):
+    """Override the global db_manager (primarily for testing)."""
+    global db_manager
+    db_manager = new_manager
+
+
 @mcp.tool()
 def get_server_status() -> str:
     """Check if the Librarian MCP server is running and connected to DB."""
