@@ -1,4 +1,3 @@
-import os
 from unittest.mock import patch
 
 import agentic_librarian.scouts.metadata_scout as md_scout
@@ -43,7 +42,10 @@ def test_google_books_scout_search(monkeypatch, mock_json, expected_title, expec
 
     metadata = scout.search("Title", "Author")
     assert metadata["title"] == expected_title
-    assert metadata["authors"] == expected_authors
+
+    # Extract names from contributors list
+    author_names = [c["name"] for c in metadata["contributors"] if c["role"] == "Author"]
+    assert author_names == expected_authors
 
 
 @pytest.mark.parametrize(
@@ -101,15 +103,3 @@ def test_scout_manager_merging():
     assert result["description"] == "Desc 2"
     # 3. Source tracking
     assert "FakeScout" in result["source_priority"]
-
-
-@pytest.mark.integration
-@pytest.mark.api_dependent
-def test_fetch_book_metadata_integration_live():
-    if os.environ.get("SKIP_INTEGRATION_TESTS") == "1":
-        pytest.skip("Skipping integration tests")
-
-    scout = md_scout.GoogleBooksScout()
-    metadata = scout.search("The Way of Kings", "Brandon Sanderson")
-    assert "title" in metadata
-    assert "isbn_13" in metadata

@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 
 import pytest
-from agentic_librarian.db.models import Author, Trope, Work, WorkTrope
+from agentic_librarian.db.models import Author, Trope, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import (
     check_reading_history,
@@ -36,8 +36,12 @@ def test_mcp_discovery_and_filtering_real_db(db_url, standard_books):
             session.add(author)
             session.flush()
 
-            work = Work(title=book["title"], authors=[author], genres=book["genres"])
+            work = Work(title=book["title"], genres=book["genres"])
             session.add(work)
+            session.flush()
+
+            wc = WorkContributor(work=work, author=author, role="Author")
+            session.add(wc)
             session.flush()
 
             for trope_name in book["tropes"]:
@@ -73,8 +77,11 @@ def test_suggestion_persistence_real_db(db_url, standard_books):
         author = Author(name="Persistence Author")
         session.add(author)
         session.flush()
-        work = Work(title="Persistent Title", authors=[author])
+        work = Work(title="Persistent Title")
         session.add(work)
+        session.flush()
+        wc = WorkContributor(work=work, author=author, role="Author")
+        session.add(wc)
         session.flush()
 
         # Log it
