@@ -189,3 +189,160 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Better error visibility, easier debugging, more robust code.
 - Cons: Requires more explicit handling of edge cases.
+
+### ADR-018: Dual-Verification Pattern for Environment-Dependent Logic (2026-02-06)
+**Context:**
+- Development occurs in varied environments (Local Windows without Docker vs Docker-ready containers).
+- Database-dependent logic (vector search, complex SQL) is difficult to verify without a live instance.
+**Decision:**
+- Adopt a **Dual-Verification Pattern** for all database-dependent components:
+    1.  **Mock Verification**: Use unit tests with mocks to verify code logic and flow. These must run in all CI environments.
+    2.  **Live Verification**: Use `@pytest.mark.db_integration` tests to verify actual SQL and data behavior. These run only when a database is reachable.
+- Both test types must be implemented simultaneously to ensure parity.
+**Consequences:**
+- Pros: Guaranteed logic verification in CI, robust data verification in staging/local-docker, clear documentation of environmental dependencies.
+- Cons: Increased testing overhead (writing tests twice).
+
+### ADR-019: 4-Agent Specialist Mesh (2026-02-13)
+**Context:**
+- Monolithic agents are difficult to tune and suffer from "prompt bloat."
+- Need to separate "Strategic Planning" from "Data Scouting" and "Nuanced Ranking."
+**Decision:**
+- Adopt a 4-agent cognitive mesh:
+    1. **Librarian**: Orchestrator (Delegation).
+    2. **Analyst**: Strategist (Parameter extraction).
+    3. **Explorer**: Scout (External discovery).
+    4. **Critic**: Matchmaker (Ranking & Feedback).
+**Consequences:**
+- Pros: Specialized tuning for each agent, modular reasoning, easier to debug failure points.
+
+### ADR-020: Google AI Agent SDK for Mesh Communication (2026-02-13)
+**Context:**
+- Need a standardized protocol for discovery and delegation between agents.
+- The project is already in the Google/Gemini ecosystem.
+**Decision:**
+- Use the **Google AI Agent SDK** (implements the A2A protocol) to power the agent services.
+**Consequences:**
+- Pros: Native A2A support, seamless Gemini integration, scalable to Vertex AI Agent Engine.
+
+### ADR-021: Association Object for Contributor Roles (2026-02-17)
+**Context:**
+- Need to support multiple roles per work (e.g., Author, Editor, Translator) which a simple junction table or direct relationship cannot handle well.
+**Decision:**
+- Refactor `work_contributors` into a full association object `WorkContributor` with a `role` field.
+**Consequences:**
+- Pros: Robust support for anthologies and translated works.
+- Cons: Slightly more complex queries (extra join).
+
+### ADR-022: Relational Style Model & Vectorization (2026-02-17)
+**Context:**
+- Literary and performance styles (pacing, tone, voice diff) were stored in `JSONB` blobs, making them difficult to deduplicate or use for vector similarity.
+**Decision:**
+- Create a standardized `Style` model with embeddings.
+- Link Authors, Narrators, and Works to this model via association tables (`AuthorStyle`, `NarratorStyle`, `WorkStyle`).
+**Consequences:**
+- Pros: Semantic deduplication via `StyleManager`, enabling high-precision vector-based recommendations.
+
+### ADR-023: Informed Scouting (Contextual baseline) (2026-02-17)
+**Context:**
+- Scouting a book's style without knowing the author's general profile leads to redundant or inconsistent "deltas."
+**Decision:**
+- Pass the existing Author's styles from the database into the LLM prompt as a "baseline."
+- Instruct the LLM to only report stylistic deviations (deltas) from this baseline for the specific work.
+**Consequences:**
+- Pros: Cleaner work-specific metadata, higher accuracy in identifying "stylistic drift."
+
+### ADR-024: Style Inheritance & Override Pattern (2026-02-17)
+**Context:**
+- Most books by an author share their core style, but some vary (e.g., Running Man vs The Stand).
+**Decision:**
+- Implement an inheritance pattern in MCP tools (`get_work_details`):
+    1. Retrieve `WorkStyle` overrides first.
+    2. Inherit missing attributes from the primary `AuthorStyle` profile.
+**Consequences:**
+- Pros: Most granular data is always used; avoids massive data duplication.
+
+### ADR-025: Strict Import Hierarchy (2026-02-17)
+**Context:**
+- Circular dependencies were common between Models, Scouts, and Assets.
+**Decision:**
+- Move most just-in-time (JIT) imports to the top level to establish a clear hierarchy (Models -> Managers -> Scouts -> Assets).
+- Use service layers or manual `sys.path` injection only where absolutely necessary to maintain tool alignment.
+**Consequences:**
+- Pros: Better IDE support, predictable load order.
+- Cons: Requires careful management of model dependencies.
+
+### ADR-026: Temporal Re-read Decay Logic (2026-02-17)
+**Context:**
+- Need to allow recommendations of previously read books without spamming the user with recent reads.
+**Decision:**
+- Implement a 2.0-year "decay" threshold. Books read >2 years ago are marked as `is_re_read_candidate`.
+**Consequences:**
+- Pros: Surfaces beloved classics while maintaining discovery of new titles.
+
+### ADR-027: Hybrid Trope-Style Semantic Search (2026-02-17)
+**Context:**
+- Recommendations based on tropes alone are too plot-focused; styles alone are too vibe-focused.
+**Decision:**
+- Combine Trope and Style vector similarity into a single discovery tool (`search_internal_database`).
+- Average vectors within categories and merge candidate sets.
+**Consequences:**
+- Pros: Recommendations that match both the "what" (plot) and "how" (prose/tone) of user taste.
+
+### ADR-028: Tiered Feedback (Mood vs. Preference) (2026-02-17)
+**Context:**
+- User mood ("not in the mood for violence") shouldn't permanently block tropes or books.
+**Decision:**
+- Handle "Moods" as transient session constraints passed to the Critic for rank penalties.
+- Handle "Preferences" (Already Read, Dismissed) as persistent database status updates.
+**Consequences:**
+- Pros: Responsive to immediate state without losing long-term accuracy.
+
+### ADR-029: Trope-RAG Justification (2026-02-17)
+**Context:**
+- Users need to know *why* a book was suggested to build trust in the agent.
+**Decision:**
+- Retrieve trope names, general descriptions, and book-specific "justification" evidence from the DB.
+- Force the Critic agent to anchor its reasoning in these specific facts.
+**Consequences:**
+- Pros: Transparent, grounded, and evidence-based recommendations.
+
+### ADR-030: Lazy Initialization for Global Service Managers (2026-02-17)
+**Context:**
+- Instantiating global managers (like `DatabaseManager`) at the module level caused crashes during test collection in environments without full configuration (CI).
+**Decision:**
+- Use lazy initialization for all heavy service managers. Defer credential validation and resource allocation until the first actual use.
+- Add override hooks (`set_db_manager`) to allow test-time dependency injection.
+**Consequences:**
+- Pros: Safe imports across all environments, improved testability.
+- Cons: Slightly more complex internal state management.
+
+### ADR-031: Composite Primary Keys for Style Link Tables (2026-02-18)
+**Context:**
+- An author or work can have multiple style attributes (e.g., 'pacing' and 'tone') associated with the same `style_id` or different ones.
+- The previous schema `(author_id, style_id)` as the primary key prevented linking the same style to different attributes for the same entity.
+**Decision:**
+- Include `attribute_type` in the primary key for `AuthorStyle`, `NarratorStyle`, and `WorkStyle`.
+- The new composite primary key is `(entity_id, style_id, attribute_type)`.
+**Consequences:**
+- Pros: Enables rich, multi-dimensional style tagging; aligns with the `WorkContributor` pattern.
+- Cons: Requires database migration for existing installations.
+
+### ADR-032: SQL-Level Vector Similarity with pgvector (2026-02-18)
+**Context:**
+- Calculating cosine similarity in-memory by loading all tropes or styles is a performance bottleneck as the database grows.
+**Decision:**
+- Use `pgvector`'s `cosine_distance` operator directly in SQLAlchemy queries (`.order_by(Style.embedding.cosine_distance(vec))`).
+- Implement an `lru_cache` for embedding generation to reduce API costs and latency.
+**Consequences:**
+- Pros: Significant performance gains (uses database indexing), lower memory usage, reduced API costs.
+- Cons: Tightens dependency on `pgvector` functionality.
+
+### ADR-033: Eager Loading to Prevent N+1 Queries in Agent Tools (2026-02-18)
+**Context:**
+- MCP tools like `get_unacted_suggestions` were performing recursive queries for work metadata, tropes, and styles within loops.
+**Decision:**
+- Use SQLAlchemy `joinedload` and `selectinload` to eagerly fetch all required relationships in a single optimized query.
+**Consequences:**
+- Pros: Massive reduction in database round-trips; improved response time for the Librarian agent.
+- Cons: Slightly more complex query definitions.

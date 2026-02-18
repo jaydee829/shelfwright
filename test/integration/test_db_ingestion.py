@@ -3,7 +3,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkTrope
+from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from sqlalchemy import text
@@ -23,11 +23,15 @@ def test_full_ingestion_flow_real_db(db_url):
         session.flush()
         assert author.id is not None
 
-        # 2. Create Work linked to Author
-        work = Work(title=f"Integration Work {uuid.uuid4()}", authors=[author])
+        # 2. Create Work linked to Author via WorkContributor
+        work = Work(title=f"Integration Work {uuid.uuid4()}")
         session.add(work)
         session.flush()
         assert work.id is not None
+
+        wc = WorkContributor(work=work, author=author, role="Author")
+        session.add(wc)
+        session.flush()
 
         # 3. Create Edition linked to Work
         edition = Edition(work=work, format="hardcover", page_count=100)
@@ -44,7 +48,7 @@ def test_full_ingestion_flow_real_db(db_url):
         # Verify we can query it back and travers relationships
         session.expire_all()  # Force reload from DB
         saved_history = session.query(ReadingHistory).filter_by(id=history.id).one()
-        assert saved_history.edition.work.authors[0].name == author.name
+        assert saved_history.edition.work.contributors[0].author.name == author.name
 
 
 @pytest.mark.db_integration

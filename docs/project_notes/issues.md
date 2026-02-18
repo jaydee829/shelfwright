@@ -58,6 +58,26 @@ This file tracks work history and ticket references.
 - **URL**: N/A
 
 ### 2026-02-06 - ARC-009: Phase 2.5 - Abstract Scout Refactor
-- **Status**: In Progress
-- **Description**: Refactoring metadata scouting into a hierarchical abstract architecture (`BaseScout` -> `APIScout`/`LLMScout`).
+- **Status**: Completed
+- **Description**: Refactored metadata scouting into a hierarchical abstract architecture (`BaseScout` -> `APIScout`/`LLMScout`).
+
+### 2026-02-13 - REC-010: Phase 3 Step 1 - MCP Server Core
+- **Status**: Completed
+- **Description**: Initialized FastMCP server with `find_recommendations` and `log_suggestion`. Implemented Dual-Verification Pattern with shared JSON fixtures.
+
+### 2026-02-13 - REC-011: Phase 3 Step 2 - Agent Mesh Foundation
+- **Status**: Completed
+- **Description**: Refactored the Agent Mesh to use the Google ADK "Reasoning Dispatcher" pattern. Librarian now delegates to Analyst, Explorer, and Critic via `AgentTool`. Integrated coarse-grained MCP tools as specialist capabilities.
 - **URL**: N/A
+
+### 2026-02-17 - ARC-012: Phase 2.6 - ETL Hardening & Style Enrichment
+- **Status**: Completed
+- **Description**: Refactored contributor roles, implemented structured Style/Trope models with vectorization, and added "Informed Scouting" context.
+- **URL**: N/A
+- **Notes**: Includes `LLMTropeScout` and `StyleScout` with 9 author attributes.
+
+### 2026-02-17 - REC-013: Phase 3 - Recommendation Engine Completion
+- **Status**: Completed
+- **Description**: Implemented temporal re-read logic, hybrid trope/style search, unacted suggestion persistence, and Trope-RAG justifications.
+- **URL**: N/A
+- **Notes**: Completed the full Specialist Mesh feedback loop (Librarian, Analyst, Explorer, Critic).

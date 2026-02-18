@@ -15,6 +15,16 @@ class DatabaseManager:
     """Manages SQLAlchemy engine and session lifecycle."""
 
     def __init__(self, db_url: str = None):
+        self._db_url = db_url
+        self._engine = None
+        self._SessionFactory = None
+
+    def _initialize(self):
+        """Lazy initialization of engine and session factory."""
+        if self._engine is not None:
+            return
+
+        db_url = self._db_url
         if db_url is None:
             # Check for individual environment variables
             user = os.getenv("POSTGRES_USER")
@@ -50,13 +60,19 @@ class DatabaseManager:
         if ssl_mode:
             connect_args["sslmode"] = ssl_mode
 
-        self.engine = create_engine(db_url, connect_args=connect_args)
-        self.SessionFactory = sessionmaker(bind=self.engine)
+        self._engine = create_engine(db_url, connect_args=connect_args)
+        self._SessionFactory = sessionmaker(bind=self._engine)
+
+    @property
+    def engine(self):
+        self._initialize()
+        return self._engine
 
     @contextmanager
     def get_session(self) -> Session:
         """Context manager for database sessions."""
-        session = self.SessionFactory()
+        self._initialize()
+        session = self._SessionFactory()
         try:
             yield session
             session.commit()

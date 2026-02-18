@@ -85,3 +85,9 @@ def test_ingestor_to_models(sample_df):
     # Verify relationships (if possible without DB session)
     works = [m for m in models if isinstance(m, Work)]
     assert any(w.title == "Boundless" for w in works)
+
+    boundless = next(w for w in works if w.title == "Boundless")
+    # Using contributors relationship instead of authors
+    assert len(boundless.contributors) > 0
+    assert boundless.contributors[0].author.name == "R.A. Salvatore"
+    assert boundless.contributors[0].role == "Author"

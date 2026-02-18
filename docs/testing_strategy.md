@@ -20,6 +20,18 @@ This document outlines the mandatory testing standards for all agents and contri
     -   **Avoid Shortcuts**: Never implement logic that handles only specific test inputs.
     -   **Parameterization**: Use `pytest.mark.parametrize` to test logic against diverse data distributions.
     -   **Generalization**: Logic must pass tests for "expected" cases AND fail gracefully/correctly for edge cases.
+6.  **Dual-Verification Pattern**:
+    -   **Mock Test**: Verification of core logic using simulated data (runs in CI).
+    -   **Integration Test**: Marked `@pytest.mark.db_integration` to verify database/SQL behavior (runs when DB is available).
+    -   **Parity via Shared Fixtures**: To prevent drift, use shared JSON files in `test/data/` (e.g., `standard_books.json`).
+        -   Mocks should load this JSON to populate `return_value` / `side_effect`.
+        -   Integration tests should load this JSON to perform `INSERT` operations before verification.
+
+## Technical Debt Management
+
+1.  **Documentation**: Log assumed debt (missing live tests, edge cases) in `docs/project_notes/bugs.md` or Phase plans.
+2.  **Parity Requirement**: If a feature is developed using mocks due to environment constraints, it MUST have a corresponding `db_integration` test drafted simultaneously.
+3.  **Buy-down**: Resolve and verify logged debt before moving to subsequent development phases when the appropriate environment is available.
 
 ## Continuous Integration (CI)
 

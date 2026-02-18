@@ -1,73 +1,58 @@
 # Execution Plan: Agentic Librarian
 
 ## Phase 1: Infrastructure & Data Layer
-**Goal**: Establish the storage foundation and data models.
-*   **Order of Work**:
-    1.  Provision Postgres + `pgvector` and MLFlow via Docker.
-    2.  Implement SQLAlchemy models and connection string management.
-    3.  Set up DVC for tracking the evolution of `data/raw`.
-*   **Packages**: `sqlalchemy`, `pgvector`, `psycopg2-binary`, `mlflow`.
-*   **Files/Classes**:
-    *   `docker-compose.yml`: Container orchestration for PG, pgvector, and MLFlow.
-    *   `src/agentic_librarian/db/session.py`: Class `DatabaseManager` for session and engine lifecycle.
-    *   `src/agentic_librarian/db/models.py`: Declarative classes for `Author`, `Work`, `Edition`, `Narrator`, `Trope`, `ReadingHistory`.
-    *   [schema.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/schema.md): Reference for full table structures.
+**Goal**: Establish the storage foundation and data models. [COMPLETED]
 
 ## Phase 2: Flow 1 - Intake & Enrichment (ETL)
-**Goal**: Transform raw CSV reading history into a deep, vectorized knowledge base.
-*   **Order of Work**:
-    1.  Refactor CSV cleaning to map rows into internal `Edition` / `Work` objects.
-    2.  Implement the `MetadataScout` for basic facts (ISBN, Page Count).
-    3.  Implement the `TropeManager` for semantic tag deduplication and embedding.
-    4.  Orchestrate the flow with Dagster.
-*   **Packages**: `pandas`, `dagster`, `google-genai`, `requests`.
-*   **Files/Classes**:
-    *   `src/agentic_librarian/etl/ingest.py`: Class `HistoryIngestor` to read CSV and stage jobs.
-    *   `src/agentic_librarian/scouts/metadata_scout.py`: Update existing file; implement Class `MultiSourceScout` (Google Books + Hardcover).
-    *   `src/agentic_librarian/scouts/trope_manager.py`: [NEW] Class `TropeManager` to handle trope seeding, vectorization, and similarity deduplication.
-    *   `src/agentic_librarian/orchestration/assets.py`: [NEW] Dagster Asset definitions for `raw_history`, `enriched_metadata`, `vectorized_tropes`.
+**Goal**: Transform raw CSV reading history into a deep, vectorized knowledge base. [COMPLETED]
 
-## Phase 3: Flow 2 - Recommendation Engine (A2A & MCP)
-**Goal**: Build a user-facing agentic system using A2A for collaboration and MCP for data tools.
-*   **Architecture Strategy**:
-    - **Hybrid Access**: Flow 1 (ETL) remains on direct SQLAlchemy for performance. Flow 2 (Agents) uses MCP.
-    - **Coarse-Grained Tools**: MCP tools encapsulate complex logic (e.g., Search + Filter in one call) to ensure ACID compliance and reduce agent-tool chatter.
-*   **Order of Work**:
-    1.  **MCP Server Implementation**:
-        -   Expose the Postgres/pgvector database as an MCP server.
-        -   Implement coarse-grained tools like `find_recommendations` and `log_suggestion`.
-    2.  **Experiment: Search Strategies**:
-        -   Implement internal search tool using `google-genai`.
-        -   Implement standalone search service with A2A interface.
-        -   Compare results in MLFlow.
-    3.  **Intelligent Filter Agent**:
-        -   Implement re-read logic and duplicate avoidance via `find_recommendations`.
-    4.  **Trope-RAG Justification Engine**:
-        -   Build "Justification Prompts" that anchor the LLM's reasoning in retrieved trope facts.
-    5.  **A2A Agent Mesh**:
-        -   Coordinate Search, Filter, Rank agents via A2A messaging.
-*   **Packages**: `langchain`, `fastmcp`, `a2a-sdk` (or equivalent LF implementation), `google-genai`.
-*   **Files/Classes**:
-    *   `src/agentic_librarian/mcp/server.py`: [NEW] FastMCP server defining tools like `get_similar_tropes`, `check_read_status`.
-    *   `src/agentic_librarian/agents/a2a_mesh.py`: [NEW] Agent discovery and communication logic following A2A spec.
-    *   `src/agentic_librarian/agents/specialized/`: Individual agent logic for search, filter, and rank.
+## Phase 2.5: Abstract Scout Refactor
+**Goal**: Migrate metadata scouts to a hierarchical Strategy Pattern. [COMPLETED]
+
+## Phase 2.6: ETL Hardening & Style Enrichment
+**Goal**: Resolve identified gaps in Flow 1 metadata and ingestion logic.
+1.  **Contributor Role Support**: Refactor `HistoryIngestor` and scouts to map roles (Editor, Translator, etc.) into the `work_contributors` table.
+2.  **Deep Style Scouting**: Implement a specialized `LLMScout` to populate `style_attributes` (JSONB) for Authors and Narrators (pacing, tone, voice differentiation).
+
+## Phase 3: Flow 2 - Recommendation Engine (A2A Mesh)
+**Goal**: Build a cognitive mesh of specialized agents using the **Google AI Agent SDK**. [COMPLETED]
+
+### The 4-Agent Mesh
+1.  **The Librarian**: Orchestrator. Manages the conversation and delegates to specialists.
+2.  **The Analyst**: Strategist. Decomposes "vibes" into tropes and manages the long-term User Style Profile.
+3.  **The Explorer**: Scout. Web-based discovery using Gemini Search Grounding.
+4.  **The Critic**: Matchmaker. Nuanced ranking including negative signal feedback (e.g., social signals).
+
+### Order of Work
+1.  **MCP Server Implementation**:
+    -   Expose Postgres/pgvector as an MCP server.
+    -   Implement tools for `search_internal_database`, `get_unacted_suggestions`, and `update_reading_status`.
+    -   **Enhancement**: Update `check_reading_history` to include temporal re-read logic (>2 years since `date_completed`).
+2.  **Agent SDK Foundation**:
+    -   Initialize the **Google AI Agent SDK** framework.
+    -   Define the 4 Agent Services and their communication contracts.
+3.  **Memory & Logic**:
+    -   Implement "Re-read Decay" logic in the Librarian.
+    -   Implement "Persistence Logic" (re-prioritizing unread suggestions) in the Librarian.
+4.  **Style-Based Ranking**:
+    -   Enhance `Critic` and `search_internal_database` to query and weight results by Author/Narrator `style_attributes` (satisfying Level 5 Use Cases).
+5.  **Feedback Loop**:
+    -   Implement "Conversational Correction" (UC6.1) and "Social Signals" (UC6.2) handling.
+6.  **Trope-RAG Justification**:
+    -   Build prompt templates that anchor final recommendations in retrieved trope **names and descriptions** for evidence-based grounding.
 
 ## Phase 4: Web Interface & Analysis
 **Goal**: Visualize the reading history and interact with the Librarian.
 *   **Order of Work**:
     1.  Initialize Vite/React frontend.
-    2.  Build "Trope Cloud" and "Author Style" radar charts.
-    3.  Implement the Chat UI for recommendation requests.
-*   **Packages**: `vite`, `react`, `recharts`, `fastapi` (for the backend API).
-*   **Files/Classes**:
-    *   `src/agentic_librarian/api/main.py`: [NEW] FastAPI wrapper for the Recommendation Agent.
-    *   `src/agentic_librarian/ui/src/components/`: Reaction components for `ChatWindow`, `HistoryDashboard`.
+    2.  Build "Trope Cloud" and "Author Style" radar charts using Recharts.
+    3.  Implement the Chat UI for recommendation requests and feedback handling.
+*   **Packages**: `vite`, `react`, `recharts`, `fastapi`.
 
 ## Phase 5: MLOps & Verification
 **Goal**: Monitor performance and data health.
 *   **Order of Work**:
-    1.  Log prompt versions and completion rates to MLFlow.
-    2.  Implement a drift detection script for the `Tropes` table.
-*   **Files/Classes**:
-    *   `src/agentic_librarian/monitoring/drift_detector.py`: [NEW] Script to analyze trope distribution over time.
-    *   `test/system/test_full_flow.py`: Integration test from CSV update to Recommendation result.
+    1.  Log agent mesh performance (latency, delegation success) to MLFlow.
+    2.  Implement a drift detection script for the `Tropes` table to monitor semantic consistency.
+    3.  **E2E Testing**: Initialize `test/e2e/` with Playwright to verify full system flows (e.g., UC3.1, UC6.1).
+    4.  Final System E2E test: From raw CSV update to verified recommendation.

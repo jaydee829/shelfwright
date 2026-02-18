@@ -1,6 +1,6 @@
-# Verification Tutorial: Phases 1 & 2
+# Verification Tutorial: Phases 1, 2, & 3
 
-This tutorial guides you through verifying the Infrastructure (Phase 1) and the ETL Pipeline (Phase 2) of the `agentic_librarian` project within a Docker-based development environment.
+This tutorial guides you through verifying the Infrastructure (Phase 1), the ETL Pipeline (Phase 2), and the Recommendation Engine (Phase 3) of the `agentic_librarian` project within a Docker-based development environment.
 
 ## 1. Environment Setup
 
@@ -61,7 +61,50 @@ dagster dev -f src/agentic_librarian/orchestration/definitions.py
    - Select the `test_sample` partition.
    - Click **Launch Run**.
 
-## 4. Results Verification
+## 4. Phase 3 Verification (Recommendation Engine)
+
+### Start the MCP Server
+In your development environment:
+```bash
+# Start the FastMCP server
+python -m agentic_librarian.mcp.server
+```
+
+### Client Verification (Option A: CLI)
+Use the `mcp-cli` or similar tool to verify tools are discoverable:
+```bash
+npx @modelcontextprotocol/inspector python -m agentic_librarian.mcp.server
+```
+*This will open a web-based inspector to test your tools.*
+
+### Client Verification (Option B: Claude Desktop)
+1. Open your Claude Desktop configuration (`%APPDATA%\Claude\claude_desktop_config.json`).
+2. Add the librarian server:
+```json
+{
+  "mcpServers": {
+    "librarian": {
+      "command": "conda",
+      "args": ["run", "-n", "agentic_librarian", "python", "-m", "agentic_librarian.mcp.server"]
+    }
+  }
+}
+```
+3. Restart Claude Desktop. You should see the "hammer" icon for the Librarian tools.
+
+### Run Phase 3 Tests
+Phase 3 uses the **Dual-Verification Pattern** (Mock + Live).
+
+1. **Verify Core Logic (CI-Safe)**:
+   ```bash
+   pytest test/unit/test_recommendation_logic.py
+   ```
+2. **Verify Database Tools (Requires Docker)**:
+   ```bash
+   pytest -m "db_integration" test/integration/test_mcp_tools.py
+   ```
+
+## 5. Results Verification
 
 ### Verifying Relational Data
 Check that the ETL process has populated the database tables correctly.

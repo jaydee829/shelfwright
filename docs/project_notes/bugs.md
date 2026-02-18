@@ -17,3 +17,45 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
 - **Root Cause**: Manual string splitting `split("-")[0]` only handled "YYYY-MM-DD" format.
 - **Solution**: Implemented regex-based `_extract_year` helper in `MultiSourceScout` to find the first 4-digit sequence in the input string.
 - **Prevention**: Use robust parsing (regex) for external API data and maintain unit tests covering multiple date formats.
+
+### 2026-02-17 - Ruff E722 Bare Except Clauses
+- **Issue**: Bare `except:` clauses in `search_strategies.py` triggered Ruff E722 and violated the project's "No Broad Except-Pass" mandate.
+- **Root Cause**: Generic exception handling used for JSON parsing failures.
+- **Solution**: Replaced bare `except:` with `except json.JSONDecodeError as e:` and added warning prints for visibility into failures.
+- **Prevention**: Use specific exception types when possible and always include error logging/printing in catch blocks to maintain visibility of failures.
+
+### 2026-02-17 - Environment/Syntax Mismatch (Python 3.9 vs 3.12)
+- **Issue**: `TypeError` on union type hints (`|`) and `ImportError` on `datetime.UTC`.
+- **Root Cause**: Tooling was defaulting to system Python 3.9 instead of the project's Conda environment (Python 3.12).
+- **Solution**: Explicitly targeted the environment binary (`.../.conda/envs/agentic_librarian/python.exe`) for all test runs and verified 3.12 compatibility.
+- **Prevention**: Always use the full path to the environment's python executable or ensure `conda run -n` is correctly resolving the local binary.
+
+### 2026-02-17 - Module-Level DB Initialization Crash in CI
+- **Issue**: Github CI failed during test collection with `ValueError: Database credentials not found`.
+- **Root Cause**: `DatabaseManager` was validating credentials in `__init__`, and `mcp/server.py` was instantiating a global manager at the module level. This caused crashes on import in any environment without a live DB.
+- **Solution**: Implemented lazy initialization in `DatabaseManager`. Engine and SessionFactory creation are now deferred until the first session request.
+- **Prevention**: Avoid heavy side effects (network, FS, cred validation) in `__init__` for global service managers.
+
+### 2026-02-18 - In-Memory Vector Similarity Bottleneck (PR #12 Review)
+- **Issue**: `StyleManager` and `TropeManager` loaded all entities into memory for similarity calculations, causing a scalability risk.
+- **Root Cause**: Reliance on `numpy` for cosine similarity instead of leveraging database-native `pgvector` operators.
+- **Solution**: Refactored `find_similar_style` and `find_similar_trope` to use SQLAlchemy with `pgvector`'s `cosine_distance` operator at the SQL level.
+- **Prevention**: Prioritize database-level operations for large-scale vector or relational filtering.
+
+### 2026-02-18 - N+1 Queries in Librarian Agent Tools (PR #12 Review)
+- **Issue**: `get_unacted_suggestions` and `search_internal_database` were triggering multiple database round-trips for each item in the result set.
+- **Root Cause**: Accessing linked relationships (work contributors, tropes, styles) inside loops without eager loading.
+- **Solution**: Implemented `joinedload` and `selectinload` to fetch all required relationships in the primary query.
+- **Prevention**: Use SQLAlchemy `options` for eager loading in all tool/API endpoints that return lists of objects with relationships.
+
+### 2026-02-18 - Style Integrity Issue: Attribute Blocking
+- **Issue**: One author/work could not have multiple attributes associated with the same Style record (e.g. 'pacing' and 'tone').
+- **Root Cause**: `attribute_type` was not part of the primary key in Style link tables, causing unique constraint violations.
+- **Solution**: Updated `AuthorStyle`, `NarratorStyle`, and `WorkStyle` models to include `attribute_type` in the composite primary key.
+- **Prevention**: Ensure that all identifying metadata for a relationship is included in the primary key or unique constraints.
+
+### 2026-02-18 - Memory Leak in Cached Embedding Methods (Ruff B019)
+- **Issue**: Using `@lru_cache` on class methods in `StyleManager` and `TropeManager` created strong references to `self`, preventing garbage collection of instances.
+- **Root Cause**: Instance-bound methods in a global or long-lived cache prevent the instance from being freed.
+- **Solution**: Moved the cached logic to module-level helper functions (`_get_cached_embedding`) that take the client and parameters as arguments, decoupling the cache from the class instance.
+- **Prevention**: Never use `@lru_cache` on methods of classes that are instantiated frequently; use module-level helpers or `cached_property` instead.
