@@ -1,4 +1,24 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic_librarian_app
+    env_file: .env
+    environment:
+      # Ensure the app talks to the 'db' service over the compose network,
+      # regardless of what POSTGRES_HOST is set to in .env.
+      POSTGRES_HOST: db
+    volumes:
+      # Bind-mount the workspace over /app so the editable install (done at
+      # build time against /app) points at the live source.
+      - .:/app:cached
+    working_dir: /app
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: pgvector/pgvector:16-pg16
     container_name: agentic_librarian_db
