@@ -42,6 +42,29 @@ def db_url():
     return url
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _create_schema(db_url):
+    """Create the ORM schema in the live database for db_integration tests.
+
+    Runs once per session when a database is reachable (otherwise a no-op, since
+    those tests are skipped). The pgvector extension is ensured first because the
+    Style and Trope models declare Vector columns.
+    """
+    if not is_db_reachable():
+        yield
+        return
+
+    from agentic_librarian.db.models import Base
+    from sqlalchemy import text
+
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    Base.metadata.create_all(engine)
+    yield
+    engine.dispose()
+
+
 def pytest_configure(config):
     config.addinivalue_line("markers", "db_integration: mark test as requiring a live database (e.g. Docker)")
 
