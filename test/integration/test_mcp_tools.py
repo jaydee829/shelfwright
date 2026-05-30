@@ -51,6 +51,10 @@ def test_mcp_discovery_and_filtering_real_db(db_url, standard_books):
                 wt = WorkTrope(work=work, trope=trope)
                 session.add(wt)
 
+        # Commit the seed: the MCP tools open their own independent sessions
+        # (coarse-grained, ADR-013), so they can only see committed data.
+        session.commit()
+
         # 2. Verify search_internal_database
         with patch("agentic_librarian.mcp.server.TropeManager._get_embedding", return_value=[0.1] * 1536):
             results = search_internal_database(target_tropes=["any"])
@@ -83,6 +87,10 @@ def test_suggestion_persistence_real_db(db_url, standard_books):
         wc = WorkContributor(work=work, author=author, role="Author")
         session.add(wc)
         session.flush()
+
+        # Commit the seed: log_suggestion opens its own session and references
+        # work_id as an FK, so the work must be committed first.
+        session.commit()
 
         # Log it
         log_suggestion(work_id=str(work.id), context="Vibe", justification="Logic")

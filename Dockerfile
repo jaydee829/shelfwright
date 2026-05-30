@@ -24,14 +24,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add both possible uv install locations to PATH
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
-# Copy pyproject.toml first for better caching
+# Copy pyproject.toml first so the heavy dependency layer stays cached.
 COPY pyproject.toml .
 
-# Install Python dependencies with uv
+# Install dependencies. The local 'agentic_librarian' package can't be
+# registered yet (its source isn't present), but this caches the expensive
+# dependency layer.
 RUN uv pip install --system -e ".[dev]"
 
-# Copy the rest of the application
+# Copy the rest of the application.
 COPY . .
+
+# Re-run the editable install now that src/ is present, so 'agentic_librarian'
+# is actually importable. Dependencies are already satisfied, so this is fast.
+RUN uv pip install --system -e ".[dev]"
 
 # Install and configure en_US.UTF-8 locale
 RUN apt-get update && apt-get install -y locales \
