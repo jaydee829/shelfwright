@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import agentic_librarian.scouts.metadata_scout as md_scout
 import pytest
@@ -142,9 +142,34 @@ def test_create_scout_manager_registers_style_and_trope_scouts():
     assert {"HardcoverScout", "GoogleBooksScout", "AudiobookScout", "DirectKnowledgeScout"} <= registered
 
 
+def test_safe_extract_json_handles_fences_prose_and_none():
+    """Grounded LLM output may be fenced, prose-wrapped, or empty."""
+    scout = md_scout.LLMTropeScout(api_key="fake-key")
+
+    assert scout._safe_extract_json('```json\n{"a": 1}\n```', "t", "a") == {"a": 1}
+    assert scout._safe_extract_json('Here you go:\n{"a": 1}\nThanks.', "t", "a") == {"a": 1}
+    assert scout._safe_extract_json(None, "t", "a") is None
+
+
+def test_extract_text_falls_back_to_candidate_parts():
+    """When response.text is empty (grounded responses), text comes from the parts."""
+    scout = md_scout.LLMTropeScout(api_key="fake-key")
+
+    direct = MagicMock()
+    direct.text = "hello"
+    assert scout._extract_text(direct) == "hello"
+
+    grounded = MagicMock()
+    grounded.text = None
+    part = MagicMock()
+    part.text = '{"x": 1}'
+    grounded.candidates = [MagicMock(content=MagicMock(parts=[part]))]
+    assert scout._extract_text(grounded) == '{"x": 1}'
+
+
 @pytest.mark.api_dependent
 def test_enrich_with_real_scouts_produces_styles_and_tropes():
-    """Live: the wired scouts actually produce styles and tropes via Gemini."""
+    """Live: the wired scouts actually produce styles and tropes via Gemini (grounding on)."""
     from agentic_librarian.orchestration.definitions import create_scout_manager
 
     manager = create_scout_manager()
