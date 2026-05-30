@@ -11,8 +11,8 @@
 	"remoteUser": "appuser",
 	// Stop the db/mlflow containers when the dev container window closes.
 	"shutdownAction": "stopCompose",
-	// Surface Postgres and MLflow on the host.
-	"forwardPorts": [5432, 5000],
+	// Note: db (5432) and mlflow (5000) are already published to 127.0.0.1 by
+	// docker-compose.yml, so they are reachable on the host without forwardPorts.
 	"customizations": {
 		"vscode": {
 			"extensions": [
