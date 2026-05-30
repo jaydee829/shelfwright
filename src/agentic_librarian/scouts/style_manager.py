@@ -15,7 +15,7 @@ class StyleManager:
         if not self._api_key:
             raise ValueError("Google API key not set for StyleManager.")
         self.client = genai.Client(api_key=self._api_key)
-        self.model_name = "text-embedding-004"
+        self.model_name = "gemini-embedding-001"  # Current GA Gemini embedding model
 
     def _get_embedding(self, text: str) -> list[float]:
         """Fetch embedding from Gemini. Uses shared module-level cache."""
