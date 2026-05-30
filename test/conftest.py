@@ -86,8 +86,13 @@ def _clean_db_tables(request):
 
     from agentic_librarian.db.models import Base
 
+    sorted_tables = Base.metadata.sorted_tables
+    if not sorted_tables:
+        yield
+        return
+
     engine = create_engine(_test_db_url())
-    tables = ", ".join(f'"{t.name}"' for t in Base.metadata.sorted_tables)
+    tables = ", ".join(f'"{t.name}"' for t in sorted_tables)
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
     engine.dispose()

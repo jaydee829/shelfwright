@@ -16,4 +16,6 @@ def get_cached_embedding(client: genai.Client, model_name: str, text: str) -> li
         contents=text,
         config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS),
     )
+    if not response or not response.embeddings:
+        raise ValueError(f"Embedding generation returned no result for text: {text!r}")
     return response.embeddings[0].values
