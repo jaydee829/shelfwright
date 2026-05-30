@@ -366,8 +366,11 @@ class StyleScout(LLMScout):
         # 1. Scout Author Style
         style_data["author_style"] = self.scout_author_style(author)
 
-        # 2. Scout Work Specific Style (Informed by author baseline)
-        style_data["work_style"] = self.scout_work_style(title, author, author_baseline=author_baseline)
+        # 2. Scout Work Specific Style (Informed Scouting, ADR-023). For a new author the
+        # DB baseline (author_styles kwarg) is empty, so fall back to the author style we
+        # just scouted above rather than scouting the work with no baseline.
+        baseline = author_baseline or style_data["author_style"]
+        style_data["work_style"] = self.scout_work_style(title, author, author_baseline=baseline)
 
         # 3. Scout Narrator Styles (if provided in kwargs)
         narrators = kwargs.get("narrators", [])
