@@ -346,3 +346,25 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Massive reduction in database round-trips; improved response time for the Librarian agent.
 - Cons: Slightly more complex query definitions.
+
+### ADR-034: Isolated Database for `db_integration` Tests (2026-05-30)
+**Status:** Accepted — implementation pending (tracked as tech debt).
+
+**Context:**
+- The `db_integration` suite had never been executed before the stack ran under Docker on a single machine. Once it ran, several isolation problems surfaced:
+  - Tests run against the **same** database the application uses (`POSTGRES_DB=agentic_librarian`), so they pollute real data.
+  - There is **no cleanup** between tests, so rows accumulate across runs. This caused non-deterministic passes (e.g. `search_internal_database` returned results from a *previous* test's committed rows rather than the current test's seed).
+  - The MCP tools intentionally open their own independent sessions and commit (coarse-grained design, ADR-013), so a single outer transaction cannot wrap a test for rollback — the tools' commits escape it.
+
+**Decision:**
+- Run `db_integration` tests against a **dedicated test database** (e.g. `agentic_librarian_test` via a `TEST_POSTGRES_DB` / `DATABASE_URL` override), never the application database.
+- Reset state with a **function-scoped autouse fixture that truncates all tables** before each `db_integration` test (the session-scoped fixture from the schema-creation work continues to create the schema + `vector` extension once).
+
+**Alternatives Considered:**
+- Per-test transactional rollback (bind the session to a SAVEPOINT) → rejected: the MCP tools open new sessions on the engine and commit, so their writes bypass and survive the test's transaction.
+- `drop_all` + `create_all` per test → rejected: slower than `TRUNCATE`, and still unsafe against the app DB without a separate database.
+- Status quo (shared DB, commit seed before tool calls — the stopgap applied in commit 43ed411) → insufficient: it makes the current assertions pass but leaves data pollution and run-to-run drift.
+
+**Consequences:**
+- Pros: Deterministic, repeatable integration tests; no risk to application/dev data; aligns with the Dual-Verification mandate (ADR-018).
+- Cons: Requires provisioning a separate database in local/compose/CI environments and a truncation fixture; marginally more setup per test run.
