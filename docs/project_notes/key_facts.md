@@ -7,9 +7,12 @@ This file tracks important project configuration, constants, and environment det
 - **Description**: An agentic system for processing reading history and providing personalized book recommendations.
 
 ## Local Development
-- **OS**: Windows
-- **Conda Environment**: `agentic_librarian`
-- **Execution Rule**: Always run commands (pytest, ruff, dagster, etc.) prefixed with `conda run -n agentic_librarian` to ensure the correct dependencies are used.
+- **OS**: Windows host + WSL2; the dev container is Debian (`python:3.11`).
+- **Primary Workflow**: VS Code **Dev Container** (compose-integrated) on a WSL2 clone of the repo. "Reopen in Container" builds the `app` image and starts `db` (pgvector) and `mlflow` together on one Docker network (see `docker-compose.yml` / `.devcontainer/devcontainer.json`, PR #15).
+  - **Setup**: `cp .env.example .env` and fill in the DB password + API keys *before* opening the container.
+  - **Execution Rule**: Run commands (`pytest`, `ruff`, `dagster dev`) **directly** inside the container. Dependencies are installed `--system` via `uv` (editable `-e ".[dev]"`); there is **no conda env** in the container.
+  - **DB host**: inside the container the app reaches Postgres at host `db`; from the Windows/WSL host use `localhost` against the published port.
+- **Legacy (deprecated)**: An earlier machine used a Conda env `agentic_librarian` with `conda run -n agentic_librarian <cmd>`. This does **not** apply in the devcontainer. (Docs paths referencing `Justin.Merrick` are from that machine.)
 
 ## Technology Stack
 - **Database**: PostgreSQL with `pgvector` (1536 dims for tropes)

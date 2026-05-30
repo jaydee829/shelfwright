@@ -1,0 +1,17 @@
+# Keep the build context small and avoid copying host-only / generated data.
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+.dvc/cache
+.dvc/tmp
+data/raw/*.csv
+mlruns
+.env
+*.log

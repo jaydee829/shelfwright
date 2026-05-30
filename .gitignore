@@ -44,5 +44,8 @@ Thumbs.db
 .coverage
 htmlcov/
 
+# MLflow artifacts (bind-mounted by docker-compose)
+mlruns/
+
 # uv
 .uv/

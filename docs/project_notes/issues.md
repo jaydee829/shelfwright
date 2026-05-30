@@ -81,3 +81,18 @@ This file tracks work history and ticket references.
 - **Description**: Implemented temporal re-read logic, hybrid trope/style search, unacted suggestion persistence, and Trope-RAG justifications.
 - **URL**: N/A
 - **Notes**: Completed the full Specialist Mesh feedback loop (Librarian, Analyst, Explorer, Critic).
+
+### 2026-05-30 - ENV-014: Centralize Dev to WSL2 + Compose Devcontainer
+- **Status**: In Progress
+- **Description**: Wired the dev container to `docker-compose.yml` (app + db + mlflow on one network), completed `.env.example`, added `.dockerignore`, and ignored `mlruns/`. Centralizing development onto a single machine under Claude Code.
+- **URL**: https://github.com/jaydee829/agentic_librarian/pull/15
+- **Notes**: Prior machine used a Conda env + a non-Docker agent harness; this machine uses the compose-based devcontainer (deps installed `--system` in-container, no conda). `key_facts.md` Local Development updated accordingly.
+
+### 2026-05-30 - ENV-015: MVP Wiring Gaps Identified (Deep-Dive Findings)
+- **Status**: Blocked
+- **Description**: Repository deep dive found two "implemented-but-not-wired" gaps to close for a working MVP.
+- **URL**: N/A
+- **Notes**:
+    1. `StyleScout` and `LLMTropeScout` are implemented + unit-tested but **never registered** in `create_scout_manager()` (`orchestration/definitions.py`). Live enrichment therefore yields empty author/work/narrator styles and no curated tropes — `vectorized_tropes` always hits the genres/moods fallback.
+    2. `ExplorerAgent` (`agents/services.py`) has no search tool wired; the real search strategies in `agents/search_strategies.py` are only used by the standalone `run_search_experiment` benchmark.
+    - Blocked on local devcontainer being runnable (ENV-014) to verify fixes against a live DB.

@@ -1,4 +1,27 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic_librarian_app
+    env_file: .env
+    environment:
+      # Ensure the app talks to the 'db' service over the compose network,
+      # regardless of what POSTGRES_HOST is set to in .env.
+      POSTGRES_HOST: db
+      # Log experiments to the MLflow server on the compose network
+      # (no DB credentials needed on the client side).
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      # Bind-mount the workspace over /app so the editable install (done at
+      # build time against /app) points at the live source.
+      - .:/app:cached
+    working_dir: /app
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+
   db:
     image: pgvector/pgvector:16-pg16
     container_name: agentic_librarian_db
@@ -24,16 +47,16 @@ services:
     restart: always
     ports:
       - "127.0.0.1:${MLFLOW_PORT:-5000}:5000"
-    environment:
-      - MLFLOW_TRACKING_URI=${MLFLOW_TRACKING_URI}
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - ./mlruns:/app/mlruns
+    # Backend store is constructed from the POSTGRES_* vars (single source of
+    # truth, same as the db service) — no duplicated credentials.
     command: >
       mlflow server
-      --backend-store-uri ${MLFLOW_TRACKING_URI}
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-agentic_librarian}
       --default-artifact-root /app/mlruns
       --host 0.0.0.0
 
