@@ -5,7 +5,9 @@ from agentic_librarian.scouts.metadata_scout import (
     DirectKnowledgeScout,
     GoogleBooksScout,
     HardcoverScout,
+    LLMTropeScout,
     ScoutManager,
+    StyleScout,
 )
 from dagster import Definitions, load_assets_from_modules
 
@@ -19,6 +21,10 @@ def create_scout_manager() -> ScoutManager:
     manager.register_scout(GoogleBooksScout(), priority=2)
     manager.register_scout(AudiobookScout(), priority=3)
     manager.register_scout(DirectKnowledgeScout(), priority=4)
+    # StyleScout runs after the audiobook scouts so narrator_names is populated
+    # before it scouts narrator styles. LLMTropeScout extracts deep tropes.
+    manager.register_scout(StyleScout(), priority=5)
+    manager.register_scout(LLMTropeScout(), priority=6)
     return manager
 
 

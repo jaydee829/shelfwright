@@ -55,3 +55,31 @@ def test_style_scout_search_mode(mock_genai_client):
     assert "narrator_styles" in res
     assert "Jefferson Mays" in res["narrator_styles"]
     assert res["author_style"]["pacing"] == "fast"
+
+
+def test_work_style_baseline_falls_back_to_scouted_author_style(mock_genai_client):
+    """New author: no DB baseline is supplied, so work-style scouting should use the
+    freshly scouted author style as the baseline (Informed Scouting, ADR-023)."""
+    scout = StyleScout(api_key="fake-key")
+
+    with (
+        patch.object(scout, "scout_author_style", return_value={"pacing": "fast"}),
+        patch.object(scout, "scout_work_style", return_value={}) as m_work,
+        patch.object(scout, "scout_narrator_style", return_value={}),
+    ):
+        scout.search("Book", "Author")  # no author_styles kwarg
+
+    assert m_work.call_args.kwargs["author_baseline"] == {"pacing": "fast"}
+
+
+def test_work_style_baseline_prefers_db_baseline_when_provided(mock_genai_client):
+    """Existing author: the DB baseline passed via author_styles wins over a fresh scout."""
+    scout = StyleScout(api_key="fake-key")
+
+    with (
+        patch.object(scout, "scout_author_style", return_value={"pacing": "fast"}),
+        patch.object(scout, "scout_work_style", return_value={}) as m_work,
+    ):
+        scout.search("Book", "Author", author_styles={"tone": "dark"})
+
+    assert m_work.call_args.kwargs["author_baseline"] == {"tone": "dark"}

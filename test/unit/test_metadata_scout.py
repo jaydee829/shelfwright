@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import agentic_librarian.scouts.metadata_scout as md_scout
 import pytest
@@ -103,3 +103,77 @@ def test_scout_manager_merging():
     assert result["description"] == "Desc 2"
     # 3. Source tracking
     assert "FakeScout" in result["source_priority"]
+
+
+def test_scout_manager_merges_styles_and_tropes():
+    """enrich() must surface StyleScout/LLMTropeScout outputs into the merged record."""
+    manager = md_scout.ScoutManager()
+
+    class FakeScout(md_scout.BaseScout):
+        def __init__(self, data):
+            super().__init__()
+            self.data = data
+
+        def search(self, t, a, **k):
+            return self.data
+
+    style_scout = FakeScout({"author_style": {"pacing": "fast"}, "work_style": {"perspective": "1st person"}})
+    trope_scout = FakeScout({"tropes": [{"trope_name": "The Chosen One", "relevance_score": 0.9}]})
+    manager.register_scout(style_scout, priority=1)
+    manager.register_scout(trope_scout, priority=2)
+
+    result = manager.enrich("Title", "Author")
+
+    assert result["author_style"] == {"pacing": "fast"}
+    assert result["work_style"] == {"perspective": "1st person"}
+    assert result["enriched_tropes"] == [{"trope_name": "The Chosen One", "relevance_score": 0.9}]
+
+
+def test_create_scout_manager_registers_style_and_trope_scouts():
+    """ENV-015: the StyleScout and LLMTropeScout must be wired into the live ScoutManager."""
+    from agentic_librarian.orchestration.definitions import create_scout_manager
+
+    manager = create_scout_manager()
+    registered = {type(scout).__name__ for scout, _ in manager.scouts}
+
+    assert "StyleScout" in registered
+    assert "LLMTropeScout" in registered
+    # The previously-registered scouts must remain.
+    assert {"HardcoverScout", "GoogleBooksScout", "AudiobookScout", "DirectKnowledgeScout"} <= registered
+
+
+def test_safe_extract_json_handles_fences_prose_and_none():
+    """Grounded LLM output may be fenced, prose-wrapped, or empty."""
+    scout = md_scout.LLMTropeScout(api_key="fake-key")
+
+    assert scout._safe_extract_json('```json\n{"a": 1}\n```', "t", "a") == {"a": 1}
+    assert scout._safe_extract_json('Here you go:\n{"a": 1}\nThanks.', "t", "a") == {"a": 1}
+    assert scout._safe_extract_json(None, "t", "a") is None
+
+
+def test_extract_text_falls_back_to_candidate_parts():
+    """When response.text is empty (grounded responses), text comes from the parts."""
+    scout = md_scout.LLMTropeScout(api_key="fake-key")
+
+    direct = MagicMock()
+    direct.text = "hello"
+    assert scout._extract_text(direct) == "hello"
+
+    grounded = MagicMock()
+    grounded.text = None
+    part = MagicMock()
+    part.text = '{"x": 1}'
+    grounded.candidates = [MagicMock(content=MagicMock(parts=[part]))]
+    assert scout._extract_text(grounded) == '{"x": 1}'
+
+
+@pytest.mark.api_dependent
+def test_enrich_with_real_scouts_produces_styles_and_tropes():
+    """Live: the wired scouts actually produce styles and tropes via Gemini (grounding on)."""
+    from agentic_librarian.orchestration.definitions import create_scout_manager
+
+    manager = create_scout_manager()
+    result = manager.enrich("The Way of Kings", "Brandon Sanderson", format="hardcover")
+
+    assert result["author_style"], "expected non-empty author_style from StyleScout"
+    assert result["enriched_tropes"], "expected non-empty enriched_tropes from LLMTropeScout"

@@ -70,20 +70,51 @@ class APIScout(BaseScout):
 class LLMScout(BaseScout):
     """Abstract base class for scouts using LLMs for unstructured data."""
 
-    def __init__(self, api_key: str = None, model_name: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str = None, model_name: str = None):
         # Fallback to GOOGLE_SEARCH_API_KEY if no specific key provided
         key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not key:
             raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
         self._client = genai.Client(api_key=self.api_key)
-        self.model_name = model_name
+        # Configurable so a deployment can pick a model its quota/billing allows.
+        # gemini-2.0-flash has no free-tier quota on some keys; flash-lite does.
+        self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+    def _extract_text(self, response) -> str | None:
+        """Return the response text, falling back to concatenated candidate parts.
+
+        Grounded / multi-part responses can leave ``response.text`` empty even though
+        the answer is present in the candidate parts.
+        """
+        if getattr(response, "text", None):
+            return response.text
+        try:
+            parts = response.candidates[0].content.parts or []
+        except (AttributeError, IndexError, TypeError):
+            return None
+        texts = [p.text for p in parts if getattr(p, "text", None)]
+        return "".join(texts) if texts else None
 
     def _safe_extract_json(self, response_text: str, title: str, author: str, retry_count: int = 0) -> dict | None:
         """Cleans and parses LLM JSON output with descriptive error logging."""
+        if not response_text:
+            # The model can return no text part (e.g. a blocked response). Surface it as
+            # a retry rather than crashing on .strip().
+            print(f"Warning: empty LLM response for '{title}' by '{author}'.")
+            return None
+
         text = response_text.strip()
-        if text.startswith("```"):
-            text = re.sub(r"^```(?:json)?\n?|\n?```$", "", text, flags=re.MULTILINE)
+
+        # Pull the JSON payload out of the response, tolerating code fences and any
+        # prose a grounded model may add before or after it.
+        fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
+        if fence:
+            text = fence.group(1).strip()
+        else:
+            block = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
+            if block:
+                text = block.group(1).strip()
 
         try:
             data = json.loads(text)
@@ -291,10 +322,10 @@ class AudiobookScout(LLMScout):
         DO NOT hallucinate or guess.
         """
         response = self._client.models.generate_content(model=self.model_name, contents=prompt)
-        data = self._safe_extract_json(response.text, title, author)
+        data = self._safe_extract_json(self._extract_text(response), title, author)
         if data is None:
             response = self._client.models.generate_content(model=self.model_name, contents=prompt + "\nJSON ONLY.")
-            data = self._safe_extract_json(response.text, title, author, retry_count=1)
+            data = self._safe_extract_json(self._extract_text(response), title, author, retry_count=1)
 
         # Normalize keys
         if data and "narrators" in data:
@@ -336,7 +367,7 @@ class DirectKnowledgeScout(LLMScout):
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
 
-        data = self._safe_extract_json(response.text, title, author)
+        data = self._safe_extract_json(self._extract_text(response), title, author)
         if data is None:
             prompt += "\n\nSTRICT: Return valid JSON ONLY."
             response = self._client.models.generate_content(
@@ -344,7 +375,7 @@ class DirectKnowledgeScout(LLMScout):
                 contents=prompt,
                 config={"tools": [{"google_search": {}}] if use_grounding else []},
             )
-            data = self._safe_extract_json(response.text, title, author, retry_count=1)
+            data = self._safe_extract_json(self._extract_text(response), title, author, retry_count=1)
 
         if data and "narrators" in data:
             data["narrator_names"] = data.pop("narrators")
@@ -366,8 +397,11 @@ class StyleScout(LLMScout):
         # 1. Scout Author Style
         style_data["author_style"] = self.scout_author_style(author)
 
-        # 2. Scout Work Specific Style (Informed by author baseline)
-        style_data["work_style"] = self.scout_work_style(title, author, author_baseline=author_baseline)
+        # 2. Scout Work Specific Style (Informed Scouting, ADR-023). For a new author the
+        # DB baseline (author_styles kwarg) is empty, so fall back to the author style we
+        # just scouted above rather than scouting the work with no baseline.
+        baseline = author_baseline or style_data["author_style"]
+        style_data["work_style"] = self.scout_work_style(title, author, author_baseline=baseline)
 
         # 3. Scout Narrator Styles (if provided in kwargs)
         narrators = kwargs.get("narrators", [])
@@ -402,7 +436,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(response.text, "Work Style", title) or {}
+        return self._safe_extract_json(self._extract_text(response), "Work Style", title) or {}
 
     def scout_author_style(self, name: str) -> dict:
         """Extracts style attributes for an author."""
@@ -428,7 +462,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(response.text, "Author Style", name) or {}
+        return self._safe_extract_json(self._extract_text(response), "Author Style", name) or {}
 
     def scout_narrator_style(self, name: str) -> dict:
         """Extracts performance attributes for an audiobook narrator."""
@@ -453,7 +487,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(response.text, "Narrator Style", name) or {}
+        return self._safe_extract_json(self._extract_text(response), "Narrator Style", name) or {}
 
 
 class LLMTropeScout(LLMScout):
@@ -481,7 +515,7 @@ class LLMTropeScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(response.text, "Tropes", title) or {"tropes": []}
+        return self._safe_extract_json(self._extract_text(response), "Tropes", title) or {"tropes": []}
 
 
 # --- THE MANAGER ---
