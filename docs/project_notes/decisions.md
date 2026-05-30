@@ -348,7 +348,7 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Cons: Slightly more complex query definitions.
 
 ### ADR-034: Isolated Database for `db_integration` Tests (2026-05-30)
-**Status:** Accepted — implementation pending (tracked as tech debt).
+**Status:** Accepted and implemented (2026-05-30) in `test/conftest.py` — a dedicated `*_test` database is auto-created and all tables are truncated before each `db_integration` test.
 
 **Context:**
 - The `db_integration` suite had never been executed before the stack ran under Docker on a single machine. Once it ran, several isolation problems surfaced:
