@@ -125,11 +125,22 @@ database (ADR-034).
 
 ## Testing & CI
 
-- **CI (deterministic):** `test_internal_retrieval.py` runs wherever Postgres is reachable.
-  **Planning must verify** whether `db_integration` tests actually execute in the GitHub CI
-  workflow (i.e. CI provides a Postgres service) or only in the devcontainer. If CI has no
-  Postgres, the ranking proof runs in the devcontainer only — state that explicitly and
-  treat it as acceptable (the suite still gates locally/pre-commit).
+Today's CI (`.github/workflows/lint.yml`) runs `pytest -m "not api_dependent and not slow"`
+with **no Postgres service**, so `db_integration` tests auto-skip in CI (conftest's
+`is_db_reachable()` is False) — they only run in the devcontainer. This spec **adds a
+Postgres service to CI** so the new ranking proof and the existing `db_integration` tests
+actually gate there.
+
+- **Thread 1b — Postgres in CI.** Add a `pgvector/pgvector:pg16` service container to the
+  `ci` job with a `pg_isready` health check, and set the connection env vars the conftest
+  reads (`POSTGRES_HOST=localhost`, `POSTGRES_PORT=5432`, `POSTGRES_USER=librarian`,
+  `POSTGRES_PASSWORD=librarian_secret_password`, `POSTGRES_DB=agentic_librarian`). The
+  conftest then creates the dedicated `*_test` database, the `vector` extension, and the
+  schema. The pgvector image is required because the conftest runs
+  `CREATE EXTENSION vector`. Cost: one image pull + a handful of small DB tests
+  (~20–40s) — no meaningful slowdown.
+- **CI (deterministic):** with Postgres present, `test_internal_retrieval.py` (and the
+  existing `db_integration` suite) run in CI. The fixture's cached vectors mean no API call.
 - **`api_dependent` (never in CI):** `test_flow1_etl_live.py`; the fixture generator is a
   manually-run script, not a test.
 - The full offline suite stays green.
@@ -139,7 +150,8 @@ database (ADR-034).
 - **Create:** `scripts/gen_trope_embedding_fixture.py`, `test/data/trope_embeddings.json`,
   `test/integration/test_internal_retrieval.py`, `test/data/etl_smoke/<key>.csv`,
   `test/integration/test_flow1_etl_live.py`
-- **Modify:** `docs/project_notes/decisions.md` (ADR-039), and on completion
+- **Modify:** `.github/workflows/lint.yml` (add the Postgres/pgvector service + env),
+  `docs/project_notes/decisions.md` (ADR-039), and on completion
   `docs/project_notes/issues.md` (record Spec 3 outcome / any new REC).
 - **Delete:** `src/agentic_librarian/agents/search_strategies.py`,
   `test/unit/test_search_strategies.py`
@@ -152,7 +164,8 @@ de-dup and scout-enrichment of discoveries (REC-016); SEC-001/002 hardening (sec
 ## Success criteria
 
 1. A `db_integration` test proves `search_internal_database` ranks a semantically-near work
-   above a far one using real cached embeddings (ordering assertion).
+   above a far one using real cached embeddings (ordering assertion), and it **runs in CI**
+   (Postgres/pgvector service added to the workflow).
 2. `get_user_trope_preferences` has integration coverage against a seeded DB.
 3. An `api_dependent` smoke materializes the real Flow 1 ETL on ≥1 physical book and asserts
    the DB is populated (Work + embedded Trope + Author + Edition + ReadingHistory); the
