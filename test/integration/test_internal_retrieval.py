@@ -1,11 +1,12 @@
 import json
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from agentic_librarian.db.models import Author, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import Author, Edition, ReadingHistory, Trope, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.mcp.server import search_internal_database, set_db_manager
+from agentic_librarian.mcp.server import get_user_trope_preferences, search_internal_database, set_db_manager
 
 FIXTURE = json.loads((Path(__file__).parent.parent / "data" / "trope_embeddings.json").read_text())
 ROMANCE = ["enemies to lovers", "slow burn romance"]
@@ -54,3 +55,35 @@ def test_search_ranks_semantically_near_work_first(db_url, monkeypatch):
 
     titles = [r["title"] for r in results]
     assert titles[:2] == ["A Courtship", "The Long War"], titles
+
+
+@pytest.mark.db_integration
+def test_user_trope_preferences_ranked_by_frequency(db_url):
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+
+    with test_db_manager.get_session() as session:
+        # "Fantasy" appears in 2 read works, "Mystery" in 1 -> Fantasy ranks first.
+        fantasy = Trope(name="Fantasy")
+        mystery = Trope(name="Mystery")
+        session.add_all([fantasy, mystery])
+        session.flush()
+        for i, tropes in enumerate([[fantasy, mystery], [fantasy]]):
+            author = Author(name=f"Auth {i}")
+            session.add(author)
+            session.flush()
+            work = Work(title=f"Book {i}")
+            session.add(work)
+            session.flush()
+            session.add(WorkContributor(work=work, author=author, role="Author"))
+            for t in tropes:
+                session.add(WorkTrope(work=work, trope=t))
+            edition = Edition(work=work, format="hardcover")
+            session.add(edition)
+            session.flush()
+            session.add(ReadingHistory(edition=edition, date_completed=date(2020, 1, 1)))
+        session.commit()
+
+    prefs = get_user_trope_preferences()
+    assert prefs[0] == "Fantasy", prefs
+    assert set(prefs) == {"Fantasy", "Mystery"}, prefs
