@@ -59,6 +59,7 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
         sm = StyleManager(session=session)
 
         candidate_work_ids = set()
+        avg_vector = None
 
         # 1. Trope Search
         if target_tropes:
@@ -97,18 +98,43 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
             candidate_work_ids.update([w[0] for w in author_works])
             candidate_work_ids.update([w[0] for w in work_styles])
 
-        # 3. Final Work Retrieval
+        # 3. Final Work Retrieval, ordered by semantic relevance.
         if not candidate_work_ids:
             return []
 
-        # Eager load contributors/authors for the final list
+        # Order candidates by their closest matching trope to the query vector (cosine
+        # distance). Candidates that arrived via style-only matching (no matching trope)
+        # are appended afterward in a stable order. Without this, the set + IN filter
+        # returns rows in arbitrary DB order.
+        ordered_ids: list[UUID] = []
+        if target_tropes and avg_vector is not None:
+            ranked = (
+                session.query(Work.id)
+                .join(WorkTrope, WorkTrope.work_id == Work.id)
+                .join(Trope, Trope.id == WorkTrope.trope_id)
+                .filter(Work.id.in_(list(candidate_work_ids)))
+                .group_by(Work.id)
+                .order_by(func.min(Trope.embedding.cosine_distance(avg_vector)))
+                .limit(limit)
+                .all()
+            )
+            ordered_ids = [w[0] for w in ranked]
+        # sorted() so the style-only leftovers have a deterministic order (set iteration
+        # order is process-randomized).
+        for wid in sorted(candidate_work_ids):
+            if wid not in ordered_ids:
+                ordered_ids.append(wid)
+        ordered_ids = ordered_ids[:limit]
+
+        # Eager load contributors/authors, then restore the ranked order.
         works = (
             session.query(Work)
             .options(joinedload(Work.contributors).joinedload(WorkContributor.author))
-            .filter(Work.id.in_(list(candidate_work_ids)))
-            .limit(limit)
+            .filter(Work.id.in_(ordered_ids))
             .all()
         )
+        works_by_id = {w.id: w for w in works}
+        ordered_works = [works_by_id[wid] for wid in ordered_ids if wid in works_by_id]
 
         return [
             {
@@ -118,7 +144,7 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
                 "genres": w.genres,
                 "description": w.description,
             }
-            for w in works
+            for w in ordered_works
         ]
 
 

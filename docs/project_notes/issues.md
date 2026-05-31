@@ -96,6 +96,12 @@ This file tracks work history and ticket references.
     1. **[Resolved]** `StyleScout` and `LLMTropeScout` were implemented + unit-tested but never registered in `create_scout_manager()`, so live enrichment produced empty styles and no curated tropes (`vectorized_tropes` fell back to genres/moods). Now registered at priorities 5/6 (StyleScout after the audiobook scouts so `narrator_names` is populated first). Covered by mock unit tests + an `api_dependent` live smoke test.
     2. **[Resolved]** `ExplorerAgent` (`agents/services.py`) had no search tool wired. Spec 2 (PR #20) added `GoogleSearchTool(bypass_multi_tools_limit=True)` + its own `EXPLORER_MODEL` (gemini-2.5-flash) + an anti-hallucination instruction; grounded web discovery verified live (real 2024 titles). `search_strategies.py` left as-is.
 
+### 2026-05-31 - REC-017: Audiobook Smoke Coverage Under Free-Tier Quota Constraint
+- **Status**: Open (Spec 5 or later)
+- **Description**: The Flow 1 smoke test cannot include an audiobook row without risking `429 RESOURCE_EXHAUSTED` on the free-tier Gemini API (20 requests/day). The audiobook path (AudiobookScout + DirectKnowledgeScout + StyleScout + LLMTropeScout) fires 4+ LLM calls per row, exhausting the daily budget on active dev days.
+- **URL**: N/A
+- **Notes**: Two options: (a) upgrade to a paid Gemini tier; (b) add a separate fixture-driven audiobook smoke that pre-seeds Audible HTML and only exercises the scraping + JSON extraction path (no quota-consuming generate_content calls). The physical-book smoke in `test_flow1_etl_live.py` covers the happy path end-to-end; audiobook is left for a future tier upgrade or fixture-based approach. See bugs.md for the rate-limit failure details.
+
 ### 2026-05-31 - REC-016: Spec 4 Requirements Surfaced by Spec 2 Live Runs
 - **Status**: Open (Spec 4)
 - **Description**: Live Librarian→Explorer runs confirmed the Explorer's grounded discovery works and surfaced recommendation-flow work for Spec 4.

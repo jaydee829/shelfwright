@@ -11,6 +11,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: librarian
+          POSTGRES_PASSWORD: librarian_secret_password
+          POSTGRES_DB: agentic_librarian
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
@@ -31,5 +45,14 @@ jobs:
           SKIP=pytest pre-commit run --all-files --show-diff-on-failure
 
       - name: Run tests
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: librarian
+          POSTGRES_PASSWORD: librarian_secret_password
+          POSTGRES_DB: agentic_librarian
+          # Managers construct a genai.Client on the search path; a dummy key is enough
+          # (embeddings are patched in tests, so no network call is made).
+          GOOGLE_SEARCH_API_KEY: dummy-key-for-construction
         run: |
           pytest -m "not api_dependent and not slow"

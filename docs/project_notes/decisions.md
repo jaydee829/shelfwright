@@ -429,3 +429,22 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: security gets a recurring, low-overhead review without front-loading a heavy security spec or slipping the recommendation MVP; findings are tracked, not lost.
 - Cons: concrete hardening of SEC-001/002 is deferred to Spec 4 — acceptable given the single-user, bounded blast radius today.
+
+### ADR-039: Remove the Orphaned `search_strategies.py` Experiment; Functional Naming is Canonical (2026-05-31)
+**Context:**
+- `agents/search_strategies.py` defined `InternalSearchAgent` (Mode A: in-process genai
+  grounding) and `ExternalA2AAgent` (Mode B: simulated A2A) — both *web* search in the old,
+  confusing sense flagged by ADR-035. It was a standalone MLflow experiment with no
+  production importer, used the quota-dead `gemini-2.0-flash`, and was superseded by the
+  Spec 2 Explorer (grounded `GoogleSearchTool`).
+
+**Decision:**
+- Remove the module and its unit test. Functional naming is canonical: **internal =
+  retrieval from our Postgres DB** (`search_internal_database`, `get_user_trope_preferences`,
+  `get_unacted_suggestions`, `check_reading_history`); **external = web discovery** (the
+  Explorer). `agents/services.py` already conforms — no rename needed there.
+
+**Consequences:**
+- Less dead code and one fewer source of the internal/external ambiguity. The deferred
+  in-process-vs-A2A (Mode A/B) comparison, if ever revisited, is an implementation detail of
+  external discovery (ADR-035), not a functional split.
