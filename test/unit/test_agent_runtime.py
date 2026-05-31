@@ -132,12 +132,19 @@ def test_explorer_has_a_google_search_tool():
 
 
 @pytest.mark.api_dependent
-def test_librarian_delegates_discovery_to_explorer():
-    # Asks for a recent release the model cannot know without searching, so a
-    # substantive answer implies the grounded Explorer ran. (Strict grounding
-    # correctness is a manual check — results vary.)
-    response = runtime.run_recommendation(
-        "Find me a grimdark fantasy novel published in 2024 that I probably haven't read."
-    )
+def test_explorer_discovers_real_books():
+    # The Explorer in isolation: its grounded google_search should return a
+    # substantive, book-naming response for a recent query. This verifies Spec 2's
+    # deliverable (grounded web discovery). Strict grounding correctness is a manual
+    # check (results vary). The full Librarian orchestration is non-deterministic
+    # (clarify vs delegate vs no-response) and is covered by Spec 4.
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+
+    runtime._ensure_adk_credentials()
+    explorer = create_agent_mesh()["explorer"]
+    runner = Runner(agent=explorer, app_name=runtime.APP_NAME, session_service=InMemorySessionService())
+    conv = runtime.start_conversation(runner=runner)
+    response = conv.send("Find grimdark fantasy novels published in 2024. List each title and author.")
     assert isinstance(response, str)
     assert len(response.strip()) > 30
