@@ -6,13 +6,16 @@
 
 ## Goal
 
-Make the existing 4-agent recommendation mesh actually **run**. Today none of the
-`LlmAgent`s have a model and there is no ADK Runner/entrypoint, so the mesh cannot
-execute at all. This spec adds the minimal runtime so the Librarian executes a user
-prompt and delegates to Analyst/Explorer/Critic, returning a final text response.
+Make the existing 4-agent recommendation mesh actually **run**, as a **multi-turn
+conversation** with the Librarian — the user talks to a librarian who remembers the
+exchange and knows their reading history. Today none of the `LlmAgent`s have a model and
+there is no ADK Runner/entrypoint, so the mesh cannot execute at all. This spec adds the
+minimal runtime: assign models, host the Librarian in an ADK Runner with a reusable
+session, and expose a conversation API that delegates to Analyst/Explorer/Critic.
 
-**Success = "runs & delegates" (smoke):** `run_recommendation(prompt)` returns a
-non-empty response without error. Recommendation *quality* is explicitly out of scope
+**Success = "runs & delegates" (smoke):** a conversation can be started and one or more
+messages sent, each returning a non-empty response without error, with the session
+remembering prior turns. Recommendation *quality* and response styling are out of scope
 (Specs 2–4).
 
 ## Approach
@@ -29,13 +32,21 @@ Rejected: (B) manual Python orchestration of the sub-agents and (C) ADK
 ### New module: `agents/runtime.py`
 - `build_runner() -> Runner` — calls `create_agent_mesh()`, wraps the Librarian in a
   `Runner(agent=librarian, app_name="agentic_librarian", session_service=InMemorySessionService())`.
-- `async def arun_recommendation(prompt, user_id="local", session_id=None) -> str` —
-  creates a session, calls
-  `runner.run_async(user_id, session_id, new_message=types.Content(role="user", parts=[types.Part(text=prompt)]))`,
-  iterates events, and returns the text of the `event.is_final_response()` event (or a
-  clear fallback string if there is none).
-- `def run_recommendation(prompt) -> str` — `asyncio.run(arun_recommendation(prompt))`;
-  the public synchronous entrypoint.
+- `class LibrarianConversation` — holds the `Runner` plus a fixed `(user_id, session_id)`:
+  - `async def asend(message) -> str` / `def send(message) -> str` — sends one turn via
+    `runner.run_async(user_id, session_id, new_message=types.Content(role="user", parts=[types.Part(text=message)]))`,
+    iterates events, returns the `event.is_final_response()` text (or a clear fallback if
+    none). **Reusing the same session across calls is what gives the Librarian
+    conversational memory.**
+- `async def start_conversation(user_id="local") -> LibrarianConversation` — creates the
+  session and returns a conversation handle.
+- `def run_recommendation(prompt) -> str` — one-shot convenience: start a conversation
+  and send a single message (`asyncio.run` wrapper). Handy for tests and simple queries.
+
+The `SessionService` is `InMemorySessionService` — conversations are remembered within a
+run, not across restarts. Durable "knows everything you've read" comes from the Postgres
+reading-history DB via the agents' tools, not the session. `DatabaseSessionService`
+(Postgres-backed, resumable conversations) is a deferred upgrade.
 
 ### Agent models (`agents/services.py`)
 - Each `LlmAgent` receives `model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")`
@@ -57,14 +68,17 @@ Rejected: (B) manual Python orchestration of the sub-agents and (C) ADK
 ## Data flow
 
 ```
-run_recommendation("something like Dune")
-  → InMemorySessionService.create_session(...)
-  → Runner.run_async(new_message=user prompt)
+conv = start_conversation(user_id="local")     # creates session S
+conv.send("something like The Way of Kings but grittier")
+  → Runner.run_async(session S, user prompt)
   → Librarian LLM runs, delegates via AgentTool to Analyst / Explorer / Critic
       (their DB FunctionTools query Postgres; on an empty/seed DB they return [] — ok)
-  → Librarian composes a final response
-  → return final_response text
+  → final response text returned
+conv.send("I already read The Blade Itself")    # same session S → Librarian recalls the prior turn
+  → ... → updated response
 ```
+
+`run_recommendation("...")` is the single-turn shortcut over the same path.
 
 ## Error handling
 - The entrypoint returns a clear message when there is no final response / no text parts.
@@ -76,14 +90,18 @@ run_recommendation("something like Dune")
 - **Mock unit tests** (run in CI, no API/DB):
   - `build_runner()` constructs a `Runner` without error.
   - Every agent in `create_agent_mesh()` has a non-empty `model`.
-  - `run_recommendation` returns the final text when `Runner.run_async` is mocked to
-    yield a final-response event.
+  - A conversation returns the final text when `Runner.run_async` is mocked to yield a
+    final-response event; two `send` calls reuse the same `session_id` (memory).
+  - `run_recommendation` returns the final text (one-shot path).
 - **`@pytest.mark.api_dependent` live smoke** (manual; needs a key + DB up):
   - `run_recommendation("something like Dune")` returns a non-empty string.
+  - A two-turn conversation works (the second turn can reference the first).
 
 ## Out of scope (later specs)
 - Explorer web-search grounding (Spec 2).
 - Seeded-DB internal retrieval quality (Spec 3).
-- Coherent end-to-end recommendation + Trope-RAG justification, e2e test (Spec 4).
-- Per-agent model tuning, response streaming, multi-turn conversation state beyond a
-  single session.
+- Coherent end-to-end recommendation, response styling (authors vs books vs
+  authors + an example book), and Trope-RAG justification; e2e test (Spec 4).
+- Per-agent model tuning, response streaming.
+- Persistent / resumable conversations across app restarts (`DatabaseSessionService`) —
+  a later upgrade; Spec 1 uses in-memory sessions.
