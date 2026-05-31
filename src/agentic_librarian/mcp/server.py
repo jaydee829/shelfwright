@@ -352,12 +352,12 @@ def get_work_details(work_id: str) -> dict:
     # run (the psycopg2 UUID cast would otherwise raise). Resolving discoveries to DB
     # works / enriching new ones is Spec 4.
     try:
-        UUID(str(work_id))
+        uuid_obj = UUID(str(work_id).strip())
     except (ValueError, TypeError):
         return {}
 
     with db_manager.get_session() as session:
-        work = session.query(Work).filter_by(id=work_id).first()
+        work = session.query(Work).filter_by(id=uuid_obj).first()
         if not work:
             return {}
 
