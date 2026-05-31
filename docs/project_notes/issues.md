@@ -94,4 +94,15 @@ This file tracks work history and ticket references.
 - **URL**: N/A
 - **Notes**:
     1. **[Resolved]** `StyleScout` and `LLMTropeScout` were implemented + unit-tested but never registered in `create_scout_manager()`, so live enrichment produced empty styles and no curated tropes (`vectorized_tropes` fell back to genres/moods). Now registered at priorities 5/6 (StyleScout after the audiobook scouts so `narrator_names` is populated first). Covered by mock unit tests + an `api_dependent` live smoke test.
-    2. **[Open]** `ExplorerAgent` (`agents/services.py`) has no search tool wired; the real search strategies in `agents/search_strategies.py` are only used by the standalone `run_search_experiment` benchmark.
+    2. **[Resolved]** `ExplorerAgent` (`agents/services.py`) had no search tool wired. Spec 2 (PR #20) added `GoogleSearchTool(bypass_multi_tools_limit=True)` + its own `EXPLORER_MODEL` (gemini-2.5-flash) + an anti-hallucination instruction; grounded web discovery verified live (real 2024 titles). `search_strategies.py` left as-is.
+
+### 2026-05-31 - REC-016: Spec 4 Requirements Surfaced by Spec 2 Live Runs
+- **Status**: Open (Spec 4)
+- **Description**: Live Librarian→Explorer runs confirmed the Explorer's grounded discovery works and surfaced recommendation-flow work for Spec 4.
+- **URL**: N/A
+- **Notes**:
+    1. **Web-candidate de-dup (Case 1)**: when the Explorer surfaces a title already in the DB (a prior suggestion or read book), resolve it to the existing `Work` (title/author match) and prefer the DB entry over the bare discovery.
+    2. **Scout-enrichment of new discoveries (Case 2)**: a web-discovered book not in the DB has no tropes/styles; enrich it via the `ScoutManager` (Flow 1) so the Critic can rank/justify it — new machinery (e.g. an `enrich_work` tool, or a discover→enrich→persist→rank step).
+    3. **Librarian one-shot orchestration**: `run_recommendation` is one *call*, not a forced answer; the conversational Librarian sometimes asks a clarifying question or delegates non-deterministically. Tune so a one-shot recommendation request commits to a best-effort recommendation.
+    4. **Multi-agent final-response extraction**: in some delegation runs the Librarian ends on a tool/transfer event with no text, so `asend` returned "(no response)". Harden the runtime's final-text extraction for multi-agent chains.
+    - Interim safety net shipped in Spec 2: `get_work_details` guards non-UUID ids (see bugs.md).

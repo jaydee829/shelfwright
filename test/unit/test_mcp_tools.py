@@ -194,3 +194,11 @@ def test_get_work_details_mock(mock_db_manager):
     assert details["tropes"][0]["justification"] == "manifests in test"
     assert details["styles"]["pacing"] == "Cinematic"
     assert details["styles"]["tone"] == "Cynical"
+
+
+def test_get_work_details_returns_empty_on_non_uuid():
+    # A web-discovered candidate has no DB id; an agent may pass a title instead of a
+    # UUID. That must return no details, not crash the run (the guard short-circuits
+    # before any DB access, so no db_manager mock is needed).
+    assert get_work_details("the daughters war") == {}
+    assert get_work_details("") == {}

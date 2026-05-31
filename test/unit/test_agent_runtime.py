@@ -111,3 +111,40 @@ def test_live_conversation_runs():
     # Second turn shares the session (memory).
     second = conv.send("Actually, something more recent.")
     assert isinstance(second, str) and second.strip()
+
+
+def test_explorer_uses_explorer_model_env(monkeypatch):
+    monkeypatch.setenv("EXPLORER_MODEL", "gemini-test-explorer")
+    mesh = create_agent_mesh()
+    assert mesh["explorer"].model == "gemini-test-explorer"
+
+
+def test_explorer_model_defaults_to_flash(monkeypatch):
+    monkeypatch.delenv("EXPLORER_MODEL", raising=False)
+    mesh = create_agent_mesh()
+    assert mesh["explorer"].model == "gemini-2.5-flash"
+
+
+def test_explorer_has_a_google_search_tool():
+    mesh = create_agent_mesh()
+    tool_types = [type(t).__name__ for t in mesh["explorer"].tools]
+    assert any("GoogleSearch" in name for name in tool_types), tool_types
+
+
+@pytest.mark.api_dependent
+def test_explorer_discovers_real_books():
+    # The Explorer in isolation: its grounded google_search should return a
+    # substantive, book-naming response for a recent query. This verifies Spec 2's
+    # deliverable (grounded web discovery). Strict grounding correctness is a manual
+    # check (results vary). The full Librarian orchestration is non-deterministic
+    # (clarify vs delegate vs no-response) and is covered by Spec 4.
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
+
+    runtime._ensure_adk_credentials()
+    explorer = create_agent_mesh()["explorer"]
+    runner = Runner(agent=explorer, app_name=runtime.APP_NAME, session_service=InMemorySessionService())
+    conv = runtime.start_conversation(runner=runner)
+    response = conv.send("Find grimdark fantasy novels published in 2024. List each title and author.")
+    assert isinstance(response, str)
+    assert len(response.strip()) > 30

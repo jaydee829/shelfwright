@@ -403,3 +403,29 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Supports the Level 4–6 conversational use cases within a session; the durable user profile persists in the DB regardless of session lifetime.
 - Conversations are not resumable across app restarts until `DatabaseSessionService` is adopted.
 - Realized by ADR-035 Spec 1; design at `docs/superpowers/specs/2026-05-30-mesh-runtime-foundation-design.md`.
+
+### ADR-037: Pin ADK at 2.1.0 for the Mesh; Defer Upgrade (2026-05-31)
+**Context:**
+- Spec 2 needs grounded web search on the Explorer, which is a *sub-agent*. ADK forbids built-in tools in sub-agents, but `GoogleSearchTool(bypass_multi_tools_limit=True)` converts the built-in search into a function-calling tool that is allowed there.
+- A live spike on the **installed ADK 2.1.0** verified this works — both standalone and via Librarian→Explorer (`AgentTool`) — returning real recent (2024) titles. Note: `use_interactions_api` (the newer documented form) is **not** a real parameter in 2.1.0 (it is silently ignored); `bypass_multi_tools_limit` works on its own.
+
+**Decision:**
+- Keep `google-adk` pinned at **2.1.0** for now. Implement the Explorer's grounded search with `GoogleSearchTool(bypass_multi_tools_limit=True)` (no Interactions API).
+- Do **not** upgrade ADK mid-feature: the Spec 1 mesh runtime (`Runner`, `LlmAgent`, sessions, `AgentTool`) is built and verified against 2.1.0, and ADK is fast-moving with pinned siblings (`a2a-sdk`, `google-genai`).
+
+**Consequences:**
+- Pros: minimal, spike-verified path; no risk to the just-merged Spec 1 runtime.
+- **Tech debt (deferred):** a benign `[EXPERIMENTAL] JSON_SCHEMA_FOR_FUNC_DECL` warning; we forgo newer native multi-tool / Interactions-API ergonomics and easy grounding-citation surfacing. **An ADK upgrade is its own future task** — do it when a newer capability is actually needed (e.g. grounding citations for Spec 4), with a full re-verification of the mesh.
+
+### ADR-038: Security Review is a Per-Spec Practice (2026-05-31)
+**Context:**
+- The system is an agentic mesh with live web grounding (Spec 2) and a mutable database. The two classic exposures are SQL injection (DB) and prompt injection (LLM mesh acting on untrusted web text). A PR #20 review prompted making security review a standing practice rather than ad hoc.
+- Current posture audited: SQLi is mitigated by construction (SQLAlchemy ORM, parameterized queries, no raw/`text()` SQL); crash-on-bad-input was the class closed by the `get_work_details` UUID guard.
+
+**Decision:**
+- Run a lightweight threat-model checklist (untrusted inputs, trust boundaries, tool input validation, write authorization, secret handling) during **each spec's review**, and log findings in `docs/project_notes/security.md`.
+- Logged two open findings now: **SEC-001** (prompt injection via the Explorer's web grounding) and **SEC-002** (write-tool authorization). Both are slated for **Spec 4**, where the full write-path mesh comes together.
+
+**Consequences:**
+- Pros: security gets a recurring, low-overhead review without front-loading a heavy security spec or slipping the recommendation MVP; findings are tracked, not lost.
+- Cons: concrete hardening of SEC-001/002 is deferred to Spec 4 — acceptable given the single-user, bounded blast radius today.
