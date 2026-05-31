@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from uuid import UUID
 
 import numpy as np
 from agentic_librarian.db.models import (
@@ -346,6 +347,15 @@ def get_user_trope_preferences(limit: int = 20) -> list[str]:
 @mcp.tool()
 def get_work_details(work_id: str) -> dict:
     """Returns metadata, tropes, and merged style profile for a work."""
+    # Web-discovered candidates have no DB id; an agent may pass a title instead of a
+    # UUID. Guard the lookup so a bad work_id returns no details rather than crashing the
+    # run (the psycopg2 UUID cast would otherwise raise). Resolving discoveries to DB
+    # works / enriching new ones is Spec 4.
+    try:
+        UUID(str(work_id))
+    except (ValueError, TypeError):
+        return {}
+
     with db_manager.get_session() as session:
         work = session.query(Work).filter_by(id=work_id).first()
         if not work:
