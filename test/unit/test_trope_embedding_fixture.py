@@ -3,7 +3,7 @@ from pathlib import Path
 
 import numpy as np
 
-FIXTURE = Path("test/data/trope_embeddings.json")
+FIXTURE = Path(__file__).parent.parent / "data" / "trope_embeddings.json"
 ROMANCE = ["enemies to lovers", "slow burn romance"]
 GRIMDARK = ["grimdark war", "brutal military strategy"]
 
