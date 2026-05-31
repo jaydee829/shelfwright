@@ -95,6 +95,8 @@ def test_suggestion_persistence_real_db(db_url, standard_books):
         # Log it
         log_suggestion(work_id=str(work.id), context="Vibe", justification="Logic")
 
-        # Verify it shows up in unacted suggestions
-        results = get_unacted_suggestions(target_tropes=["any"])
+        # Verify it shows up in unacted suggestions. Patch the embedding so semantic ranking
+        # needs no API call — db_integration now runs in CI with only a dummy key.
+        with patch("agentic_librarian.mcp.server.TropeManager._get_embedding", return_value=[0.1] * 1536):
+            results = get_unacted_suggestions(target_tropes=["any"])
         assert any(r["title"] == "Persistent Title" for r in results)
