@@ -111,3 +111,21 @@ def test_live_conversation_runs():
     # Second turn shares the session (memory).
     second = conv.send("Actually, something more recent.")
     assert isinstance(second, str) and second.strip()
+
+
+def test_explorer_uses_explorer_model_env(monkeypatch):
+    monkeypatch.setenv("EXPLORER_MODEL", "gemini-test-explorer")
+    mesh = create_agent_mesh()
+    assert mesh["explorer"].model == "gemini-test-explorer"
+
+
+def test_explorer_model_defaults_to_flash(monkeypatch):
+    monkeypatch.delenv("EXPLORER_MODEL", raising=False)
+    mesh = create_agent_mesh()
+    assert mesh["explorer"].model == "gemini-2.5-flash"
+
+
+def test_explorer_has_a_google_search_tool():
+    mesh = create_agent_mesh()
+    tool_types = [type(t).__name__ for t in mesh["explorer"].tools]
+    assert any("GoogleSearch" in name for name in tool_types), tool_types

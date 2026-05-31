@@ -12,11 +12,18 @@ from agentic_librarian.mcp.server import (
 )
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool, FunctionTool
+from google.adk.tools.google_search_tool import GoogleSearchTool
 
 
 def _model_name() -> str:
     """Generative model for the mesh agents (configurable; matches the scouts)."""
     return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+
+def _explorer_model() -> str:
+    """The Explorer does grounded web discovery, which benefits from a stronger model
+    than the flash-lite default used by the other agents."""
+    return os.environ.get("EXPLORER_MODEL", "gemini-2.5-flash")
 
 
 # --- SPECIALIST AGENTS ---
@@ -43,20 +50,25 @@ class AnalystAgent(LlmAgent):
 
 
 class ExplorerAgent(LlmAgent):
-    """The Scout. Web-based discovery using search grounding."""
+    """The Scout. External web discovery via grounded search (ADR-035)."""
 
     def __init__(self):
         super().__init__(
-            model=_model_name(),
+            model=_explorer_model(),
             name="Explorer",
-            description="Discovers new books from the internet using search grounding.",
+            description="Discovers new/recent books from the web using grounded search.",
             instruction="""
-            You are a book scout. Use your internal search grounding capabilities to find real books.
-            If a book is found, return its title, author, and a brief description.
-            Focus on discovery of titles NOT likely to be in a standard personal library.
+            You are a book scout. Use the google_search tool to find REAL books that
+            match the user's request. Prefer recent or lesser-known titles that are
+            unlikely to already be in a standard personal library.
+
+            For each book give: Title — Author — one short sentence on why it fits.
+            Return a handful (3-5).
+
+            CRITICAL: Only report books that appear in your search results. Never invent
+            titles, authors, or details. If the search finds nothing relevant, say so.
             """,
-            # Search grounding is an internal capability of the LlmAgent if configured,
-            # or we can add a specific search tool if the ADK requires it.
+            tools=[GoogleSearchTool(bypass_multi_tools_limit=True)],
         )
 
 
