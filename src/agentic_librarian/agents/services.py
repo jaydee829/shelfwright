@@ -1,3 +1,5 @@
+import os
+
 from agentic_librarian.mcp.server import (
     check_reading_history,
     get_unacted_suggestions,
@@ -11,6 +13,12 @@ from agentic_librarian.mcp.server import (
 from google.adk.agents import LlmAgent
 from google.adk.tools import AgentTool, FunctionTool
 
+
+def _model_name() -> str:
+    """Generative model for the mesh agents (configurable; matches the scouts)."""
+    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+
+
 # --- SPECIALIST AGENTS ---
 
 
@@ -19,6 +27,7 @@ class AnalystAgent(LlmAgent):
 
     def __init__(self):
         super().__init__(
+            model=_model_name(),
             name="Analyst",
             description="Specializes in extracting structured book attributes and analyzing user taste.",
             instruction="""
@@ -38,6 +47,7 @@ class ExplorerAgent(LlmAgent):
 
     def __init__(self):
         super().__init__(
+            model=_model_name(),
             name="Explorer",
             description="Discovers new books from the internet using search grounding.",
             instruction="""
@@ -55,6 +65,7 @@ class CriticAgent(LlmAgent):
 
     def __init__(self):
         super().__init__(
+            model=_model_name(),
             name="Critic",
             description="Ranks book candidates using vector similarity and ensures no duplicates in history.",
             instruction="""
@@ -86,6 +97,7 @@ class LibrarianAgent(LlmAgent):
 
     def __init__(self, analyst, explorer, critic):
         super().__init__(
+            model=_model_name(),
             name="Librarian",
             description="The entry point for users. Orchestrates the recommendation process.",
             instruction="""

@@ -388,3 +388,18 @@ This file documents key architectural decisions, their context, and trade-offs.
 - ENV-015 part 2 is scoped to Spec 2 (Explorer external discovery).
 - `search_strategies.py`'s A/B benchmark is decoupled from the live mesh (kept as an experiment or removed later).
 - Phase 3's "COMPLETED" status was component-level, not runnable-mesh-level; these four specs close that gap.
+
+### ADR-036: The Librarian is a Multi-Turn Conversational Agent (2026-05-30)
+**Context:**
+- The Librarian should feel like talking to a librarian who remembers the exchange and knows the user's reading history (use_cases.md Levels 4–6: follow-ups, "I already read that" corrections, social signals). A single prompt→response call is too restrictive, and responses may legitimately be a list of authors, authors + an example book, or specific titles depending on the request.
+
+**Decision:**
+- The recommendation runtime hosts the Librarian in an ADK `Runner` with a **reusable session**. The public abstraction is a multi-turn `LibrarianConversation` (`start_conversation` → `send` → `send` …) that reuses one `(user_id, session_id)` so the agent remembers prior turns. `run_recommendation(prompt)` remains a one-shot convenience over the same path.
+- **Two layers of memory:** *within-conversation memory* = the ADK session; *durable "knows everything you've read"* = the Postgres reading-history DB via the agents' tools, independent of any conversation.
+- **Response shape** (authors, authors + an example book, or specific books) is Librarian instruction/behavior decided per request — not constrained by the runtime.
+- Spec 1 uses `InMemorySessionService` (ephemeral conversations); `DatabaseSessionService` (Postgres, resumable conversations across restarts) is a deferred upgrade.
+
+**Consequences:**
+- Supports the Level 4–6 conversational use cases within a session; the durable user profile persists in the DB regardless of session lifetime.
+- Conversations are not resumable across app restarts until `DatabaseSessionService` is adopted.
+- Realized by ADR-035 Spec 1; design at `docs/superpowers/specs/2026-05-30-mesh-runtime-foundation-design.md`.
