@@ -368,3 +368,23 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - Pros: Deterministic, repeatable integration tests; no risk to application/dev data; aligns with the Dual-Verification mandate (ADR-018).
 - Cons: Requires provisioning a separate database in local/compose/CI environments and a truncation fixture; marginally more setup per test run.
+
+### ADR-035: Internal (DB) vs External (Web) Search Clarification & Phased Mesh Delivery (2026-05-30)
+**Context:**
+- The spec and `agents/search_strategies.py` used "Internal" (Mode A) and "External" (Mode B) to mean *where the web search runs* — in-process `google-genai` grounding vs a separate A2A microservice. **Both are web search.** This conflicts with the intuitive meaning ("internal" = our database) and caused real confusion.
+- The 4-agent mesh does not actually run yet: no `model` is set on the `LlmAgent`s, there is no ADK Runner/session entrypoint, and the Explorer has no search capability. Phase 3 was marked COMPLETED but only the *components* exist; they are not wired to run.
+
+**Decision:**
+- **Adopt functional naming.** *Internal = retrieval from our Postgres DB* (existing/read/suggested books — already wired via the Critic's `search_internal_database` and the Librarian's `get_unacted_suggestions` / `get_user_trope_preferences`). *External = web discovery via search grounding* (finding new/unread books — the Explorer's job, currently the gap).
+- The earlier "Mode A (in-process grounding) vs Mode B (external A2A service)" distinction is an **implementation detail of External web discovery**, not a functional split. The MVP uses Mode A (in-process Gemini grounding); the external A2A service (Mode B) is deferred.
+- **Deliver the runnable mesh as four phased specs** (each its own spec → plan → implementation), order 1 → (2, 3) → 4:
+    1. **Mesh runtime foundation** — set models on all agents (via `GEMINI_MODEL`), build the ADK Runner/session + a `run_recommendation(prompt)` entrypoint so the Librarian executes and delegates.
+    2. **Explorer = external web discovery** — grounded web search on the Explorer; verify real new-book discovery ("ENV-015 part 2").
+    3. **Internal retrieval readiness** — DB-backed tools (preferences, vector search, history) return real results against a seeded DB (needs a real Flow 1 enrichment run); rename internal/external in code + docs.
+    4. **End-to-end recommendation + Trope-RAG** — full Librarian→Analyst→Explorer→Critic chain yields a justified, logged recommendation; e2e test.
+
+**Consequences:**
+- Clearer architecture and naming; removes the Internal/External ambiguity.
+- ENV-015 part 2 is scoped to Spec 2 (Explorer external discovery).
+- `search_strategies.py`'s A/B benchmark is decoupled from the live mesh (kept as an experiment or removed later).
+- Phase 3's "COMPLETED" status was component-level, not runnable-mesh-level; these four specs close that gap.
