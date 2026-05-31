@@ -1,7 +1,7 @@
 import os
 
 import pytest
-from agentic_librarian.agents import runtime  # noqa: F401  (used by later tasks)
+from agentic_librarian.agents import runtime
 from agentic_librarian.agents.services import create_agent_mesh
 from google.genai import types
 
@@ -66,6 +66,17 @@ class _FakeRunner:
 def test_send_returns_final_response_text():
     conv = runtime.LibrarianConversation(_FakeRunner(reply="Try Hyperion"), "u", "s")
     assert conv.send("recommend sci-fi") == "Try Hyperion"
+
+
+def test_asend_concatenates_multiple_text_parts():
+    class _MultiPartRunner(_FakeRunner):
+        async def run_async(self, user_id, session_id, new_message):
+            event = _FakeEvent("")
+            event.content = types.Content(role="model", parts=[types.Part(text="Hello "), types.Part(text="world")])
+            yield event
+
+    conv = runtime.LibrarianConversation(_MultiPartRunner(), "u", "s")
+    assert conv.send("hi") == "Hello world"
 
 
 def test_two_sends_reuse_the_same_session():

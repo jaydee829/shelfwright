@@ -57,7 +57,9 @@ class LibrarianConversation:
             user_id=self.user_id, session_id=self.session_id, new_message=content
         ):
             if event.is_final_response() and event.content and event.content.parts:
-                final = event.content.parts[0].text or final
+                parts_text = [p.text for p in event.content.parts if p.text]
+                if parts_text:
+                    final = "".join(parts_text)
         return final or "(no response)"
 
     def send(self, message: str) -> str:
@@ -75,11 +77,12 @@ def start_conversation(user_id: str = "local", runner: Runner | None = None) -> 
     return asyncio.run(astart_conversation(user_id=user_id, runner=runner))
 
 
+async def arun_recommendation(prompt: str, user_id: str = "local") -> str:
+    """Async one-shot convenience: start a conversation and send a single message."""
+    conv = await astart_conversation(user_id=user_id)
+    return await conv.asend(prompt)
+
+
 def run_recommendation(prompt: str, user_id: str = "local") -> str:
     """One-shot convenience: start a conversation and send a single message."""
-
-    async def _once() -> str:
-        conv = await astart_conversation(user_id=user_id)
-        return await conv.asend(prompt)
-
-    return asyncio.run(_once())
+    return asyncio.run(arun_recommendation(prompt, user_id))
