@@ -106,7 +106,7 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
         # distance). Candidates that arrived via style-only matching (no matching trope)
         # are appended afterward in a stable order. Without this, the set + IN filter
         # returns rows in arbitrary DB order.
-        ordered_ids: list = []
+        ordered_ids: list[UUID] = []
         if target_tropes and avg_vector is not None:
             ranked = (
                 session.query(Work.id)
@@ -115,10 +115,13 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
                 .filter(Work.id.in_(list(candidate_work_ids)))
                 .group_by(Work.id)
                 .order_by(func.min(Trope.embedding.cosine_distance(avg_vector)))
+                .limit(limit)
                 .all()
             )
             ordered_ids = [w[0] for w in ranked]
-        for wid in candidate_work_ids:
+        # sorted() so the style-only leftovers have a deterministic order (set iteration
+        # order is process-randomized).
+        for wid in sorted(candidate_work_ids):
             if wid not in ordered_ids:
                 ordered_ids.append(wid)
         ordered_ids = ordered_ids[:limit]

@@ -7,7 +7,7 @@ from agentic_librarian.db.models import Author, Trope, Work, WorkContributor, Wo
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import search_internal_database, set_db_manager
 
-FIXTURE = json.loads(Path("test/data/trope_embeddings.json").read_text())
+FIXTURE = json.loads((Path(__file__).parent.parent / "data" / "trope_embeddings.json").read_text())
 ROMANCE = ["enemies to lovers", "slow burn romance"]
 GRIMDARK = ["grimdark war", "brutal military strategy"]
 
@@ -30,7 +30,8 @@ def _seed_work(session, title, author_name, trope_names):
 
 @pytest.mark.db_integration
 def test_search_ranks_semantically_near_work_first(db_url, monkeypatch):
-    # Managers construct a genai.Client in __init__ (needs a key; no network call).
+    # TropeManager/StyleManager read GOOGLE_SEARCH_API_KEY to construct a genai.Client in
+    # __init__ (no network call at construction); set a dummy so the tool can be called.
     monkeypatch.setenv("GOOGLE_SEARCH_API_KEY", "dummy-key-for-construction")
     test_db_manager = DatabaseManager(db_url)
     set_db_manager(test_db_manager)
