@@ -1,11 +1,14 @@
 """Runtime for the recommendation agent mesh: host the Librarian in an ADK Runner
 and expose a multi-turn conversation API (ADR-035 Spec 1, ADR-036)."""
 
+import asyncio
 import os
+import uuid
 
 from agentic_librarian.agents.services import create_agent_mesh
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 try:
     from dotenv import load_dotenv
@@ -36,3 +39,37 @@ def build_runner() -> Runner:
         app_name=APP_NAME,
         session_service=InMemorySessionService(),
     )
+
+
+class LibrarianConversation:
+    """A multi-turn conversation with the Librarian. Reusing one session across
+    sends is what gives the agent conversational memory (ADR-036)."""
+
+    def __init__(self, runner: Runner, user_id: str, session_id: str):
+        self._runner = runner
+        self.user_id = user_id
+        self.session_id = session_id
+
+    async def asend(self, message: str) -> str:
+        content = types.Content(role="user", parts=[types.Part(text=message)])
+        final = ""
+        async for event in self._runner.run_async(
+            user_id=self.user_id, session_id=self.session_id, new_message=content
+        ):
+            if event.is_final_response() and event.content and event.content.parts:
+                final = event.content.parts[0].text or final
+        return final or "(no response)"
+
+    def send(self, message: str) -> str:
+        return asyncio.run(self.asend(message))
+
+
+async def astart_conversation(user_id: str = "local", runner: Runner | None = None) -> LibrarianConversation:
+    runner = runner or build_runner()
+    session_id = uuid.uuid4().hex
+    await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    return LibrarianConversation(runner, user_id, session_id)
+
+
+def start_conversation(user_id: str = "local", runner: Runner | None = None) -> LibrarianConversation:
+    return asyncio.run(astart_conversation(user_id=user_id, runner=runner))
