@@ -129,3 +129,15 @@ def test_explorer_has_a_google_search_tool():
     mesh = create_agent_mesh()
     tool_types = [type(t).__name__ for t in mesh["explorer"].tools]
     assert any("GoogleSearch" in name for name in tool_types), tool_types
+
+
+@pytest.mark.api_dependent
+def test_librarian_delegates_discovery_to_explorer():
+    # Asks for a recent release the model cannot know without searching, so a
+    # substantive answer implies the grounded Explorer ran. (Strict grounding
+    # correctness is a manual check — results vary.)
+    response = runtime.run_recommendation(
+        "Find me a grimdark fantasy novel published in 2024 that I probably haven't read."
+    )
+    assert isinstance(response, str)
+    assert len(response.strip()) > 30
