@@ -90,3 +90,13 @@ def test_run_recommendation_one_shot(monkeypatch):
     monkeypatch.setattr(runtime, "build_runner", lambda: fake)
     assert runtime.run_recommendation("something like Dune") == "Recommended: Dune"
     assert fake.calls[0][2] == "something like Dune"
+
+
+@pytest.mark.api_dependent
+def test_live_conversation_runs():
+    conv = runtime.start_conversation()
+    first = conv.send("Recommend a sci-fi novel like Dune in one sentence.")
+    assert isinstance(first, str) and first.strip()
+    # Second turn shares the session (memory).
+    second = conv.send("Actually, something more recent.")
+    assert isinstance(second, str) and second.strip()
