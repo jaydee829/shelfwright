@@ -83,3 +83,10 @@ def test_start_conversation_creates_a_session():
     assert conv.user_id == "alice"
     assert fake.session_service.created
     assert fake.session_service.created[0][1] == "alice"
+
+
+def test_run_recommendation_one_shot(monkeypatch):
+    fake = _FakeRunner(reply="Recommended: Dune")
+    monkeypatch.setattr(runtime, "build_runner", lambda: fake)
+    assert runtime.run_recommendation("something like Dune") == "Recommended: Dune"
+    assert fake.calls[0][2] == "something like Dune"

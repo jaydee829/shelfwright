@@ -73,3 +73,13 @@ async def astart_conversation(user_id: str = "local", runner: Runner | None = No
 
 def start_conversation(user_id: str = "local", runner: Runner | None = None) -> LibrarianConversation:
     return asyncio.run(astart_conversation(user_id=user_id, runner=runner))
+
+
+def run_recommendation(prompt: str, user_id: str = "local") -> str:
+    """One-shot convenience: start a conversation and send a single message."""
+
+    async def _once() -> str:
+        conv = await astart_conversation(user_id=user_id)
+        return await conv.asend(prompt)
+
+    return asyncio.run(_once())
