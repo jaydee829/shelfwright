@@ -36,8 +36,11 @@ def test_search_ranks_semantically_near_work_first(db_url, monkeypatch):
     set_db_manager(test_db_manager)
 
     with test_db_manager.get_session() as session:
-        _seed_work(session, "A Courtship", "Romance Author", ROMANCE)
+        # Seed the FAR (grimdark) work first so insertion/heap order is the opposite of the
+        # expected ranked order. The assertion then only holds if cosine ranking is applied
+        # — an unordered IN-filter would return the grimdark work first and fail.
         _seed_work(session, "The Long War", "Grimdark Author", GRIMDARK)
+        _seed_work(session, "A Courtship", "Romance Author", ROMANCE)
         session.commit()
 
     # The query-side embedding resolves a known string to the same cached real vector,
