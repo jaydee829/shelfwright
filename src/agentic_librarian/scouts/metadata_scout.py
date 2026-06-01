@@ -251,6 +251,9 @@ class HardcoverScout(APIScout):
             return any(c in (d.get("title") or "").lower() for c in companions)
 
         def author_matches(d: dict) -> bool:
+            # Bidirectional substring match on purpose: tolerate abbreviated/extended author names
+            # between the caller and Hardcover (e.g. "S. King" vs "Stephen King"). Author names are
+            # never single chars in practice, so this stays specific enough.
             return any(a and (a in norm(n) or norm(n) in a) for n in (d.get("author_names") or []))
 
         def reads(d: dict) -> int:
