@@ -16,6 +16,9 @@ services:
       # Bind-mount the workspace over /app so the editable install (done at
       # build time against /app) points at the live source.
       - .:/app:cached
+      # Persist the `claude` CLI login (Max-subscription OAuth used by the Claude
+      # Agent SDK backend) across image rebuilds, so it's a one-time `claude` auth.
+      - claude_auth:/root/.claude
     working_dir: /app
     command: sleep infinity
     depends_on:
@@ -62,3 +65,4 @@ services:
 
 volumes:
   pgdata:
+  claude_auth:
