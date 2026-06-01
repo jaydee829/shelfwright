@@ -7,13 +7,14 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 
+from agentic_librarian.agents.services import AnalystAgent, CriticAgent, ExplorerAgent
 from agentic_librarian.mcp.server import (
     enrich_and_persist_work,
     get_unacted_suggestions,
     log_suggestion,
     search_internal_database,
 )
-from google.adk.agents import BaseAgent
+from google.adk.agents import BaseAgent, SequentialAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event, EventActions
 from typing_extensions import override
@@ -101,3 +102,19 @@ class LoggerAgent(BaseAgent):
         yield Event(
             author=self.name, actions=EventActions(state_delta={"logged": bool(recommendation and candidate_ids)})
         )
+
+
+def create_recommendation_pipeline() -> SequentialAgent:
+    """The fixed-order recommendation pipeline (ADR-035 Spec 4). SequentialAgent logs a benign
+    deprecation warning in 2.1.0 (the Workflow replacement is not shipped); ignore it."""
+    return SequentialAgent(
+        name="RecommendationPipeline",
+        sub_agents=[
+            AnalystAgent(),
+            InternalCandidatesAgent(name="InternalCandidates"),
+            ExplorerAgent(),
+            EnrichmentAgent(name="Enrichment"),
+            CriticAgent(),
+            LoggerAgent(name="Logger"),
+        ],
+    )
