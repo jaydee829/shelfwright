@@ -427,6 +427,12 @@ def _normalize(s: str) -> str:
     return " ".join((s or "").strip().lower().split())
 
 
+def _normalized_col(col):
+    """SQL-side equivalent of _normalize: lowercase, collapse internal whitespace, trim — so
+    de-dup matches even when a stored title/name has irregular spacing."""
+    return func.trim(func.regexp_replace(func.lower(col), r"\s+", " ", "g"))
+
+
 @mcp.tool()
 def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> str | None:
     """De-dup a web-discovered book against the catalog; if new, enrich it via the ScoutManager
@@ -440,8 +446,8 @@ def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> s
                 session.query(Work)
                 .join(WorkContributor)
                 .join(Author)
-                .filter(func.lower(Work.title) == _normalize(title))
-                .filter(func.lower(Author.name) == _normalize(author))
+                .filter(_normalized_col(Work.title) == _normalize(title))
+                .filter(_normalized_col(Author.name) == _normalize(author))
                 .first()
             )
             if existing:
@@ -469,10 +475,9 @@ def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> s
             work = persist_enriched_work(session, row, tm, sm)
             if work is None:
                 return None
-            session.flush()
-            work_id = str(work.id)
-            session.commit()
-            return work_id
+            session.flush()  # ensure work.id is populated
+            # get_session commits on clean exit (matches the other write tools) — no explicit commit.
+            return str(work.id)
     except Exception as e:  # noqa: BLE001 - degrade gracefully, never crash the pipeline
         print(f"enrich_and_persist_work error: {e}")
         return None

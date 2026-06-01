@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agentic_librarian.db.models import Author, Work, WorkContributor
+from agentic_librarian.db.models import Author, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import enrich_and_persist_work, set_db_manager
 
@@ -50,6 +50,8 @@ def test_enrich_persists_new_discovery(db_url, monkeypatch):
     fake_manager = MagicMock()
     fake_manager.enrich.return_value = fake_enriched
     with (
+        # Patch at the definition site: the tool's lazy `from ... import create_scout_manager`
+        # re-executes inside this block and resolves the patched attribute.
         patch("agentic_librarian.orchestration.definitions.create_scout_manager", return_value=fake_manager),
         patch("agentic_librarian.mcp.server.TropeManager._get_embedding", return_value=[0.1] * 1536),
     ):
@@ -57,4 +59,9 @@ def test_enrich_persists_new_discovery(db_url, monkeypatch):
     assert result is not None
     fake_manager.enrich.assert_called_once()
     with dbm.get_session() as session:
-        assert session.query(Work).filter_by(title="Brand New Find").first() is not None
+        work = session.query(Work).filter_by(title="Brand New Find").first()
+        assert work is not None
+        # The enriched trope was persisted through the shared persist function.
+        wt = session.query(WorkTrope).filter_by(work_id=work.id).first()
+        assert wt is not None
+        assert wt.relevance_score == pytest.approx(0.8)

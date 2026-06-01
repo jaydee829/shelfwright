@@ -72,15 +72,17 @@ def persist_enriched_work(
 
         work_contributors_list.append(WorkContributor(author=author, role=role))
 
-    # 2. Work
-    work = (
-        session.query(Work)
-        .join(WorkContributor)
-        .join(Author)
-        .filter(Work.title == row["Title"])
-        .filter(Author.name == (row.get("Author_1") or row.get("Author")))
-        .first()
-    )
+    # 2. Work. no_autoflush: the not-yet-added WorkContributor objects above must not be
+    # cascaded by this query's autoflush (raises a SAWarning and could flush incomplete rows).
+    with session.no_autoflush:
+        work = (
+            session.query(Work)
+            .join(WorkContributor)
+            .join(Author)
+            .filter(Work.title == row["Title"])
+            .filter(Author.name == (row.get("Author_1") or row.get("Author")))
+            .first()
+        )
     if not work:
         work = Work(
             title=row["Title"],
