@@ -23,7 +23,7 @@ def _model_name() -> str:
     """Generative model for the NON-grounding mesh agents (Analyst, Critic, Librarian).
     Defaults to gemini-3.1-flash-lite: stable, high free-tier throughput, no grounding needed here,
     and it offloads these agents from the squeezed gemini-2.5 capacity (REC-020)."""
-    return os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
+    return os.environ.get("GEMINI_MODEL") or "gemini-3.1-flash-lite"
 
 
 def _grounding_model() -> str:
