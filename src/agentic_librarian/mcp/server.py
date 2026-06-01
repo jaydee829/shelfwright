@@ -206,7 +206,9 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
             score = 0
             # Score by tropes linked to this suggestion's work
             if target_trope_vec is not None and s.work.tropes:
-                work_trope_vecs = [np.array(wt.trope.embedding) for wt in s.work.tropes if wt.trope.embedding]
+                work_trope_vecs = [
+                    np.array(wt.trope.embedding) for wt in s.work.tropes if wt.trope.embedding is not None
+                ]
                 if work_trope_vecs:
                     avg_work_trope = np.mean(work_trope_vecs, axis=0)
                     score += np.dot(target_trope_vec, avg_work_trope)  # Cosine similarity assumes normalized
@@ -219,7 +221,7 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
                 if primary_contributor:
                     style_links.extend(primary_contributor.author.styles)
 
-                work_style_vecs = [np.array(sl.style.embedding) for sl in style_links if sl.style.embedding]
+                work_style_vecs = [np.array(sl.style.embedding) for sl in style_links if sl.style.embedding is not None]
                 if work_style_vecs:
                     avg_work_style = np.mean(work_style_vecs, axis=0)
                     score += np.dot(target_style_vec, avg_work_style)

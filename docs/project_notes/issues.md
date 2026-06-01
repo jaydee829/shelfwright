@@ -127,3 +127,9 @@ This file tracks work history and ticket references.
 - **Description**: The Claude backend's Explorer step passes `allowed_tools=["WebSearch"]` (Claude Code's built-in web-search tool; `allowed_tools` uses PascalCase CLI tool names, cf. `["Read", "Grep"]`). This cannot be verified without an authenticated `claude` CLI.
 - **URL**: N/A
 - **Notes**: On the first live `test_claude_e2e` run (after `claude` auth), confirm the Explorer actually performs a web search. If it does not, the correct identifier may be the server-tool name `"web_search"` — change `agents/backends/claude.py` accordingly. The shared `EXPLORER_INSTRUCTION` was made tool-agnostic ("use your web search tool") so it reads correctly for both the ADK (`google_search`) and Claude (`WebSearch`) backends.
+
+### 2026-06-01 - REC-020: Pipeline should tolerate transient LLM 5xx (live e2e finding)
+- **Status**: Open (robustness follow-up)
+- **Description**: The first full live recommendation e2e (ADK backend) ran the whole chain (Analyst → Explorer found real 2024 romance titles → enrichment → Critic) but crashed when a Gemini call returned `503 UNAVAILABLE` ("model experiencing high demand"). The error propagated uncaught from `LlmAgent` through `run_recommendation`. Google Books also 429'd from rapid enrichment calls (degrades gracefully — discoveries skipped).
+- **URL**: N/A
+- **Notes**: A transient 5xx from one agent's LLM call should not crash the whole recommendation. Add retry-with-backoff on transient 5xx (ADK retry config or a wrapper) for the mesh/pipeline LLM calls; consider light rate-limiting / backoff for the per-discovery Google Books enrichment burst. Re-running when Gemini is not under load should succeed. (The array-truthiness bug surfaced in the same run is fixed + regression-tested.)

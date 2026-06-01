@@ -4,9 +4,23 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from agentic_librarian.db.models import Author, Edition, ReadingHistory, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import (
+    Author,
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Trope,
+    Work,
+    WorkContributor,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.mcp.server import get_user_trope_preferences, search_internal_database, set_db_manager
+from agentic_librarian.mcp.server import (
+    get_unacted_suggestions,
+    get_user_trope_preferences,
+    search_internal_database,
+    set_db_manager,
+)
 
 FIXTURE = json.loads((Path(__file__).parent.parent / "data" / "trope_embeddings.json").read_text())
 ROMANCE = ["enemies to lovers", "slow burn romance"]
@@ -87,3 +101,35 @@ def test_user_trope_preferences_ranked_by_frequency(db_url):
     prefs = get_user_trope_preferences()
     assert prefs[0] == "Fantasy", prefs
     assert set(prefs) == {"Fantasy", "Mystery"}, prefs
+
+
+@pytest.mark.db_integration
+def test_get_unacted_suggestions_scores_embedded_suggestion(db_url, monkeypatch):
+    # Regression: a Suggested work whose trope carries a real (array-valued) embedding must be
+    # scorable. `if wt.trope.embedding` raised "truth value of an array is ambiguous" — surfaced by
+    # the live recommendation e2e. The fix is an `is not None` check.
+    monkeypatch.setenv("GOOGLE_SEARCH_API_KEY", "dummy-key-for-construction")
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    with test_db_manager.get_session() as session:
+        author = Author(name="Romance Author")
+        session.add(author)
+        session.flush()
+        work = Work(title="A Courtship")
+        session.add(work)
+        session.flush()
+        session.add(WorkContributor(work=work, author=author, role="Author"))
+        trope = Trope(name="enemies to lovers", embedding=FIXTURE["enemies to lovers"])
+        session.add(trope)
+        session.flush()
+        session.add(WorkTrope(work=work, trope=trope))
+        session.add(Suggestions(work=work, status="Suggested", justification="prior"))
+        session.commit()
+
+    def fake_embedding(self, text):
+        return FIXTURE[text]
+
+    with patch("agentic_librarian.mcp.server.TropeManager._get_embedding", fake_embedding):
+        results = get_unacted_suggestions(target_tropes=["enemies to lovers"])
+
+    assert any(r["title"] == "A Courtship" for r in results)
