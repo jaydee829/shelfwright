@@ -1,6 +1,6 @@
 import os
 
-from agentic_librarian.agents.schemas import Discoveries, Targets
+from agentic_librarian.agents.schemas import Targets
 from agentic_librarian.mcp.server import (
     check_reading_history,
     get_unacted_suggestions,
@@ -66,15 +66,19 @@ class ExplorerAgent(LlmAgent):
             match the user's request. Prefer recent or lesser-known titles that are
             unlikely to already be in a standard personal library.
 
-            For each book give: Title — Author — one short sentence on why it fits.
             Return a handful (3-5).
 
             CRITICAL: Only report books that appear in your search results. Never invent
-            titles, authors, or details. If the search finds nothing relevant, say so.
-            Return the books list; each item has title, author, why.
+            titles, authors, or details. If the search finds nothing relevant, return an empty list.
+
+            Respond with ONLY a JSON object of this exact shape (no prose, no code fence):
+            {"books": [{"title": "...", "author": "...", "why": "one short sentence"}]}
             """,
+            # NOTE: no output_schema here. google_search is a built-in tool, and Gemini rejects
+            # combining a built-in tool with function-calling (which is how output_schema is
+            # enforced) in one request. The Explorer therefore emits JSON-as-text; the pipeline's
+            # Enrichment step parses it (coerce_schema_value -> json.loads). See ADR-040.
             tools=[GoogleSearchTool(bypass_multi_tools_limit=True)],
-            output_schema=Discoveries,
             output_key="discoveries",
         )
 
