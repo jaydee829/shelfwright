@@ -30,3 +30,10 @@ def test_persist_tolerates_dict_style_value(db_url, monkeypatch):
         work = persist_enriched_work(session, row, tm, sm)
         session.flush()
         assert work is not None and work.title == "Dict Style Book"
+
+        # The valid scalar attribute persists; the dict-valued "differences" is skipped by the guard.
+        from agentic_librarian.db.models import WorkStyle
+
+        attr_types = {ws.attribute_type for ws in session.query(WorkStyle).filter_by(work_id=work.id).all()}
+        assert "perspective" in attr_types
+        assert "differences" not in attr_types

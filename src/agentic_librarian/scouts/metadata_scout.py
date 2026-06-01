@@ -410,7 +410,7 @@ class DirectKnowledgeScout(LLMScout):
         return data or {}
 
 
-def _flatten_style_map(data: dict) -> dict[str, str]:
+def _flatten_style_map(data: dict | None) -> dict[str, str]:
     """Coerce a scouted style dict to {attribute: non-empty-string}. The work-style prompt asks the
     model to also list attributes that DIFFER from the author baseline, so a value can come back as a
     nested dict (e.g. {"differences": {"pacing": "..."}}). Hoist one level of nested string values to
@@ -424,7 +424,7 @@ def _flatten_style_map(data: dict) -> dict[str, str]:
         elif isinstance(val, dict):
             for sub_key, sub_val in val.items():
                 if isinstance(sub_val, str) and sub_val.strip():
-                    out.setdefault(sub_key, sub_val.strip())
+                    out.setdefault(sub_key, sub_val.strip())  # top-level value wins on collision
     return out
 
 

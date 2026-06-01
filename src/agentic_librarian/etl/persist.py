@@ -29,7 +29,7 @@ def _iter_style_items(style_data: dict | None, owner_label: str):
     gracefully (REC-021)."""
     for attr_type, style_name in (style_data or {}).items():
         if isinstance(style_name, str) and style_name.strip():
-            yield attr_type, style_name
+            yield attr_type, style_name.strip()
         elif style_name:
             print(f"Warning: skipping non-string style '{attr_type}'={type(style_name).__name__} for {owner_label}")
 
