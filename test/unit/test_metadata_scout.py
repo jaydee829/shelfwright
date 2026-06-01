@@ -298,6 +298,19 @@ def test_hardcover_live_returns_metadata_for_known_title():
     assert md.get("page_count")
 
 
+def test_google_books_warns_once_without_key(capsys, monkeypatch):
+    import agentic_librarian.scouts.metadata_scout as md_scout
+
+    monkeypatch.delenv("GOOGLE_BOOKS_API_KEY", raising=False)
+    md_scout._gbooks_nokey_warned = False
+    scout = md_scout.GoogleBooksScout()
+    monkeypatch.setattr(scout, "_make_request", lambda *a, **k: {})
+    scout.search("T", "A")
+    scout.search("T2", "A2")
+    out = capsys.readouterr().out
+    assert out.count("no GOOGLE_BOOKS_API_KEY") == 1
+
+
 def test_flatten_style_map_hoists_nested_and_drops_nonstrings():
     from agentic_librarian.scouts.metadata_scout import _flatten_style_map
 

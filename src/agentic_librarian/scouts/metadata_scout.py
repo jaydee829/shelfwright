@@ -38,6 +38,8 @@ _API_RETRY = Retry(
     respect_retry_after_header=False,
 )
 
+_gbooks_nokey_warned = False
+
 
 class BaseScout(ABC):
     """Abstract base class for all metadata scouts."""
@@ -167,6 +169,14 @@ class GoogleBooksScout(APIScout):
         super().__init__(key)
 
     def search(self, title: str, author: str, **kwargs) -> dict:
+        global _gbooks_nokey_warned
+        if not self.api_key and not _gbooks_nokey_warned:
+            print(
+                "Warning: GoogleBooksScout has no GOOGLE_BOOKS_API_KEY — using the very low "
+                "unauthenticated quota; expect 429s on enrichment bursts. Get a free key: "
+                "https://developers.google.com/books/docs/v1/using#APIKey"
+            )
+            _gbooks_nokey_warned = True
         base_url = "https://www.googleapis.com/books/v1/volumes"
         query = f"intitle:{title} inauthor:{author}"
         params = {
