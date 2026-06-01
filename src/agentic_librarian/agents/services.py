@@ -97,6 +97,8 @@ class LibrarianAgent(LlmAgent):
             model=_model_name(),
             name="Librarian",
             description="The entry point for users. Orchestrates the recommendation process.",
+            # Inline (not in prompts.py): the Librarian is the ADK-only conversational orchestrator,
+            # not one of the backend-portable specialist prompts.
             instruction="""
             You are the Head Librarian. You provide personalized book recommendations and manage history.
 

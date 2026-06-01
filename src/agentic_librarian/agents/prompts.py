@@ -1,4 +1,6 @@
-"""Shared agent instruction text, used by both the ADK and Claude backends so the two never drift."""
+"""Shared instruction text for the three specialist agents (Analyst/Explorer/Critic), used by both
+the ADK and Claude backends so the two never drift. The Librarian orchestrator's instruction stays
+inline in services.py — it is part of the ADK-only conversational path, not a portable backend prompt."""
 
 ANALYST_INSTRUCTION = """
             You are a literary analyst. Your job is to extract semantic concepts from user requests.
