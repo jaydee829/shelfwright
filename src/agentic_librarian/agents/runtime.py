@@ -5,6 +5,7 @@ import asyncio
 import os
 import uuid
 
+from agentic_librarian.agents.pipeline import create_recommendation_pipeline
 from agentic_librarian.agents.services import create_agent_mesh
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -77,12 +78,28 @@ def start_conversation(user_id: str = "local", runner: Runner | None = None) -> 
     return asyncio.run(astart_conversation(user_id=user_id, runner=runner))
 
 
+def build_pipeline_runner() -> Runner:
+    """Build a Runner hosting the fixed-order SequentialAgent recommendation pipeline."""
+    _ensure_adk_credentials()
+    return Runner(
+        agent=create_recommendation_pipeline(),
+        app_name=APP_NAME,
+        session_service=InMemorySessionService(),
+    )
+
+
 async def arun_recommendation(prompt: str, user_id: str = "local") -> str:
-    """Async one-shot convenience: start a conversation and send a single message."""
-    conv = await astart_conversation(user_id=user_id)
-    return await conv.asend(prompt)
+    """Run the fixed-order recommendation pipeline and return state['recommendation']."""
+    runner = build_pipeline_runner()
+    session_id = uuid.uuid4().hex
+    await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    content = types.Content(role="user", parts=[types.Part(text=prompt)])
+    async for _ in runner.run_async(user_id=user_id, session_id=session_id, new_message=content):
+        pass
+    session = await runner.session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    return session.state.get("recommendation") or "(no recommendation)"
 
 
 def run_recommendation(prompt: str, user_id: str = "local") -> str:
-    """One-shot convenience: start a conversation and send a single message."""
+    """One-shot convenience: run the pipeline and return state['recommendation']."""
     return asyncio.run(arun_recommendation(prompt, user_id))
