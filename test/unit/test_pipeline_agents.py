@@ -11,6 +11,14 @@ def test_coerce_schema_value_handles_dict_and_json_and_model():
     assert coerce_schema_value({"tropes": ["a"]})["tropes"] == ["a"]
     assert coerce_schema_value('{"tropes": ["a"]}')["tropes"] == ["a"]
     assert coerce_schema_value(None) == {}
+    # A valid JSON string that decodes to a non-dict must coerce to {} (callers do .get()).
+    assert coerce_schema_value("[1, 2]") == {}
+    assert coerce_schema_value("not json") == {}
+
+
+def test_extract_discovery_pairs_skips_books_missing_title_or_author():
+    state = {"discoveries": {"books": [{"title": "X"}, {"title": "Y", "author": "Z"}]}}
+    assert extract_discovery_pairs(state) == [("Y", "Z")]
 
 
 def test_extract_discovery_pairs_reads_books_from_dict_and_json():

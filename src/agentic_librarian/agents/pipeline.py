@@ -28,9 +28,12 @@ def coerce_schema_value(value) -> dict:
         return value
     if isinstance(value, str):
         try:
-            return json.loads(value)
+            parsed = json.loads(value)
         except json.JSONDecodeError:
             return {}
+        # A valid JSON string can decode to a list/scalar; the callers always do .get(), and the
+        # annotation promises a dict, so coerce anything non-dict to {}.
+        return parsed if isinstance(parsed, dict) else {}
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return {}
@@ -57,9 +60,9 @@ def extract_discovery_pairs(state: dict) -> list[tuple[str, str]]:
     """Pull (title, author) pairs out of the Explorer's structured discoveries."""
     disc = coerce_schema_value(state.get("discoveries"))
     pairs = []
-    for b in disc.get("books") or []:
-        b = coerce_schema_value(b) if not isinstance(b, dict) else b
-        title, author = b.get("title"), b.get("author")
+    for raw in disc.get("books") or []:
+        book = raw if isinstance(raw, dict) else coerce_schema_value(raw)
+        title, author = book.get("title"), book.get("author")
         if title and author:
             pairs.append((title, author))
     return pairs
@@ -91,7 +94,9 @@ class LoggerAgent(BaseAgent):
         recommendation = ctx.session.state.get("recommendation") or ""
         candidate_ids = list(ctx.session.state.get("candidate_ids") or [])
         if recommendation and candidate_ids:
-            # Log the top candidate as the acted suggestion; justification is the Critic's text.
+            # Log the first candidate as the acted suggestion; justification is the Critic's text.
+            # TODO(spec5): candidate_ids is in gather order, not the Critic's ranked order — log the
+            # Critic's actual top pick once the Critic emits a structured ranking, not just prose.
             log_suggestion(work_id=candidate_ids[0], context="recommendation", justification=recommendation[:1000])
         yield Event(
             author=self.name, actions=EventActions(state_delta={"logged": bool(recommendation and candidate_ids)})
