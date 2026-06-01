@@ -4,7 +4,9 @@ does NOT persist in ADK 2.1.0."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
 from collections.abc import AsyncGenerator
 
 from agentic_librarian.agents.services import AnalystAgent, CriticAgent, ExplorerAgent
@@ -28,8 +30,13 @@ def coerce_schema_value(value) -> dict:
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
+        cleaned = value.strip()
+        # LLMs (incl. the Explorer, which has no output_schema) often wrap JSON in a ```json ... ```
+        # fence despite instructions — strip it before parsing.
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned).strip()
         try:
-            parsed = json.loads(value)
+            parsed = json.loads(cleaned)
         except json.JSONDecodeError:
             return {}
         # A valid JSON string can decode to a list/scalar; the callers always do .get(), and the
@@ -72,7 +79,8 @@ def extract_discovery_pairs(state: dict) -> list[tuple[str, str]]:
 class InternalCandidatesAgent(BaseAgent):
     @override
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
-        ids = extract_candidate_ids(dict(ctx.session.state))
+        # to_thread: these are blocking DB calls; don't stall the ADK event loop.
+        ids = await asyncio.to_thread(extract_candidate_ids, dict(ctx.session.state))
         existing = list(ctx.session.state.get("candidate_ids") or [])
         merged = existing + [i for i in ids if i not in existing]
         yield Event(author=self.name, actions=EventActions(state_delta={"candidate_ids": merged}))
@@ -83,7 +91,8 @@ class EnrichmentAgent(BaseAgent):
     async def _run_async_impl(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         candidate_ids = list(ctx.session.state.get("candidate_ids") or [])
         for title, author in extract_discovery_pairs(dict(ctx.session.state)):
-            wid = enrich_and_persist_work(title, author)  # de-dups + persists; None on failure
+            # to_thread: enrich makes blocking network + DB calls; don't stall the event loop.
+            wid = await asyncio.to_thread(enrich_and_persist_work, title, author)  # de-dups + persists; None on failure
             if wid and wid not in candidate_ids:
                 candidate_ids.append(wid)
         yield Event(author=self.name, actions=EventActions(state_delta={"candidate_ids": candidate_ids}))
@@ -98,7 +107,9 @@ class LoggerAgent(BaseAgent):
             # Log the first candidate as the acted suggestion; justification is the Critic's text.
             # TODO(spec5): candidate_ids is in gather order, not the Critic's ranked order — log the
             # Critic's actual top pick once the Critic emits a structured ranking, not just prose.
-            log_suggestion(work_id=candidate_ids[0], context="recommendation", justification=recommendation[:1000])
+            await asyncio.to_thread(
+                log_suggestion, work_id=candidate_ids[0], context="recommendation", justification=recommendation[:1000]
+            )
         yield Event(
             author=self.name, actions=EventActions(state_delta={"logged": bool(recommendation and candidate_ids)})
         )

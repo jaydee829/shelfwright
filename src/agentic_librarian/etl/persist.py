@@ -171,8 +171,10 @@ def persist_enriched_work(
         if narrator_objs:
             edition.narrators = list(set(edition.narrators) | set(narrator_objs))
 
-    # 4. Reading History (The actual read event)
-    date_completed = pd.to_datetime(row["date_completed"]).date() if row.get("date_completed") else None
+    # 4. Reading History (The actual read event). pd.NaT/NaN are truthy, so guard with pd.isna
+    # before calling .date() (which would raise on NaT).
+    _raw_date = row.get("date_completed")
+    date_completed = pd.to_datetime(_raw_date).date() if _raw_date is not None and not pd.isna(_raw_date) else None
 
     if date_completed:
         # Duplicate Check: Work + Edition + Date Completed

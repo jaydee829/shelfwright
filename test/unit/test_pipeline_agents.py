@@ -10,6 +10,8 @@ from agentic_librarian.agents.pipeline import (
 def test_coerce_schema_value_handles_dict_and_json_and_model():
     assert coerce_schema_value({"tropes": ["a"]})["tropes"] == ["a"]
     assert coerce_schema_value('{"tropes": ["a"]}')["tropes"] == ["a"]
+    # LLMs often wrap JSON in a markdown code fence — it must still parse.
+    assert coerce_schema_value('```json\n{"tropes": ["a"]}\n```')["tropes"] == ["a"]
     assert coerce_schema_value(None) == {}
     # A valid JSON string that decodes to a non-dict must coerce to {} (callers do .get()).
     assert coerce_schema_value("[1, 2]") == {}
