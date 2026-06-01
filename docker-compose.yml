@@ -12,10 +12,18 @@ services:
       # Log experiments to the MLflow server on the compose network
       # (no DB credentials needed on the client side).
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Consolidate ALL `claude` CLI state (config .claude.json + OAuth credentials,
+      # which otherwise split between ~/.claude.json and ~/.claude/) into the single
+      # claude_auth-mounted dir below, so a one-time login persists across rebuilds.
+      CLAUDE_CONFIG_DIR: /home/appuser/.claude
     volumes:
       # Bind-mount the workspace over /app so the editable install (done at
       # build time against /app) points at the live source.
       - .:/app:cached
+      # Persist the `claude` CLI login (Max-subscription OAuth used by the Claude
+      # Agent SDK backend) across image rebuilds, so it's a one-time `claude` auth.
+      # The container runs as `appuser`, so the CLI writes to /home/appuser/.claude.
+      - claude_auth:/home/appuser/.claude
     working_dir: /app
     command: sleep infinity
     depends_on:
@@ -62,3 +70,4 @@ services:
 
 volumes:
   pgdata:
+  claude_auth:

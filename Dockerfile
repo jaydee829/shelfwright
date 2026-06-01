@@ -24,20 +24,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Add both possible uv install locations to PATH
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
+# Install Node.js (LTS) and the Anthropic Claude CLI so the `claude` binary is available for
+# api_dependent e2e tests. Placed BEFORE the source COPY so this slow layer caches independently of
+# code changes. Auth is NOT performed here — the user runs `claude` (one-time login) interactively
+# after attaching. (The nodesource setup script runs apt-get update internally.)
+# Reference: https://docs.anthropic.com/en/docs/claude-code/setup
+RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy pyproject.toml first so the heavy dependency layer stays cached.
 COPY pyproject.toml .
 
 # Install dependencies. The local 'agentic_librarian' package can't be
 # registered yet (its source isn't present), but this caches the expensive
 # dependency layer.
-RUN uv pip install --system -e ".[dev]"
+RUN uv pip install --system -e ".[dev,claude]"
 
 # Copy the rest of the application.
 COPY . .
 
 # Re-run the editable install now that src/ is present, so 'agentic_librarian'
 # is actually importable. Dependencies are already satisfied, so this is fast.
-RUN uv pip install --system -e ".[dev]"
+RUN uv pip install --system -e ".[dev,claude]"
 
 # Install and configure en_US.UTF-8 locale
 RUN apt-get update && apt-get install -y locales \

@@ -2,6 +2,14 @@
 // together with Postgres (pgvector) and MLflow on a shared network, so code can
 // reach the database at host "db". See docker-compose.yml for service details.
 // Format reference: https://aka.ms/devcontainer.json
+//
+// Claude CLI note: The Dockerfile installs Node.js LTS and the Anthropic Claude
+// CLI binary via `npm install -g @anthropic-ai/claude-code` (see Dockerfile).
+// The `.[dev,claude]` extras (including claude-agent-sdk) are also installed at
+// build time.  Authentication is NOT performed during the build — after attaching
+// to the container for the first time, run `claude` to complete the one-time
+// login.  This auth is required for `api_dependent` e2e tests that exercise the
+// real Claude Max quota; offline/mocked tests run without it.
 {
 	"name": "Agentic Librarian",
 	"dockerComposeFile": "../docker-compose.yml",

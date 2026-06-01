@@ -97,31 +97,18 @@ def test_start_conversation_creates_a_session():
 
 
 def test_run_recommendation_one_shot(monkeypatch):
-    class _PipelineSessionService:
-        async def create_session(self, app_name, user_id, session_id):
-            return None
+    received = []
 
-        async def get_session(self, app_name, user_id, session_id):
-            class _S:
-                state = {"recommendation": "Recommended: Dune"}
+    class _FakeBackend:
+        name = "fake"
 
-            return _S()
+        def run_recommendation(self, prompt, user_id="local"):
+            received.append(prompt)
+            return "Recommended: Dune"
 
-    class _PipelineRunner:
-        def __init__(self):
-            self.app_name = runtime.APP_NAME
-            self.session_service = _PipelineSessionService()
-            self.calls = []
-
-        async def run_async(self, user_id, session_id, new_message):
-            self.calls.append((user_id, session_id, new_message.parts[0].text))
-            if False:
-                yield  # empty async generator (pipeline ran)
-
-    fake = _PipelineRunner()
-    monkeypatch.setattr(runtime, "build_pipeline_runner", lambda: fake)
+    monkeypatch.setattr(runtime, "get_backend", lambda: _FakeBackend())
     assert runtime.run_recommendation("something like Dune") == "Recommended: Dune"
-    assert fake.calls[0][2] == "something like Dune"
+    assert received[0] == "something like Dune"
 
 
 @pytest.mark.api_dependent

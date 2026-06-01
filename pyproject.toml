@@ -46,6 +46,13 @@ dev = [
     "scikit-learn>=1.8.0",
     "google-cloud-aiplatform>=1.135.0",
 ]
+# Optional: Anthropic Claude Agent SDK (python wrapper around the `claude` CLI).
+# Install with:  pip install -e ".[claude]"
+# The `claude` CLI binary (npm install -g @anthropic-ai/claude-code) must also be
+# present and authenticated (one-time `claude` login) for api_dependent e2e tests.
+claude = [
+    "claude-agent-sdk>=0.2.87",
+]
 
 [build-system]
 requires = ["hatchling"]

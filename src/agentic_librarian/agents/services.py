@@ -1,5 +1,6 @@
 import os
 
+from agentic_librarian.agents import prompts
 from agentic_librarian.agents.schemas import Targets
 from agentic_librarian.mcp.server import (
     check_reading_history,
@@ -38,15 +39,7 @@ class AnalystAgent(LlmAgent):
             model=_model_name(),
             name="Analyst",
             description="Specializes in extracting structured book attributes and analyzing user taste.",
-            instruction="""
-            You are a literary analyst. Your job is to extract semantic concepts from user requests.
-            1. Identify 'Target Vibes' (Tropes/Styles the user wants).
-            2. Identify 'Session Constraints' (Moods/Tropes the user wants to avoid *just for now*, e.g., "Nothing too violent today").
-            3. Identify 'Permanent Negative Signals' (Things the user explicitly says they always hate).
-
-            Use the 'get_user_trope_preferences' tool to understand the user's historical taste.
-            Respond with the structured fields tropes, styles, session_constraints.
-            """,
+            instruction=prompts.ANALYST_INSTRUCTION,
             tools=[FunctionTool(get_user_trope_preferences)],
             output_schema=Targets,
             output_key="targets",
@@ -61,19 +54,7 @@ class ExplorerAgent(LlmAgent):
             model=_explorer_model(),
             name="Explorer",
             description="Discovers new/recent books from the web using grounded search.",
-            instruction="""
-            You are a book scout. Use the google_search tool to find REAL books that
-            match the user's request. Prefer recent or lesser-known titles that are
-            unlikely to already be in a standard personal library.
-
-            Return a handful (3-5).
-
-            CRITICAL: Only report books that appear in your search results. Never invent
-            titles, authors, or details. If the search finds nothing relevant, return an empty list.
-
-            Respond with ONLY a JSON object of this exact shape (no prose, no code fence):
-            {"books": [{"title": "...", "author": "...", "why": "one short sentence"}]}
-            """,
+            instruction=prompts.EXPLORER_INSTRUCTION,
             # NOTE: no output_schema here. google_search is a built-in tool, and Gemini rejects
             # combining a built-in tool with function-calling (which is how output_schema is
             # enforced) in one request. The Explorer therefore emits JSON-as-text; the pipeline's
@@ -95,21 +76,7 @@ class CriticAgent(LlmAgent):
             model=_model_name(),
             name="Critic",
             description="Ranks book candidates using vector similarity and ensures no duplicates in history.",
-            instruction="""
-            You are a book critic. You receive a list of candidate books and target vibes (tropes/styles).
-            1. Use 'search_internal_database' with both target tropes and target styles.
-            2. Use 'get_work_details' to see deep metadata for candidates.
-            3. Use 'check_reading_history' to check re-read eligibility (>2 years).
-            4. Rank candidates by similarity to Target Vibes.
-            5. APPLY PENALTY: If a candidate matches a 'Session Constraint', lower its rank.
-
-            6. JUSTIFY (Trope-RAG): For each recommended book, provide a grounded justification.
-               - Anchor your reasoning in the 'name' and 'description' of the top-matching tropes.
-               - Include the 'justification' (evidence) from the database to explain how the trope manifests in that specific book.
-               - Format: "I recommend [Title] because it features [Trope Name] ([Description]). Specifically, [Justification Evidence]."
-
-            Always end with a clear final recommendation naming the specific book(s) you recommend.
-            """,
+            instruction=prompts.CRITIC_INSTRUCTION,
             output_key=output_key,
             tools=[
                 FunctionTool(search_internal_database),
@@ -130,6 +97,8 @@ class LibrarianAgent(LlmAgent):
             model=_model_name(),
             name="Librarian",
             description="The entry point for users. Orchestrates the recommendation process.",
+            # Inline (not in prompts.py): the Librarian is the ADK-only conversational orchestrator,
+            # not one of the backend-portable specialist prompts.
             instruction="""
             You are the Head Librarian. You provide personalized book recommendations and manage history.
 
