@@ -4,6 +4,8 @@ from agentic_librarian.agents.schemas import Discoveries, Targets
 def test_targets_schema_validates():
     t = Targets(tropes=["heist"], styles=["fast paced"], session_constraints=["no gore"])
     assert t.tropes == ["heist"]
+    assert t.styles == ["fast paced"]
+    assert t.session_constraints == ["no gore"]
 
 
 def test_discoveries_schema_validates():

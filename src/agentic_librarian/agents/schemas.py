@@ -16,8 +16,8 @@ class Targets(BaseModel):
 
 
 class Discovery(BaseModel):
-    title: str
-    author: str
+    title: str = Field(description="Book title as it appears in search results.")
+    author: str = Field(description="Primary author name.")
     why: str = Field(default="", description="One sentence on why it fits.")
 
 
