@@ -197,3 +197,20 @@ def test_enrich_with_real_scouts_produces_styles_and_tropes():
 
     assert result["author_style"], "expected non-empty author_style from StyleScout"
     assert result["enriched_tropes"], "expected non-empty enriched_tropes from LLMTropeScout"
+
+
+def test_flatten_style_map_hoists_nested_and_drops_nonstrings():
+    from agentic_librarian.scouts.metadata_scout import _flatten_style_map
+
+    raw = {
+        "perspective": "1st person",
+        "pacing": "",  # empty -> dropped
+        "differences": {"prose_density": "denser", "tone": "darker"},  # nested -> hoisted
+        "junk": ["a", "b"],  # list -> dropped
+    }
+    assert _flatten_style_map(raw) == {
+        "perspective": "1st person",
+        "prose_density": "denser",
+        "tone": "darker",
+    }
+    assert _flatten_style_map("not a dict") == {}

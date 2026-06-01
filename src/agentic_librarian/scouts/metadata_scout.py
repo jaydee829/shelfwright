@@ -410,6 +410,24 @@ class DirectKnowledgeScout(LLMScout):
         return data or {}
 
 
+def _flatten_style_map(data: dict) -> dict[str, str]:
+    """Coerce a scouted style dict to {attribute: non-empty-string}. The work-style prompt asks the
+    model to also list attributes that DIFFER from the author baseline, so a value can come back as a
+    nested dict (e.g. {"differences": {"pacing": "..."}}). Hoist one level of nested string values to
+    the top level and drop anything that is not a non-empty string (REC-021)."""
+    out: dict[str, str] = {}
+    if not isinstance(data, dict):
+        return out
+    for key, val in data.items():
+        if isinstance(val, str) and val.strip():
+            out[key] = val.strip()
+        elif isinstance(val, dict):
+            for sub_key, sub_val in val.items():
+                if isinstance(sub_val, str) and sub_val.strip():
+                    out.setdefault(sub_key, sub_val.strip())
+    return out
+
+
 class StyleScout(LLMScout):
     """Scouts deep style attributes for authors and narrators using LLM knowledge."""
 
@@ -463,7 +481,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Work Style", title) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Work Style", title))
 
     def scout_author_style(self, name: str) -> dict:
         """Extracts style attributes for an author."""
@@ -489,7 +507,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Author Style", name) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Author Style", name))
 
     def scout_narrator_style(self, name: str) -> dict:
         """Extracts performance attributes for an audiobook narrator."""
@@ -514,7 +532,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Narrator Style", name) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Narrator Style", name))
 
 
 class LLMTropeScout(LLMScout):

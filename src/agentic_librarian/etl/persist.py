@@ -22,6 +22,18 @@ from agentic_librarian.scouts.trope_manager import TropeManager
 from sqlalchemy.orm import Session
 
 
+def _iter_style_items(style_data: dict | None, owner_label: str):
+    """Yield (attr_type, style_name) for valid non-empty string values only. A malformed scout
+    response can nest a value as a dict/list; passing that to standardize_style would make it a
+    Style.name and raise 'can't adapt type dict'. Skip + warn instead so persistence degrades
+    gracefully (REC-021)."""
+    for attr_type, style_name in (style_data or {}).items():
+        if isinstance(style_name, str) and style_name.strip():
+            yield attr_type, style_name
+        elif style_name:
+            print(f"Warning: skipping non-string style '{attr_type}'={type(style_name).__name__} for {owner_label}")
+
+
 def persist_enriched_work(
     session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
 ) -> Work | None:
@@ -57,11 +69,8 @@ def persist_enriched_work(
 
         # Process Author Styles if role is Author
         if role == "Author" and author_style_data:
-            for attr_type, style_name in author_style_data.items():
-                if not style_name:
-                    continue
+            for attr_type, style_name in _iter_style_items(author_style_data, f"Author '{name}'"):
                 standard_style = style_manager.standardize_style(style_name, category="Author")
-                # Check if link exists
                 existing_link = (
                     session.query(AuthorStyle)
                     .filter_by(author_id=author.id, style_id=standard_style.id, attribute_type=attr_type)
@@ -104,9 +113,7 @@ def persist_enriched_work(
     # 2.5 Work Styles
     work_style_data = row.get("work_style", {})
     if work_style_data:
-        for attr_type, style_name in work_style_data.items():
-            if not style_name:
-                continue
+        for attr_type, style_name in _iter_style_items(work_style_data, f"Work '{row.get('Title')}'"):
             standard_style = style_manager.standardize_style(style_name, category="Work")
             existing_link = (
                 session.query(WorkStyle)
@@ -134,9 +141,7 @@ def persist_enriched_work(
         # Process Narrator Styles
         n_style_data = narrator_styles.get(n_name, {})
         if n_style_data:
-            for attr_type, style_name in n_style_data.items():
-                if not style_name:
-                    continue
+            for attr_type, style_name in _iter_style_items(n_style_data, f"Narrator '{n_name}'"):
                 standard_style = style_manager.standardize_style(style_name, category="Narrator")
                 existing_link = (
                     session.query(NarratorStyle)
