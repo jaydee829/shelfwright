@@ -52,26 +52,26 @@ interactive chat uses the Librarian.
 
 | # | Step | Type | Reads → Writes (state) |
 |---|------|------|------------------------|
-| 1 | **Analyst** | `LlmAgent` (+ `get_user_trope_preferences`), `output_key="targets"` | user prompt → `targets` (JSON-as-text: tropes, styles, session_constraints) |
-| 2 | **InternalCandidates** | custom `BaseAgent` | parses `targets` → `candidate_ids` (from `search_internal_database` + `get_unacted_suggestions`) |
-| 3 | **Explorer** | `LlmAgent` (+ `google_search`), `output_key="discoveries"` | prompt + `targets` → `discoveries` (JSON-as-text list of `{title, author, why}`) |
-| 4 | **Enrichment** | custom `BaseAgent` | parses `discoveries` → appends enriched/de-duped work-ids to `candidate_ids` |
+| 1 | **Analyst** | `LlmAgent` (+ `get_user_trope_preferences`, `output_schema=Targets`), `output_key="targets"` | user prompt → `targets` (structured: tropes, styles, session_constraints) |
+| 2 | **InternalCandidates** | custom `BaseAgent` | `targets` → `candidate_ids` (from `search_internal_database` + `get_unacted_suggestions`) |
+| 3 | **Explorer** | `LlmAgent` (+ `google_search`, `output_schema=Discoveries`), `output_key="discoveries"` | prompt + `targets` → `discoveries` (structured list of `{title, author, why}`) |
+| 4 | **Enrichment** | custom `BaseAgent` | `discoveries` → appends enriched/de-duped work-ids to `candidate_ids` |
 | 5 | **Critic** | `LlmAgent` (+ DB tools), `output_key="recommendation"` | `candidate_ids` + `targets` → `recommendation` (Trope-RAG justified) |
 | 6 | **Logger** | custom `BaseAgent` | `recommendation` → calls `log_suggestion`; passes the text through |
 
-**Why JSON-in-text, not `output_schema`:** ADK 2.1.0 disables tool use whenever `output_schema`
-is set on an `LlmAgent` (verified via Context7 `/google/adk-python`: *"when this is set, agent can
-ONLY reply and CANNOT use any tools"*; the `output_schema`+tools processor exists only on newer
-`main`, and we are pinned to 2.1.0 per ADR-037). The Analyst needs `get_user_trope_preferences`
-and the Explorer needs `google_search`, so neither can use `output_schema`. Instead they are
-instructed to emit a **JSON object/array as their text response** (written to state via
-`output_key`), and the consuming custom agents parse it with a **robust JSON extractor** — the
-same `_safe_extract_json` pattern already used for grounded LLM output in
-`scouts/metadata_scout.py` (extracted/shared so both the scouts and the pipeline use one
-implementation). This keeps each agent's tools while still giving downstream steps structured
-data, and it removes the brittle prose-scraping that caused REC-016 #2. Downstream `LlmAgent`s
-read upstream results via instruction templating (`{targets}` injects the JSON text). The Critic's
-final `recommendation` is human-readable text (no schema).
+**Structured outputs via `output_schema` + tools:** the Analyst and Explorer define Pydantic
+`output_schema`s (`Targets`, `Discoveries`) so their results land in `ctx.session.state` as
+**validated structured objects**, not prose — removing the brittle parsing that caused REC-016 #2.
+ADK 2.1.0 supports `output_schema` *together with* tools on the same `LlmAgent` (verified
+empirically: `LlmAgent(tools=[...], output_schema=...)` constructs cleanly, and the LlmAgent
+source states it "supports using output_schema and tools together … enforcing structure only on
+the reply"; capability present since 1.26.0 — see the ADR-037 update). So the Analyst keeps
+`get_user_trope_preferences` and the Explorer keeps `google_search` while still emitting schemas.
+Downstream `LlmAgent`s read upstream results via instruction templating (`{targets}`); the custom
+agents read the structured objects from state directly. The Critic's final `recommendation` is
+human-readable text (no schema). If a live run shows the schema+tools path mishandles grounded
+output, `scouts/metadata_scout.py::_safe_extract_json` is the documented fallback (extract it to a
+shared helper only if actually needed — YAGNI otherwise).
 
 **Final-text extraction:** `run_recommendation` returns `ctx.session.state["recommendation"]`
 directly after the pipeline completes, **not** the last event's text — this is the structural
@@ -155,9 +155,8 @@ justification)` for the final pick(s).
   - **`enrich_and_persist_work`** with a **mocked `ScoutManager`** (no real API) against the
     fixture seed: new title → persisted work-id; duplicate title → existing work-id.
   - **Pipeline assembly:** `create_recommendation_pipeline()` builds a `SequentialAgent` with the
-    six steps in order.
-  - **JSON extraction:** the shared `_safe_extract_json` parses sample Analyst/Explorer outputs in
-    all three shapes (clean JSON, code-fenced, prose-wrapped) — a deterministic unit test, no API.
+    six steps in order; the `Targets`/`Discoveries` Pydantic `output_schema`s validate sample
+    objects (and reject malformed ones) — a deterministic unit test, no API.
   - **Final extraction:** a pipeline run with faked step outputs yields
     `state["recommendation"]` (never "(no response)").
 - **`api_dependent` (excluded from CI, manual):** the full live pipeline against a fixture-seeded
@@ -175,9 +174,9 @@ justification)` for the final pick(s).
 - **Modify:** `mcp/server.py` (`enrich_and_persist_work` tool); `orchestration/assets.py`
   (`vectorized_tropes` calls the shared persist function); `agents/runtime.py`
   (`run_recommendation` runs the pipeline and returns `state["recommendation"]`);
-  `agents/services.py` (Analyst/Explorer instructions emit JSON-as-text; the Critic agent is
-  reused by the pipeline); `scouts/metadata_scout.py` (extract/share `_safe_extract_json`).
-  `docs/project_notes/decisions.md` (an ADR for the pipeline architecture).
+  `agents/services.py` (Analyst/Explorer get Pydantic `output_schema`s + `output_key`; the Critic
+  agent is reused by the pipeline). `docs/project_notes/decisions.md` (an ADR for the pipeline
+  architecture).
 - The conversational Librarian path (`create_agent_mesh`, `LibrarianConversation`) is unchanged.
 
 ## Out of scope (→ Spec 5+)
