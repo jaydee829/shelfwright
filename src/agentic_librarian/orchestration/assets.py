@@ -102,5 +102,6 @@ def vectorized_tropes(
         trope_manager = TropeManager(session=session)
         style_manager = StyleManager(session=session)
         for _, row in enriched_metadata.iterrows():
-            persist_enriched_work(session, row.to_dict(), trope_manager, style_manager)
+            if persist_enriched_work(session, row.to_dict(), trope_manager, style_manager) is None:
+                context.log.warning(f"No contributors found for '{row['Title']}'. Skipping work creation.")
     context.log.info("Successfully vectorized tropes and updated database.")

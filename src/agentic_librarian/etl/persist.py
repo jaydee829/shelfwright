@@ -19,9 +19,12 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
+from sqlalchemy.orm import Session
 
 
-def persist_enriched_work(session, row: dict, trope_manager: TropeManager, style_manager: StyleManager) -> Work | None:
+def persist_enriched_work(
+    session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
+) -> Work | None:
     """Create/Update the Work graph for one enriched row. Returns the Work, or None if the
     row has no contributors. Does NOT commit — the caller controls the transaction."""
     # 1. Contributors (Name + Role)
@@ -184,7 +187,7 @@ def persist_enriched_work(session, row: dict, trope_manager: TropeManager, style
             )
             session.add(history_entry)
 
-    # 2. Tropes (Only if enriched)
+    # 5. Tropes (Only if enriched)
     if not row.get("skip_enrichment"):
         # Handle Enriched Tropes (LLMTropeScout)
         enriched_tropes = row.get("enriched_tropes", [])

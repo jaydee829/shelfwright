@@ -45,4 +45,6 @@ def test_persist_enriched_work_creates_graph(db_url, monkeypatch):
         assert w is not None
         wt = session.query(WorkTrope).filter_by(work_id=w.id).first()
         assert wt is not None
+        assert wt.relevance_score == 0.9
+        assert wt.justification == "the hero is chosen"
         assert session.query(Trope).filter_by(id=wt.trope_id).first().name == "Chosen One"
