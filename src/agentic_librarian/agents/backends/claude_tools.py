@@ -83,7 +83,7 @@ def _wrap(short: str, description: str, schema: dict[str, Any], fn: Any):
         actual = args or {}
         if not has_kwargs:
             actual = {k: v for k, v in actual.items() if k in sig.parameters}
-        result = await asyncio.to_thread(lambda: fn(**actual))  # off-thread: blocking DB call
+        result = await asyncio.to_thread(fn, **actual)  # off-thread: blocking DB call
         return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
 
     return _handler
