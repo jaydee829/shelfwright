@@ -48,6 +48,26 @@ def test_google_books_scout_search(monkeypatch, mock_json, expected_title, expec
     assert author_names == expected_authors
 
 
+def test_api_scout_session_retries_transient_http_errors():
+    # The Google Books enrichment burst 429s (REC-016/020); APIScout must retry transient 429/5xx
+    # with backoff instead of dropping a book's metadata.
+    from urllib3.util.retry import Retry
+
+    scout = md_scout.GoogleBooksScout(api_key="key")
+    retry = scout._session.get_adapter("https://www.googleapis.com").max_retries
+    assert isinstance(retry, Retry)
+    for code in (429, 500, 502, 503, 504):
+        assert code in retry.status_forcelist
+    assert retry.total >= 3
+
+
+def test_hardcover_scout_shares_the_retrying_session():
+    # Hardcover is an APIScout too, so it inherits the same transient-error retry.
+    scout = md_scout.HardcoverScout(api_key="key")
+    retry = scout._session.get_adapter("https://api.hardcover.app").max_retries
+    assert 429 in retry.status_forcelist
+
+
 @pytest.mark.parametrize(
     "mock_data,expected_pages",
     [

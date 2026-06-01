@@ -7,9 +7,12 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 
 import requests
+from agentic_librarian.llm_retry import genai_http_options
 from bs4 import BeautifulSoup
 from google import genai
 from googleapiclient.discovery import build
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # Load environment variables from .env if present (for local dev)
 try:
@@ -21,6 +24,19 @@ except ImportError:
 
 
 # --- CORE ABSTRACTIONS ---
+
+# Retry transient HTTP failures (429 + 5xx) with bounded exponential backoff. Google Books
+# rate-limits the per-discovery enrichment burst with 429s (REC-016/REC-020); without this, a burst
+# of discoveries silently loses all REST metadata. Bounded (total=3, ~1+2+4s) and Retry-After is NOT
+# honored on purpose: a single rate-limited lookup must not stall an interactive recommendation by
+# the server-dictated delay — transient blips recover, sustained limits degrade gracefully (skip).
+_API_RETRY = Retry(
+    total=3,
+    backoff_factor=1.0,
+    status_forcelist=(429, 500, 502, 503, 504),
+    allowed_methods=frozenset({"GET", "POST"}),
+    respect_retry_after_header=False,
+)
 
 
 class BaseScout(ABC):
@@ -55,11 +71,17 @@ class APIScout(BaseScout):
     def __init__(self, api_key: str = None, timeout: int = 10):
         super().__init__(api_key)
         self.timeout = timeout
+        # A Session with a retrying adapter so transient 429/5xx (e.g. the Google Books enrichment
+        # burst) back off and retry instead of silently dropping a book's metadata.
+        self._session = requests.Session()
+        adapter = HTTPAdapter(max_retries=_API_RETRY)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     def _make_request(self, method: str, url: str, **kwargs) -> dict:
         """Shared request logic with error handling."""
         try:
-            response = requests.request(method, url, timeout=self.timeout, **kwargs)
+            response = self._session.request(method, url, timeout=self.timeout, **kwargs)
             response.raise_for_status()
             return response.json()
         except requests.RequestException as e:
@@ -76,10 +98,15 @@ class LLMScout(BaseScout):
         if not key:
             raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
-        self._client = genai.Client(api_key=self.api_key)
-        # Configurable so a deployment can pick a model its quota/billing allows.
-        # gemini-2.0-flash has no free-tier quota on some keys; flash-lite does.
-        self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        # http_options carries the shared transient-error retry so grounded calls ride through
+        # 429/5xx demand spikes instead of crashing the run (REC-020).
+        self._client = genai.Client(api_key=self.api_key, http_options=genai_http_options())
+        # These scouts use Gemini-native Search grounding ({"google_search": {}}), so they need a
+        # grounding-capable model. Defaults to gemini-2.5-flash (reliable free-tier grounding);
+        # GROUNDING_MODEL/EXPLORER_MODEL override it. (Non-grounding mesh agents use GEMINI_MODEL.)
+        self.model_name = (
+            model_name or os.environ.get("GROUNDING_MODEL") or os.environ.get("EXPLORER_MODEL") or "gemini-2.5-flash"
+        )
 
     def _extract_text(self, response) -> str | None:
         """Return the response text, falling back to concatenated candidate parts.
