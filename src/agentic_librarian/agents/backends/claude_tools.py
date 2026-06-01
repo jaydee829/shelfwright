@@ -4,6 +4,7 @@ so the Claude backend reuses the SAME tool logic (and set_db_manager test inject
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 from typing import Any
 
@@ -72,9 +73,17 @@ LIBRARIAN_TOOL_NAMES = [f"mcp__{_SERVER_NAME}__{short}" for short, _, _, _ in _T
 
 
 def _wrap(short: str, description: str, schema: dict[str, Any], fn: Any):
+    sig = inspect.signature(fn)
+    has_kwargs = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+
     @tool(short, description, schema)
-    async def _handler(args: dict[str, Any]) -> dict[str, Any]:
-        result = await asyncio.to_thread(lambda: fn(**args))  # off-thread: blocking DB call
+    async def _handler(args: dict[str, Any] | None = None) -> dict[str, Any]:
+        # Defensive: the model may call with no args or hallucinate extra keys. Default to {} and,
+        # unless the function takes **kwargs, drop keys it doesn't accept — so fn(**actual) can't TypeError.
+        actual = args or {}
+        if not has_kwargs:
+            actual = {k: v for k, v in actual.items() if k in sig.parameters}
+        result = await asyncio.to_thread(lambda: fn(**actual))  # off-thread: blocking DB call
         return {"content": [{"type": "text", "text": json.dumps(result, default=str)}]}
 
     return _handler

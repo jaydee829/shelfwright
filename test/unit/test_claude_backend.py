@@ -1,6 +1,10 @@
 from unittest.mock import patch
 
-from agentic_librarian.agents.backends.claude import ClaudeBackend
+import pytest
+
+pytest.importorskip("claude_agent_sdk")  # the `claude` optional extra; skip if not installed
+
+from agentic_librarian.agents.backends.claude import ClaudeBackend  # noqa: E402
 
 
 class _Result:

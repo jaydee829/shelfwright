@@ -1,3 +1,8 @@
+import pytest
+
+pytest.importorskip("claude_agent_sdk")  # the `claude` optional extra; skip if not installed
+
+
 def test_build_librarian_mcp_server_exposes_tools():
     from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES, build_librarian_mcp_server
 

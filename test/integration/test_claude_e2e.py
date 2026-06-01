@@ -2,9 +2,12 @@ import os
 from test.integration.seed_helpers import seed_recommendation_fixture
 
 import pytest
-from agentic_librarian.agents.backends.claude import ClaudeBackend
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import set_db_manager
+
+pytest.importorskip("claude_agent_sdk")  # the `claude` optional extra; skip if not installed
+
+from agentic_librarian.agents.backends.claude import ClaudeBackend  # noqa: E402
 
 
 @pytest.mark.api_dependent

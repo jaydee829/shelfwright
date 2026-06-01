@@ -37,7 +37,8 @@ async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_jso
         if result_val and isinstance(result_val, str):
             text = result_val
     if expect_json:
-        return structured if structured is not None else coerce_schema_value(text)
+        # Normalize to a dict regardless of how the result arrived (dict / pydantic model / JSON text).
+        return coerce_schema_value(structured if structured is not None else text)
     return text
 
 
