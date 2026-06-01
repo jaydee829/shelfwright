@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 
 import requests
+from agentic_librarian.llm_retry import genai_http_options
 from bs4 import BeautifulSoup
 from google import genai
 from googleapiclient.discovery import build
@@ -76,10 +77,15 @@ class LLMScout(BaseScout):
         if not key:
             raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
-        self._client = genai.Client(api_key=self.api_key)
-        # Configurable so a deployment can pick a model its quota/billing allows.
-        # gemini-2.0-flash has no free-tier quota on some keys; flash-lite does.
-        self.model_name = model_name or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+        # http_options carries the shared transient-error retry so grounded calls ride through
+        # 429/5xx demand spikes instead of crashing the run (REC-020).
+        self._client = genai.Client(api_key=self.api_key, http_options=genai_http_options())
+        # These scouts use Gemini-native Search grounding ({"google_search": {}}), so they need a
+        # grounding-capable model. Defaults to gemini-2.5-flash (reliable free-tier grounding);
+        # GROUNDING_MODEL/EXPLORER_MODEL override it. (Non-grounding mesh agents use GEMINI_MODEL.)
+        self.model_name = (
+            model_name or os.environ.get("GROUNDING_MODEL") or os.environ.get("EXPLORER_MODEL") or "gemini-2.5-flash"
+        )
 
     def _extract_text(self, response) -> str | None:
         """Return the response text, falling back to concatenated candidate parts.

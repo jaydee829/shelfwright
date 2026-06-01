@@ -2,6 +2,7 @@ import os
 
 from agentic_librarian.agents import prompts
 from agentic_librarian.agents.schemas import Targets
+from agentic_librarian.llm_retry import RETRY_OPTIONS
 from agentic_librarian.mcp.server import (
     check_reading_history,
     get_unacted_suggestions,
@@ -13,19 +14,28 @@ from agentic_librarian.mcp.server import (
     update_suggestion_status,
 )
 from google.adk.agents import LlmAgent
+from google.adk.models.google_llm import Gemini
 from google.adk.tools import AgentTool, FunctionTool
 from google.adk.tools.google_search_tool import GoogleSearchTool
 
 
 def _model_name() -> str:
-    """Generative model for the mesh agents (configurable; matches the scouts)."""
-    return os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+    """Generative model for the NON-grounding mesh agents (Analyst, Critic, Librarian).
+    Defaults to gemini-3.1-flash-lite: stable, high free-tier throughput, no grounding needed here,
+    and it offloads these agents from the squeezed gemini-2.5 capacity (REC-020)."""
+    return os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 
-def _explorer_model() -> str:
-    """The Explorer does grounded web discovery, which benefits from a stronger model
-    than the flash-lite default used by the other agents."""
-    return os.environ.get("EXPLORER_MODEL", "gemini-2.5-flash")
+def _grounding_model() -> str:
+    """Generative model for grounded web discovery (the Explorer). Kept on gemini-2.5-flash because
+    Search grounding on the free tier is reliable there; honours EXPLORER_MODEL for back-compat."""
+    return os.environ.get("GROUNDING_MODEL") or os.environ.get("EXPLORER_MODEL") or "gemini-2.5-flash"
+
+
+def _gemini(model_name: str) -> Gemini:
+    """Wrap a model id in an ADK Gemini model carrying the shared transient-error retry config, so
+    every mesh agent rides through 429/5xx demand spikes instead of crashing the run (REC-020)."""
+    return Gemini(model=model_name, retry_options=RETRY_OPTIONS)
 
 
 # --- SPECIALIST AGENTS ---
@@ -36,7 +46,7 @@ class AnalystAgent(LlmAgent):
 
     def __init__(self):
         super().__init__(
-            model=_model_name(),
+            model=_gemini(_model_name()),
             name="Analyst",
             description="Specializes in extracting structured book attributes and analyzing user taste.",
             instruction=prompts.ANALYST_INSTRUCTION,
@@ -51,7 +61,7 @@ class ExplorerAgent(LlmAgent):
 
     def __init__(self):
         super().__init__(
-            model=_explorer_model(),
+            model=_gemini(_grounding_model()),
             name="Explorer",
             description="Discovers new/recent books from the web using grounded search.",
             instruction=prompts.EXPLORER_INSTRUCTION,
@@ -73,7 +83,7 @@ class CriticAgent(LlmAgent):
 
     def __init__(self, output_key: str | None = None):
         super().__init__(
-            model=_model_name(),
+            model=_gemini(_model_name()),
             name="Critic",
             description="Ranks book candidates using vector similarity and ensures no duplicates in history.",
             instruction=prompts.CRITIC_INSTRUCTION,
@@ -94,7 +104,7 @@ class LibrarianAgent(LlmAgent):
 
     def __init__(self, analyst, explorer, critic):
         super().__init__(
-            model=_model_name(),
+            model=_gemini(_model_name()),
             name="Librarian",
             description="The entry point for users. Orchestrates the recommendation process.",
             # Inline (not in prompts.py): the Librarian is the ADK-only conversational orchestrator,

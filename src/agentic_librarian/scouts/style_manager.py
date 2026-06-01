@@ -1,6 +1,7 @@
 import os
 
 from agentic_librarian.db.models import Style
+from agentic_librarian.llm_retry import genai_http_options
 from agentic_librarian.scouts.utils import get_cached_embedding
 from google import genai
 from sqlalchemy.orm import Session
@@ -14,7 +15,7 @@ class StyleManager:
         self._api_key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not self._api_key:
             raise ValueError("Google API key not set for StyleManager.")
-        self.client = genai.Client(api_key=self._api_key)
+        self.client = genai.Client(api_key=self._api_key, http_options=genai_http_options())
         self.model_name = "gemini-embedding-001"  # Current GA Gemini embedding model
 
     def _get_embedding(self, text: str) -> list[float]:

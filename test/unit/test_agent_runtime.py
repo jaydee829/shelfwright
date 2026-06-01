@@ -122,15 +122,45 @@ def test_live_conversation_runs():
 
 
 def test_explorer_uses_explorer_model_env(monkeypatch):
+    # Each agent's model is an ADK Gemini object; its id is `.model.model`.
+    monkeypatch.delenv("GROUNDING_MODEL", raising=False)
     monkeypatch.setenv("EXPLORER_MODEL", "gemini-test-explorer")
     mesh = create_agent_mesh()
-    assert mesh["explorer"].model == "gemini-test-explorer"
+    assert mesh["explorer"].model.model == "gemini-test-explorer"
 
 
 def test_explorer_model_defaults_to_flash(monkeypatch):
+    monkeypatch.delenv("GROUNDING_MODEL", raising=False)
     monkeypatch.delenv("EXPLORER_MODEL", raising=False)
     mesh = create_agent_mesh()
-    assert mesh["explorer"].model == "gemini-2.5-flash"
+    assert mesh["explorer"].model.model == "gemini-2.5-flash"
+
+
+def test_grounding_model_env_overrides_explorer_model(monkeypatch):
+    monkeypatch.setenv("GROUNDING_MODEL", "gemini-grounded")
+    monkeypatch.setenv("EXPLORER_MODEL", "gemini-legacy")
+    mesh = create_agent_mesh()
+    assert mesh["explorer"].model.model == "gemini-grounded"
+
+
+def test_nongrounding_agents_default_to_flash_lite_3_1(monkeypatch):
+    # Analyst/Critic/Librarian don't ground -> high-throughput gemini-3.1-flash-lite by default,
+    # off the squeezed gemini-2.5 capacity. The grounding Explorer stays on a grounding model.
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    monkeypatch.delenv("GROUNDING_MODEL", raising=False)
+    monkeypatch.delenv("EXPLORER_MODEL", raising=False)
+    mesh = create_agent_mesh()
+    for role in ("analyst", "critic", "librarian"):
+        assert mesh[role].model.model == "gemini-3.1-flash-lite", role
+    assert mesh["explorer"].model.model == "gemini-2.5-flash"
+
+
+def test_every_agent_model_carries_transient_retry(monkeypatch):
+    from agentic_librarian.llm_retry import RETRY_OPTIONS
+
+    mesh = create_agent_mesh()
+    for role, agent in mesh.items():
+        assert agent.model.retry_options is RETRY_OPTIONS, role
 
 
 def test_explorer_has_a_google_search_tool():

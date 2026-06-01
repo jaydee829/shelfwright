@@ -513,3 +513,30 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Live validation of the Claude backend is deferred until the `claude` CLI is authenticated; the
   `allowed_tools` web-search identifier ("WebSearch" vs "web_search") must be verified on the first live run
   (issues.md REC-019). Each non-LLM piece is covered by deterministic offline tests.
+
+### ADR-042: Model Routing (grounding vs non-grounding) + Transient-Error Retry (2026-06-01)
+**Context:**
+- The first live e2e run crashed on an uncaught `503 UNAVAILABLE` ("model experiencing high demand") from
+  `gemini-2.5-flash` — Google appears to be squeezing gemini-2.5 free-tier capacity. gemini-3.1-flash-lite is
+  stable with markedly higher free-tier throughput, but is below 3 Flash on quality and free-tier Search
+  *grounding* on the 3.x family is currently unreliable/ambiguous. Two distinct needs (grounded discovery vs
+  plain generation) were sharing one model config (`GEMINI_MODEL`), so they couldn't be routed separately.
+
+**Decision:**
+- Split model config into two roles. `GEMINI_MODEL` (default **gemini-3.1-flash-lite**) drives the
+  NON-grounding mesh agents (Analyst, Critic, Librarian) — high throughput, off the squeezed 2.5 capacity.
+  New `GROUNDING_MODEL` (default **gemini-2.5-flash**, honouring `EXPLORER_MODEL` as a back-compat alias)
+  drives everything that uses Gemini Search grounding: the Explorer agent AND the LLM scouts
+  (StyleScout/LLMTropeScout/audiobook), which were previously (incorrectly) pinned to `GEMINI_MODEL`.
+- Add a single shared `HttpRetryOptions` (`llm_retry.py`: 5 attempts, exp backoff, codes 429/500/502/503/504)
+  applied everywhere Gemini is called: ADK agents via `Gemini(model=..., retry_options=...)`, and the scout /
+  embedding `genai.Client(http_options=...)`. This rides through transient demand spikes instead of crashing
+  the run (resolves REC-020). Embeddings stay on `gemini-embedding-001`.
+
+**Consequences:**
+- The 503 that crashed the run is now retried with backoff; non-grounding load shifts to the higher-limit
+  3.1-flash-lite. Critic ranking quality on 3.1-flash-lite is unverified vs 2.5 — if it regresses, bump
+  `GEMINI_MODEL` back to a flash-class model (config-only). If free-tier 3.x grounding later proves reliable,
+  the Explorer/scouts can move to `GROUNDING_MODEL=gemini-3.x` for higher limits. Gemma 4 31B was considered
+  as a high-limit grounding option but rejected: Gemma on the Gemini API generally lacks the grounding tool
+  and is a smaller model (weaker for the grounding/reasoning roles).
