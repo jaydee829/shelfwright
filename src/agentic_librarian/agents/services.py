@@ -84,9 +84,13 @@ class ExplorerAgent(LlmAgent):
 
 
 class CriticAgent(LlmAgent):
-    """The Matchmaker. Nuanced ranking and history validation."""
+    """The Matchmaker. Nuanced ranking and history validation.
 
-    def __init__(self):
+    output_key: when set (the recommendation pipeline passes "recommendation"), the Critic's final
+    response is written to session state under that key so the pipeline can read it. The
+    conversational mesh constructs it without an output_key (it reads the AgentTool return value)."""
+
+    def __init__(self, output_key: str | None = None):
         super().__init__(
             model=_model_name(),
             name="Critic",
@@ -103,7 +107,10 @@ class CriticAgent(LlmAgent):
                - Anchor your reasoning in the 'name' and 'description' of the top-matching tropes.
                - Include the 'justification' (evidence) from the database to explain how the trope manifests in that specific book.
                - Format: "I recommend [Title] because it features [Trope Name] ([Description]). Specifically, [Justification Evidence]."
+
+            Always end with a clear final recommendation naming the specific book(s) you recommend.
             """,
+            output_key=output_key,
             tools=[
                 FunctionTool(search_internal_database),
                 FunctionTool(get_work_details),

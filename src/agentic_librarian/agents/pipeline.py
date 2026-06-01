@@ -114,7 +114,9 @@ def create_recommendation_pipeline() -> SequentialAgent:
             InternalCandidatesAgent(name="InternalCandidates"),
             ExplorerAgent(),
             EnrichmentAgent(name="Enrichment"),
-            CriticAgent(),
+            # output_key is essential: it writes the Critic's recommendation into
+            # state["recommendation"], which run_recommendation returns and the Logger reads.
+            CriticAgent(output_key="recommendation"),
             LoggerAgent(name="Logger"),
         ],
     )

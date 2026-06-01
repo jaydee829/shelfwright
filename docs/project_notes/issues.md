@@ -113,3 +113,11 @@ This file tracks work history and ticket references.
     4. **Multi-agent final-response extraction**: in some delegation runs the Librarian ends on a tool/transfer event with no text, so `asend` returned "(no response)". Harden the runtime's final-text extraction for multi-agent chains.
     - Interim safety net shipped in Spec 2: `get_work_details` guards non-UUID ids (see bugs.md).
     - Items 1 (web-candidate de-dup) and 2 (scout-enrichment of discoveries) are handled by `enrich_and_persist_work`; items 3 (one-shot determinism) and 4 (final-response extraction) are handled by the fixed-order SequentialAgent pipeline returning `state['recommendation']` (ADR-040).
+
+### 2026-05-31 - REC-018: Spec 4 Follow-ups (Critic ranking + live e2e verification)
+- **Status**: Open (Spec 5 / next quota window)
+- **Description**: Refinements surfaced by the Spec 4 final review.
+- **URL**: N/A
+- **Notes**:
+    1. **Explicit candidate ranking**: the pipeline gathers `state["candidate_ids"]` (internal + enriched discoveries) but the `CriticAgent` re-derives candidates via its own `search_internal_database`. Enriched discoveries are still rankable because they are persisted with embeddings (the Critic's vector search surfaces them), but ranking is not *guaranteed* to include a specific discovery. Refinement: feed `candidate_ids`/`targets` into the pipeline Critic (without disturbing the shared conversational Critic) and have it `get_work_details` each id. Pairs with the LoggerAgent TODO (log the Critic's ranked top pick, not gather-order `candidate_ids[0]`).
+    2. **Live e2e verification pending**: `test_recommendation_e2e.py` (api_dependent) could not be live-verified during Spec 4 — Gemini free-tier quota was exhausted (429). Each pipeline piece is covered by deterministic offline tests, and the critical `CriticAgent` `output_key="recommendation"` wiring is asserted offline (`test_pipeline_assembly.py`), but the full live chain (real Analyst/Explorer/Critic) must be run once when quota is available to confirm a justified recommendation is produced and logged.

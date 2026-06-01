@@ -7,3 +7,7 @@ def test_pipeline_has_six_steps_in_order(monkeypatch):
     pipeline = create_recommendation_pipeline()
     names = [a.name for a in pipeline.sub_agents]
     assert names == ["Analyst", "InternalCandidates", "Explorer", "Enrichment", "Critic", "Logger"]
+    # The Critic MUST write its recommendation to state["recommendation"] (via output_key), or
+    # run_recommendation returns "(no recommendation)" and the Logger never logs.
+    critic = pipeline.sub_agents[4]
+    assert critic.output_key == "recommendation"
