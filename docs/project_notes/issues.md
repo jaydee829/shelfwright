@@ -103,7 +103,7 @@ This file tracks work history and ticket references.
 - **Notes**: Two options: (a) upgrade to a paid Gemini tier; (b) add a separate fixture-driven audiobook smoke that pre-seeds Audible HTML and only exercises the scraping + JSON extraction path (no quota-consuming generate_content calls). The physical-book smoke in `test_flow1_etl_live.py` covers the happy path end-to-end; audiobook is left for a future tier upgrade or fixture-based approach. See bugs.md for the rate-limit failure details.
 
 ### 2026-05-31 - REC-016: Spec 4 Requirements Surfaced by Spec 2 Live Runs
-- **Status**: Open (Spec 4)
+- **Status**: Resolved in Spec 4 (ADR-040)
 - **Description**: Live Librarian→Explorer runs confirmed the Explorer's grounded discovery works and surfaced recommendation-flow work for Spec 4.
 - **URL**: N/A
 - **Notes**:
@@ -112,3 +112,4 @@ This file tracks work history and ticket references.
     3. **Librarian one-shot orchestration**: `run_recommendation` is one *call*, not a forced answer; the conversational Librarian sometimes asks a clarifying question or delegates non-deterministically. Tune so a one-shot recommendation request commits to a best-effort recommendation.
     4. **Multi-agent final-response extraction**: in some delegation runs the Librarian ends on a tool/transfer event with no text, so `asend` returned "(no response)". Harden the runtime's final-text extraction for multi-agent chains.
     - Interim safety net shipped in Spec 2: `get_work_details` guards non-UUID ids (see bugs.md).
+    - Items 1 (web-candidate de-dup) and 2 (scout-enrichment of discoveries) are handled by `enrich_and_persist_work`; items 3 (one-shot determinism) and 4 (final-response extraction) are handled by the fixed-order SequentialAgent pipeline returning `state['recommendation']` (ADR-040).

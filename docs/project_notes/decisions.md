@@ -450,3 +450,36 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Less dead code and one fewer source of the internal/external ambiguity. The deferred
   in-process-vs-A2A (Mode A/B) comparison, if ever revisited, is an implementation detail of
   external discovery (ADR-035), not a functional split.
+
+### ADR-040: One-Shot Recommendation is a Fixed-Order SequentialAgent Pipeline (2026-05-31)
+**Context:**
+- The fully LLM-driven Librarian orchestration was non-deterministic (REC-016): one-shot calls
+  sometimes asked a clarifying question instead of answering, and delegation runs sometimes ended
+  on a tool/transfer event yielding "(no response)". Web discoveries (no DB id) could not be ranked
+  by the Critic.
+
+**Decision:**
+- `run_recommendation` runs a fixed-order ADK `SequentialAgent` pipeline (Analyst →
+  InternalCandidates → Explorer → Enrichment → Critic → Logger) and returns
+  `state["recommendation"]`. The sequence is code, not an LLM decision, so ordering is deterministic
+  and the final text is read from session state (not the last event). The conversational multi-turn
+  Librarian (ADR-036) is unchanged for interactive chat.
+- Web discoveries are de-duped + enriched + persisted (`enrich_and_persist_work` + the shared
+  `persist_enriched_work`) so the Critic ranks them with DB-backed Trope-RAG.
+
+**ADK 2.1.0 mechanics (verified empirically during implementation):**
+- `output_schema` works together with **function** tools, so the **Analyst** uses `output_schema=Targets`.
+  But the **Explorer's `google_search` is a built-in tool**, and Gemini rejects combining a built-in tool
+  with function-calling (which is how `output_schema` is enforced) — so the Explorer has NO `output_schema`;
+  it emits a JSON `{"books":[...]}` object as text, parsed by the pipeline's Enrichment step.
+- Custom (non-LLM) pipeline steps write state via `Event(actions=EventActions(state_delta={...}))`; direct
+  `ctx.session.state` mutation does NOT persist in 2.1.0.
+- `SequentialAgent` logs a benign deprecation warning (the `Workflow` replacement is not shipped in 2.1.0);
+  it remains the correct API for our pinned version.
+
+**Consequences:**
+- Deterministic, testable one-shot recommendations; discoveries become first-class catalog Works.
+- Security hardening (SEC-001/002) is deferred to Spec 5 but structured for: discoveries are consumed as
+  data and all writes funnel through MCP tools (`enrich_and_persist_work` is the single new write surface).
+- The live end-to-end test (`test_recommendation_e2e.py`) is `api_dependent`; live verification is gated on
+  Gemini quota (free-tier). Each pipeline piece is independently covered by deterministic offline tests.
