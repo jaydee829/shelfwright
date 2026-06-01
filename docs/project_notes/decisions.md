@@ -483,3 +483,33 @@ This file documents key architectural decisions, their context, and trade-offs.
   data and all writes funnel through MCP tools (`enrich_and_persist_work` is the single new write surface).
 - The live end-to-end test (`test_recommendation_e2e.py`) is `api_dependent`; live verification is gated on
   Gemini quota (free-tier). Each pipeline piece is independently covered by deterministic offline tests.
+
+### ADR-041: Pluggable Agent Backend (ADK + Claude Agent SDK) (2026-06-01)
+**Context:**
+- The ADK mesh calls models via API keys (Gemini), which cannot reach the user's Claude Max
+  *subscription* quota — only the Claude Agent SDK's auto-detected Claude Code auth can. The Gemini
+  free-tier 429 wall repeatedly blocked live verification.
+
+**Decision:**
+- Introduce a `RecommendationBackend` Strategy seam at the `run_recommendation` entrypoint
+  (`AGENT_BACKEND=adk|claude`, default `adk`). `ADKBackend` wraps the existing SequentialAgent pipeline
+  verbatim; `ClaudeBackend` is explicit Python sequencing of Claude Agent SDK `query()` calls (Analyst →
+  internal candidates → Explorer-with-web-search → enrich → Critic → log), exposing the SAME in-process MCP
+  tools via `create_sdk_mcp_server`. Prompts (`agents/prompts.py`), schemas (`agents/schemas.py`), and pure
+  helpers (`agents/candidates.py`) are shared so the two backends never drift; the shared Explorer prompt was
+  made tool-agnostic ("use your web search tool") so it reads correctly for both google_search (ADK) and
+  WebSearch (Claude).
+- Structured agent output on the Claude backend uses **JSON-as-text parsed by `coerce_schema_value`** (the
+  SDK's `output_format` semantics were undocumented at v0.2.87; the text approach is the robust fallback).
+- Embeddings stay on Gemini (pgvector / `gemini-embedding-001`) for both backends — separate, low-volume
+  quota. `claude-agent-sdk` is an optional extra; the `claude` CLI is installed in the devcontainer and
+  authenticated in-container (one-time manual login) for Max-quota calls.
+
+**Consequences:**
+- The recurring Gemini quota wall is bypassable by flipping one config value; the ADK work is preserved as
+  the default backend. Two agent implementations to maintain. Using subscription quota for a personal app is
+  a ToS gray area (acceptable for personal use; not a supported product path). Conversational Librarian on
+  Claude and security hardening (SEC-001/002) remain out of scope.
+- Live validation of the Claude backend is deferred until the `claude` CLI is authenticated; the
+  `allowed_tools` web-search identifier ("WebSearch" vs "web_search") must be verified on the first live run
+  (issues.md REC-019). Each non-LLM piece is covered by deterministic offline tests.
