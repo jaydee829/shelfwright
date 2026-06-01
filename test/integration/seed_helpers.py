@@ -18,13 +18,22 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 _FIXTURE = json.loads((Path(__file__).parent.parent / "data" / "trope_embeddings.json").read_text())
 ROMANCE = ["enemies to lovers", "slow burn romance"]
 GRIMDARK = ["grimdark war", "brutal military strategy"]
 
 
-def _work(session, title, author_name, trope_names, *, read_on=None, suggested=False):
+def _work(
+    session: Session,
+    title: str,
+    author_name: str,
+    trope_names: list[str],
+    *,
+    read_on: date | None = None,
+    suggested: bool = False,
+) -> Work:
     author = Author(name=author_name)
     session.add(author)
     session.flush()
