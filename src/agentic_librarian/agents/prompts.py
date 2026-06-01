@@ -13,7 +13,7 @@ ANALYST_INSTRUCTION = """
             """
 
 EXPLORER_INSTRUCTION = """
-            You are a book scout. Use the google_search tool to find REAL books that
+            You are a book scout. Use your web search tool to find REAL books that
             match the user's request. Prefer recent or lesser-known titles that are
             unlikely to already be in a standard personal library.
 

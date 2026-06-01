@@ -18,12 +18,13 @@ def _model() -> str:
     return os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 
-async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_json: bool) -> object:
-    """Run one query() turn. Returns parsed dict (expect_json=True) or raw result text (expect_json=False)."""
+async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_json: bool, mcp_server) -> object:
+    """Run one query() turn. Returns parsed dict (expect_json=True) or raw result text (expect_json=False).
+    `mcp_server` is the prebuilt in-process librarian server (built once per run and reused)."""
     options = ClaudeAgentOptions(
         system_prompt=system,
         model=_model(),
-        mcp_servers={"librarian": build_librarian_mcp_server()},
+        mcp_servers={"librarian": mcp_server},
         allowed_tools=allowed_tools,
     )
     text, structured = "", None
@@ -42,20 +43,26 @@ async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_jso
 
 async def _arun(prompt: str) -> str:
     state: dict = {}
+    librarian = build_librarian_mcp_server()  # in-process; built once, reused across the steps
     state["targets"] = await _ask(
         prompt,
         system=prompts.ANALYST_INSTRUCTION
         + '\nRespond with ONLY a JSON object: {"tropes":[], "styles":[], "session_constraints":[]}.',
         allowed_tools=["mcp__librarian__get_user_trope_preferences"],
         expect_json=True,
+        mcp_server=librarian,
     )
     candidate_ids = extract_candidate_ids(state)
     state["discoveries"] = await _ask(
         f"{prompt}\nTarget vibes: {coerce_schema_value(state['targets'])}",
         system=prompts.EXPLORER_INSTRUCTION
         + '\nRespond with ONLY a JSON object: {"books":[{"title": "", "author": "", "why": ""}]}.',
+        # "WebSearch" is Claude Code's built-in web-search tool (allowed_tools uses CLI tool names,
+        # PascalCase — cf. ["Read", "Grep"]). Unverifiable offline; if the live Explorer doesn't
+        # search, try the server-tool name "web_search". VERIFY on the first live run (REC-019).
         allowed_tools=["WebSearch"],
         expect_json=True,
+        mcp_server=librarian,
     )
     for title, author in extract_discovery_pairs(state):
         wid = await asyncio.to_thread(enrich_and_persist_work, title, author)
@@ -75,6 +82,7 @@ async def _arun(prompt: str) -> str:
             "mcp__librarian__check_reading_history",
         ],
         expect_json=False,
+        mcp_server=librarian,
     )
     recommendation = recommendation or "(no recommendation)"
     if recommendation != "(no recommendation)" and candidate_ids:
