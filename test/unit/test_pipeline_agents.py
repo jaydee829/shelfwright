@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from agentic_librarian.agents.pipeline import (
+from agentic_librarian.agents.candidates import (
     coerce_schema_value,
     extract_candidate_ids,
     extract_discovery_pairs,

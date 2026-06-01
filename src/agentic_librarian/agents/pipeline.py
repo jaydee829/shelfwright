@@ -7,11 +7,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 
-from agentic_librarian.agents.candidates import (
-    coerce_schema_value,  # noqa: F401  (re-exported for existing importers)
-    extract_candidate_ids,
-    extract_discovery_pairs,
-)
+from agentic_librarian.agents.candidates import extract_candidate_ids, extract_discovery_pairs
 from agentic_librarian.agents.services import AnalystAgent, CriticAgent, ExplorerAgent
 from agentic_librarian.mcp.server import (
     enrich_and_persist_work,
