@@ -1,5 +1,6 @@
 import os
 
+from agentic_librarian.agents.schemas import Discoveries, Targets
 from agentic_librarian.mcp.server import (
     check_reading_history,
     get_unacted_suggestions,
@@ -44,8 +45,11 @@ class AnalystAgent(LlmAgent):
             3. Identify 'Permanent Negative Signals' (Things the user explicitly says they always hate).
 
             Use the 'get_user_trope_preferences' tool to understand the user's historical taste.
+            Respond with the structured fields tropes, styles, session_constraints.
             """,
             tools=[FunctionTool(get_user_trope_preferences)],
+            output_schema=Targets,
+            output_key="targets",
         )
 
 
@@ -67,8 +71,11 @@ class ExplorerAgent(LlmAgent):
 
             CRITICAL: Only report books that appear in your search results. Never invent
             titles, authors, or details. If the search finds nothing relevant, say so.
+            Return the books list; each item has title, author, why.
             """,
             tools=[GoogleSearchTool(bypass_multi_tools_limit=True)],
+            output_schema=Discoveries,
+            output_key="discoveries",
         )
 
 
