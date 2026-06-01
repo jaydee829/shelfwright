@@ -417,6 +417,8 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Pros: minimal, spike-verified path; no risk to the just-merged Spec 1 runtime.
 - **Tech debt (deferred):** a benign `[EXPERIMENTAL] JSON_SCHEMA_FOR_FUNC_DECL` warning; we forgo newer native multi-tool / Interactions-API ergonomics and easy grounding-citation surfacing. **An ADK upgrade is its own future task** — do it when a newer capability is actually needed (e.g. grounding citations for Spec 4), with a full re-verification of the mesh.
 
+**Update (2026-05-31, during Spec 4 brainstorming):** Investigated whether to upgrade ADK for `output_schema`+tools. Findings: **2.1.0 is already the latest stable** on PyPI (line: 2.1.0 › 1.34.1 › …; nothing newer to upgrade to short of unreleased git `main`). The capabilities we thought we lacked actually shipped *below* 2.1.0 and are present: **`output_schema` together with tools** (improvements in 1.26.0, 2026-02-26) and **grounding/citation metadata + interactions-API** (1.27.0, 2026-03-12). Empirically verified in the container: `LlmAgent(tools=[...], output_schema=...)` constructs cleanly and the LlmAgent source states *"The ADK supports using output_schema and tools together … enforcing structure only on the reply."* So the earlier "forgo output_schema" framing was based on stale general docs, not our installed version. **Decision:** stay on 2.1.0, **use `output_schema`+tools natively** (Spec 4), and raise the dependency floor to `google-adk>=2.1.0` / `google-genai>=1.72` so a fresh resolve keeps the capability. The `bypass_multi_tools_limit` approach for `google_search` in a *sub-agent* remains correct (a separate built-in-tools-in-sub-agents constraint). Grounding-citation surfacing is available if a later spec wants it — no upgrade required.
+
 ### ADR-038: Security Review is a Per-Spec Practice (2026-05-31)
 **Context:**
 - The system is an agentic mesh with live web grounding (Spec 2) and a mutable database. The two classic exposures are SQL injection (DB) and prompt injection (LLM mesh acting on untrusted web text). A PR #20 review prompted making security review a standing practice rather than ad hoc.
@@ -448,3 +450,36 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Less dead code and one fewer source of the internal/external ambiguity. The deferred
   in-process-vs-A2A (Mode A/B) comparison, if ever revisited, is an implementation detail of
   external discovery (ADR-035), not a functional split.
+
+### ADR-040: One-Shot Recommendation is a Fixed-Order SequentialAgent Pipeline (2026-05-31)
+**Context:**
+- The fully LLM-driven Librarian orchestration was non-deterministic (REC-016): one-shot calls
+  sometimes asked a clarifying question instead of answering, and delegation runs sometimes ended
+  on a tool/transfer event yielding "(no response)". Web discoveries (no DB id) could not be ranked
+  by the Critic.
+
+**Decision:**
+- `run_recommendation` runs a fixed-order ADK `SequentialAgent` pipeline (Analyst →
+  InternalCandidates → Explorer → Enrichment → Critic → Logger) and returns
+  `state["recommendation"]`. The sequence is code, not an LLM decision, so ordering is deterministic
+  and the final text is read from session state (not the last event). The conversational multi-turn
+  Librarian (ADR-036) is unchanged for interactive chat.
+- Web discoveries are de-duped + enriched + persisted (`enrich_and_persist_work` + the shared
+  `persist_enriched_work`) so the Critic ranks them with DB-backed Trope-RAG.
+
+**ADK 2.1.0 mechanics (verified empirically during implementation):**
+- `output_schema` works together with **function** tools, so the **Analyst** uses `output_schema=Targets`.
+  But the **Explorer's `google_search` is a built-in tool**, and Gemini rejects combining a built-in tool
+  with function-calling (which is how `output_schema` is enforced) — so the Explorer has NO `output_schema`;
+  it emits a JSON `{"books":[...]}` object as text, parsed by the pipeline's Enrichment step.
+- Custom (non-LLM) pipeline steps write state via `Event(actions=EventActions(state_delta={...}))`; direct
+  `ctx.session.state` mutation does NOT persist in 2.1.0.
+- `SequentialAgent` logs a benign deprecation warning (the `Workflow` replacement is not shipped in 2.1.0);
+  it remains the correct API for our pinned version.
+
+**Consequences:**
+- Deterministic, testable one-shot recommendations; discoveries become first-class catalog Works.
+- Security hardening (SEC-001/002) is deferred to Spec 5 but structured for: discoveries are consumed as
+  data and all writes funnel through MCP tools (`enrich_and_persist_work` is the single new write surface).
+- The live end-to-end test (`test_recommendation_e2e.py`) is `api_dependent`; live verification is gated on
+  Gemini quota (free-tier). Each pipeline piece is independently covered by deterministic offline tests.

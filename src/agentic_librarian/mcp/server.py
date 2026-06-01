@@ -18,6 +18,7 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from sqlalchemy import func, select
@@ -420,6 +421,66 @@ def get_work_details(work_id: str) -> dict:
             "tropes": tropes,
             "styles": merged_styles,
         }
+
+
+def _normalize(s: str) -> str:
+    return " ".join((s or "").strip().lower().split())
+
+
+def _normalized_col(col):
+    """SQL-side equivalent of _normalize: lowercase, collapse internal whitespace, trim — so
+    de-dup matches even when a stored title/name has irregular spacing."""
+    return func.trim(func.regexp_replace(func.lower(col), r"\s+", " ", "g"))
+
+
+@mcp.tool()
+def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> str | None:
+    """De-dup a web-discovered book against the catalog; if new, enrich it via the ScoutManager
+    and persist it as a Work (no reading history). Returns the work_id, or None if enrichment
+    found nothing. This is the single write surface for discoveries — a future authorization
+    layer (SEC-002) wraps here."""
+    try:
+        with db_manager.get_session() as session:
+            # 1. De-dup (Case 1): match an existing Work by normalized title + author.
+            existing = (
+                session.query(Work)
+                .join(WorkContributor)
+                .join(Author)
+                .filter(_normalized_col(Work.title) == _normalize(title))
+                .filter(_normalized_col(Author.name) == _normalize(author))
+                .first()
+            )
+            if existing:
+                return str(existing.id)
+
+            # 2. Enrich (Case 2): run the scouts, then persist via the shared function.
+            from agentic_librarian.orchestration.definitions import create_scout_manager
+
+            enriched = create_scout_manager().enrich(title=title, author=author, format=format)
+            if not enriched:
+                return None
+
+            row = {
+                "Title": title,
+                "Author_1": author,
+                "format": format,
+                "skip_enrichment": False,
+                "date_completed": None,
+                **enriched,
+                "genres": list(enriched.get("genres") or []),
+                "moods": list(enriched.get("moods") or []),
+            }
+            tm = TropeManager(session=session)
+            sm = StyleManager(session=session)
+            work = persist_enriched_work(session, row, tm, sm)
+            if work is None:
+                return None
+            session.flush()  # ensure work.id is populated
+            # get_session commits on clean exit (matches the other write tools) — no explicit commit.
+            return str(work.id)
+    except Exception as e:  # noqa: BLE001 - degrade gracefully, never crash the pipeline
+        print(f"enrich_and_persist_work error: {e}")
+        return None
 
 
 if __name__ == "__main__":
