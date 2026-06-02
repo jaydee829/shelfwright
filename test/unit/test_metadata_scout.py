@@ -302,7 +302,7 @@ def test_google_books_warns_once_without_key(capsys, monkeypatch):
     import agentic_librarian.scouts.metadata_scout as md_scout
 
     monkeypatch.delenv("GOOGLE_BOOKS_API_KEY", raising=False)
-    md_scout._gbooks_nokey_warned = False
+    monkeypatch.setattr(md_scout, "_gbooks_nokey_warned", False)  # auto-restored on teardown
     scout = md_scout.GoogleBooksScout()
     monkeypatch.setattr(scout, "_make_request", lambda *a, **k: {})
     scout.search("T", "A")
