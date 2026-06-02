@@ -1,4 +1,11 @@
 from agentic_librarian.agents import prompts
+from agentic_librarian.agents.prompts import CRITIC_INSTRUCTION
+
+
+def test_critic_commits_to_a_one_shot_recommendation():
+    text = CRITIC_INSTRUCTION.lower()
+    assert "best-effort" in text
+    assert "never" in text  # never ask a clarifying question / never return empty
 
 
 def test_prompts_are_nonempty_strings():

@@ -38,6 +38,8 @@ _API_RETRY = Retry(
     respect_retry_after_header=False,
 )
 
+_gbooks_nokey_warned = False
+
 
 class BaseScout(ABC):
     """Abstract base class for all metadata scouts."""
@@ -167,6 +169,14 @@ class GoogleBooksScout(APIScout):
         super().__init__(key)
 
     def search(self, title: str, author: str, **kwargs) -> dict:
+        global _gbooks_nokey_warned
+        if not self.api_key and not _gbooks_nokey_warned:
+            print(
+                "Warning: GoogleBooksScout has no GOOGLE_BOOKS_API_KEY — using the very low "
+                "unauthenticated quota; expect 429s on enrichment bursts. Get a free key: "
+                "https://developers.google.com/books/docs/v1/using#APIKey"
+            )
+            _gbooks_nokey_warned = True
         base_url = "https://www.googleapis.com/books/v1/volumes"
         query = f"intitle:{title} inauthor:{author}"
         params = {
@@ -215,92 +225,122 @@ class HardcoverScout(APIScout):
 
     def search(self, title: str, author: str, **kwargs) -> dict:
         format_val = kwargs.get("format", "Paperback")
-        url = "https://api.hardcover.app/v1/graphql"
         if not self.api_key:
             return {}
+        book_id = self._find_book_id(title, author)
+        if book_id is None:
+            return {}
+        book = self._fetch_book(book_id)
+        if not book:
+            return {}
+        return self._book_to_metadata(book, format_val)
 
+    def _graphql(self, query: str, variables: dict) -> dict:
         headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"}
+        url = "https://api.hardcover.app/v1/graphql"
+        data = self._make_request("POST", url, headers=headers, json={"query": query, "variables": variables})
+        return data.get("data") or {}
+
+    def _find_book_id(self, title: str, author: str) -> int | None:
+        # Search by TITLE only (adding the author can rank companion "workbook" entries first).
+        query = 'query($q: String!) { search(query: $q, query_type: "Book", per_page: 5) { results } }'
+        data = self._graphql(query, {"q": title})
+        hits = (((data.get("search") or {}).get("results") or {}).get("hits")) or []
+        return self._select_hit(hits, author)
+
+    @staticmethod
+    def _select_hit(hits: list, author: str) -> int | None:
+        def norm(s: str) -> str:
+            return " ".join((s or "").lower().split())
+
+        companions = ("workbook", "summary", "analysis", "study guide", "conversation starters")
+        a = norm(author)
+        docs = [h.get("document", {}) for h in hits]
+
+        def is_companion(d: dict) -> bool:
+            return any(c in (d.get("title") or "").lower() for c in companions)
+
+        def author_matches(d: dict) -> bool:
+            # Bidirectional substring match on purpose: tolerate abbreviated/extended author names
+            # between the caller and Hardcover (e.g. "S. King" vs "Stephen King"). Author names are
+            # never single chars in practice, so this stays specific enough.
+            return any(a and norm(n) and (a in norm(n) or norm(n) in a) for n in (d.get("author_names") or []))
+
+        def reads(d: dict) -> int:
+            return d.get("users_read_count") or 0
+
+        candidates = [d for d in docs if not is_companion(d) and author_matches(d)]
+        if not candidates:
+            candidates = [d for d in docs if not is_companion(d)] or docs
+        if not candidates:
+            return None
+        best = max(candidates, key=reads)
+        try:
+            return int(best.get("id"))
+        except (TypeError, ValueError):
+            return None
+
+    def _fetch_book(self, book_id: int) -> dict | None:
         query = """
-            query GetEditionsFromTitleFormat($title: String!, $format: String!) {
-                editions(
-                    where: {book: {title: {_eq: $title}}, country: {name: {_eq: "United States of America"}}, edition_format: {_eq: $format}}
-                ) {
-                    isbn_13
+            query GetBook($id: Int!) {
+                books(where: {id: {_eq: $id}}) {
                     title
-                    book {
-                    contributions {
-                        author {
-                        name
-                        }
-                        author_role {
-                        name
-                        }
-                    }
-                    moods: cached_tags(path: "Mood")
-                    genres: cached_tags(path: "Genre")
                     description
                     pages
-                    audio_seconds
                     release_date
+                    contributions { author { name } contribution }
+                    moods: cached_tags(path: "Mood")
+                    genres: cached_tags(path: "Genre")
+                    editions {
+                        isbn_13
+                        edition_format
+                        pages
+                        audio_seconds
+                        release_date
+                        country { name }
                     }
-                    pages
-                    audio_seconds
-                    release_date
                 }
-                }
+            }
         """
-        variables = {"title": title, "format": format_val}
-        data = self._make_request("POST", url, headers=headers, json={"query": query, "variables": variables})
+        books = (self._graphql(query, {"id": book_id}).get("books")) or []
+        return books[0] if books else None
 
-        editions = data.get("data", {}).get("editions", [])
-        if not editions:
-            return {}
+    def _book_to_metadata(self, book: dict, format_val: str) -> dict:
+        editions = book.get("editions") or []
 
-        moods, genres = [], []
-        audio_length, pages = None, None
-        selected_edition = None
+        def fmt_match(e: dict) -> bool:
+            return (e.get("edition_format") or "").lower() == format_val.lower()
 
-        for edition in editions:
-            raw_moods = edition.get("book", {}).get("moods", [])
-            moods.extend([m.get("tagSlug") for m in raw_moods])
-            raw_genres = edition.get("book", {}).get("genres", [])
-            genres.extend([g.get("tagSlug") for g in raw_genres])
-            audio_length = edition.get("audio_seconds") or audio_length
-            pages = edition.get("pages") or pages
-            if "audiobook" in format_val.lower() and edition.get("audio_seconds"):
-                selected_edition = edition
-                break
-            if "audiobook" not in format_val.lower() and edition.get("pages"):
-                selected_edition = edition
-                break
+        def is_us(e: dict) -> bool:
+            return ((e.get("country") or {}).get("name")) == "United States of America"
 
-        # Fallback if no perfect format match found
-        if not selected_edition:
-            selected_edition = editions[0]
+        selected = (
+            next((e for e in editions if fmt_match(e) and is_us(e)), None)
+            or next((e for e in editions if fmt_match(e)), None)
+            or (editions[0] if editions else {})
+        )
 
-        book = selected_edition.get("book", {})
+        audio_seconds = selected.get("audio_seconds")
         contributors = []
-        for c in book.get("contributions", []):
-            name = c.get("author", {}).get("name")
-            role = c.get("author_role", {}).get("name") or "Author"
+        for c in book.get("contributions") or []:
+            name = (c.get("author") or {}).get("name")
+            role = c.get("contribution") or "Author"
             if name:
                 contributors.append({"name": name, "role": role})
 
-        edition_release_date = selected_edition.get("release_date")
-        original_release_date = book.get("release_date") or edition_release_date
-
+        edition_release = selected.get("release_date")
         return {
-            "title": selected_edition.get("title"),
+            "title": book.get("title"),
             "contributors": contributors,
-            "edition_format": selected_edition.get("edition_format"),
-            "page_count": pages,
-            "publication_date": edition_release_date,
-            "original_publication_date": original_release_date,
-            "isbn_13": selected_edition.get("isbn_13"),
-            "moods": set(moods),
-            "genres": set(genres),
+            "edition_format": selected.get("edition_format"),
+            "page_count": selected.get("pages") or book.get("pages"),
+            "publication_date": edition_release,
+            "original_publication_date": book.get("release_date") or edition_release,
+            "isbn_13": selected.get("isbn_13"),
+            "moods": {m.get("tagSlug") for m in (book.get("moods") or []) if m.get("tagSlug")},
+            "genres": {g.get("tagSlug") for g in (book.get("genres") or []) if g.get("tagSlug")},
             "description": book.get("description", ""),
-            "audio_minutes": audio_length // 60 if audio_length else None,
+            "audio_minutes": audio_seconds // 60 if audio_seconds else None,
         }
 
 
@@ -410,6 +450,24 @@ class DirectKnowledgeScout(LLMScout):
         return data or {}
 
 
+def _flatten_style_map(data: dict | None) -> dict[str, str]:
+    """Coerce a scouted style dict to {attribute: non-empty-string}. The work-style prompt asks the
+    model to also list attributes that DIFFER from the author baseline, so a value can come back as a
+    nested dict (e.g. {"differences": {"pacing": "..."}}). Hoist one level of nested string values to
+    the top level and drop anything that is not a non-empty string (REC-021)."""
+    out: dict[str, str] = {}
+    if not isinstance(data, dict):
+        return out
+    for key, val in data.items():
+        if isinstance(val, str) and val.strip():
+            out[key] = val.strip()
+        elif isinstance(val, dict):
+            for sub_key, sub_val in val.items():
+                if isinstance(sub_val, str) and sub_val.strip():
+                    out.setdefault(sub_key, sub_val.strip())  # top-level value wins on collision
+    return out
+
+
 class StyleScout(LLMScout):
     """Scouts deep style attributes for authors and narrators using LLM knowledge."""
 
@@ -463,7 +521,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Work Style", title) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Work Style", title))
 
     def scout_author_style(self, name: str) -> dict:
         """Extracts style attributes for an author."""
@@ -489,7 +547,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Author Style", name) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Author Style", name))
 
     def scout_narrator_style(self, name: str) -> dict:
         """Extracts performance attributes for an audiobook narrator."""
@@ -514,7 +572,7 @@ class StyleScout(LLMScout):
             contents=prompt,
             config={"tools": [{"google_search": {}}] if use_grounding else []},
         )
-        return self._safe_extract_json(self._extract_text(response), "Narrator Style", name) or {}
+        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Narrator Style", name))
 
 
 class LLMTropeScout(LLMScout):
@@ -579,7 +637,11 @@ class ScoutManager:
             if isinstance(scout, AudiobookScout | DirectKnowledgeScout) and "audiobook" not in format.lower():
                 continue
 
-            res = scout.search(title, author, format=format, narrators=merged_data["narrator_names"], **kwargs)
+            try:
+                res = scout.search(title, author, format=format, narrators=merged_data["narrator_names"], **kwargs)
+            except Exception as e:  # noqa: BLE001 - one scout's failure must not discard the others' data
+                print(f"Warning: {scout.source_name} scout failed: {e}")
+                continue
             if not res:
                 continue
 

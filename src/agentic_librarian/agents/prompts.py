@@ -40,4 +40,9 @@ CRITIC_INSTRUCTION = """
                - Format: "I recommend [Title] because it features [Trope Name] ([Description]). Specifically, [Justification Evidence]."
 
             Always end with a clear final recommendation naming the specific book(s) you recommend.
+
+            ONE-SHOT: This is a single-shot request, not a conversation. Always commit to a concrete
+            best-effort recommendation from the candidates available — never ask a clarifying question
+            and never return an empty response. If the evidence is thin, recommend the closest match
+            and say so.
             """
