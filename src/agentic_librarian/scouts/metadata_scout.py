@@ -101,11 +101,11 @@ class LLMScout(BaseScout):
             raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
         # Backend-selectable grounding LLM (Gemini default; Claude when AGENT_BACKEND=claude). Injectable
-        # for tests. model_name kept for back-compat; the Gemini provider owns the model (GROUNDING_MODEL).
+        # for tests. model_name is threaded into the Gemini provider (so it isn't silently ignored).
         self.model_name = (
             model_name or os.environ.get("GROUNDING_MODEL") or os.environ.get("EXPLORER_MODEL") or "gemini-2.5-flash"
         )
-        self._llm = llm or get_grounded_llm(self.api_key)
+        self._llm = llm or get_grounded_llm(self.api_key, model_name=self.model_name)
 
     def _safe_extract_json(self, response_text: str, title: str, author: str, retry_count: int = 0) -> dict | None:
         """Cleans and parses LLM JSON output with descriptive error logging."""

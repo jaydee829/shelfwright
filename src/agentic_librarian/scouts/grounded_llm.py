@@ -83,9 +83,10 @@ class ClaudeGroundedLLM:
         return text
 
 
-def get_grounded_llm(api_key: str | None = None) -> GroundedLLM:
-    """Pick the grounding-LLM provider from AGENT_BACKEND (default/'adk' -> Gemini; 'claude' -> Claude)."""
+def get_grounded_llm(api_key: str | None = None, model_name: str | None = None) -> GroundedLLM:
+    """Pick the grounding-LLM provider from AGENT_BACKEND (default/'adk' -> Gemini; 'claude' -> Claude).
+    `model_name` applies only to the Gemini provider; the Claude provider uses CLAUDE_MODEL."""
     choice = os.environ.get("AGENT_BACKEND", "adk").strip().lower()
     if choice == "claude":
         return ClaudeGroundedLLM()
-    return GeminiGroundedLLM(api_key)
+    return GeminiGroundedLLM(api_key, model_name)

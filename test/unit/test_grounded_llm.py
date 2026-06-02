@@ -79,6 +79,13 @@ def test_factory_selects_backend(monkeypatch):
     assert isinstance(gl.get_grounded_llm("k"), gl.ClaudeGroundedLLM)
 
 
+def test_factory_threads_model_name_to_gemini(monkeypatch):
+    monkeypatch.setattr(gl.genai, "Client", lambda *a, **k: MagicMock())
+    monkeypatch.delenv("AGENT_BACKEND", raising=False)
+    llm = gl.get_grounded_llm("k", model_name="gemini-custom")
+    assert llm.model_name == "gemini-custom"  # not silently ignored
+
+
 def test_claude_generate_collects_result_and_sets_tools(monkeypatch):
     captured = {}
 
