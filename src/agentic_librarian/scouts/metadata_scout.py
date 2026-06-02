@@ -330,7 +330,7 @@ class AudiobookScout(LLMScout):
     """Scouts audiobook metadata from Audible using LLM extraction."""
 
     def search(self, title: str, author: str, **kwargs) -> dict:
-        return self.extract_metadata_with_gemini(title, author)
+        return self._extract_metadata_from_page(title, author)
 
     def search_audible_link(self, title: str) -> str | None:
         search_engine_id = os.environ.get("SEARCH_ENGINE_ID")
@@ -358,7 +358,7 @@ class AudiobookScout(LLMScout):
             script.extract()
         return soup.get_text()
 
-    def extract_metadata_with_gemini(self, title: str, author: str = "Unknown") -> dict:
+    def _extract_metadata_from_page(self, title: str, author: str = "Unknown") -> dict:
         text_content = self.fetch_page_content(title)
         prompt = f"""
         Extract the following fields from the text. Return ONLY a raw JSON object.

@@ -86,6 +86,14 @@ def test_factory_threads_model_name_to_gemini(monkeypatch):
     assert llm.model_name == "gemini-custom"  # not silently ignored
 
 
+def test_factory_raises_on_unknown_backend(monkeypatch):
+    import pytest
+
+    monkeypatch.setenv("AGENT_BACKEND", "gemni")  # typo
+    with pytest.raises(ValueError, match="Unknown AGENT_BACKEND"):
+        gl.get_grounded_llm("k")
+
+
 def test_claude_generate_collects_result_and_sets_tools(monkeypatch):
     captured = {}
 

@@ -89,4 +89,7 @@ def get_grounded_llm(api_key: str | None = None, model_name: str | None = None) 
     choice = os.environ.get("AGENT_BACKEND", "adk").strip().lower()
     if choice == "claude":
         return ClaudeGroundedLLM()
+    if choice not in ("adk", ""):
+        # Fail loudly on a typo rather than silently defaulting to Gemini (matches agents.get_backend).
+        raise ValueError(f"Unknown AGENT_BACKEND={choice!r} (expected 'adk' or 'claude').")
     return GeminiGroundedLLM(api_key, model_name)
