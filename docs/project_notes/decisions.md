@@ -561,3 +561,23 @@ This file documents key architectural decisions, their context, and trade-offs.
   (`&` vs "and", articles) since matching is fuzzy. Two API calls per book instead of one (acceptable —
   priority-1 short-circuits the other scouts; Hardcover quota is generous). Companion/workbook hits are
   filtered heuristically; a future refinement could weight series/edition signals.
+
+### ADR-044: GroundedLLM Seam — Enrichment Scouts Follow AGENT_BACKEND (2026-06-02)
+**Context:**
+- ADR-041 made the recommendation mesh backend-selectable, but the enrichment LLM scouts stayed on
+  Gemini. An `AGENT_BACKEND=claude` run (and the Flow-1 ETL) still hit the Gemini free-tier
+  `generate_content` daily cap (20/day), stretching a full reading-history ingest into ~weeks (REC-024).
+
+**Decision:**
+- Introduce a `GroundedLLM` provider seam (`scouts/grounded_llm.py`: `generate(prompt, grounded=)`) with
+  `GeminiGroundedLLM` (google_search) and `ClaudeGroundedLLM` (Agent SDK WebSearch, run synchronously via
+  `asyncio.run`), chosen by `get_grounded_llm()` reading the SAME `AGENT_BACKEND` knob. `LLMScout` takes
+  the provider (injectable); all four scouts call `self._llm.generate(...)`. Prompts, JSON parsing, merge
+  and persistence are unchanged. Embeddings stay on Gemini (separate, higher quota — not the bottleneck).
+
+**Consequences:**
+- One knob flips the whole pipeline (recommendation + batch ETL) between Gemini and Claude; default is
+  byte-for-byte Gemini. Claude extraction quality vs Gemini grounding is validated by a live check.
+  `ClaudeGroundedLLM.generate` must be called from a synchronous context (it uses `asyncio.run`); scouts
+  always are. A full ETL on Claude issues many WebSearch calls — validate Agent SDK rate limits on a
+  small batch first.

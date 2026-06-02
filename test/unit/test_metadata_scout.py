@@ -144,19 +144,20 @@ def test_safe_extract_json_handles_fences_prose_and_none():
 
 
 def test_extract_text_falls_back_to_candidate_parts():
-    """When response.text is empty (grounded responses), text comes from the parts."""
-    scout = md_scout.LLMTropeScout(api_key="fake-key")
+    """When response.text is empty (grounded responses), text comes from the candidate parts."""
+
+    from agentic_librarian.scouts.grounded_llm import _extract_text
 
     direct = MagicMock()
     direct.text = "hello"
-    assert scout._extract_text(direct) == "hello"
+    assert _extract_text(direct) == "hello"
 
     grounded = MagicMock()
     grounded.text = None
     part = MagicMock()
     part.text = '{"x": 1}'
     grounded.candidates = [MagicMock(content=MagicMock(parts=[part]))]
-    assert scout._extract_text(grounded) == '{"x": 1}'
+    assert _extract_text(grounded) == '{"x": 1}'
 
 
 @pytest.mark.api_dependent
@@ -359,3 +360,15 @@ def test_flatten_style_map_hoists_nested_and_drops_nonstrings():
         "tone": "darker",
     }
     assert _flatten_style_map("not a dict") == {}
+
+
+@pytest.mark.api_dependent
+def test_claude_grounded_scouts_produce_styles_and_tropes(monkeypatch):
+    """Live (needs an authenticated claude CLI): AGENT_BACKEND=claude yields usable style/trope JSON."""
+    monkeypatch.setenv("AGENT_BACKEND", "claude")
+    from agentic_librarian.scouts.metadata_scout import LLMTropeScout, StyleScout
+
+    tropes = LLMTropeScout(api_key="x").search("The Way of Kings", "Brandon Sanderson")
+    assert tropes.get("tropes"), "expected non-empty tropes from the Claude LLMTropeScout"
+    style = StyleScout(api_key="x").scout_author_style("Brandon Sanderson")
+    assert style, "expected non-empty author style from the Claude StyleScout"

@@ -1,22 +1,16 @@
-from unittest.mock import MagicMock, patch
-
-import pytest
 from agentic_librarian.scouts.metadata_scout import LLMTropeScout
 
 
-@pytest.fixture
-def mock_genai_client():
-    with patch("agentic_librarian.scouts.metadata_scout.genai.Client") as mock:
-        client_inst = mock.return_value
-        yield client_inst
+class _FakeLLM:
+    def __init__(self, text: str):
+        self._text = text
+
+    def generate(self, prompt: str, grounded: bool = True) -> str:
+        return self._text
 
 
-def test_llm_trope_scout(mock_genai_client):
-    scout = LLMTropeScout(api_key="fake-key")
-
-    # Mock LLM response
-    mock_response = MagicMock()
-    mock_response.text = """
+def test_llm_trope_scout():
+    payload = """
     {
         "tropes": [
             {
@@ -28,10 +22,8 @@ def test_llm_trope_scout(mock_genai_client):
         ]
     }
     """
-    mock_genai_client.models.generate_content.return_value = mock_response
-
+    scout = LLMTropeScout(api_key="fake-key", llm=_FakeLLM(payload))
     res = scout.search("Leviathan Wakes", "James S.A. Corey")
-
     assert "tropes" in res
     assert len(res["tropes"]) == 1
     assert res["tropes"][0]["trope_name"] == "Found Family"
