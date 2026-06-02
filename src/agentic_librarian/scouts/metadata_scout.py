@@ -637,7 +637,11 @@ class ScoutManager:
             if isinstance(scout, AudiobookScout | DirectKnowledgeScout) and "audiobook" not in format.lower():
                 continue
 
-            res = scout.search(title, author, format=format, narrators=merged_data["narrator_names"], **kwargs)
+            try:
+                res = scout.search(title, author, format=format, narrators=merged_data["narrator_names"], **kwargs)
+            except Exception as e:  # noqa: BLE001 - one scout's failure must not discard the others' data
+                print(f"Warning: {scout.source_name} scout failed: {e}")
+                continue
             if not res:
                 continue
 

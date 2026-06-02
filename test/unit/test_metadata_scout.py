@@ -311,6 +311,26 @@ def test_google_books_warns_once_without_key(capsys, monkeypatch):
     assert out.count("no GOOGLE_BOOKS_API_KEY") == 1
 
 
+def test_enrich_isolates_a_failing_scout(capsys):
+    import agentic_librarian.scouts.metadata_scout as md_scout
+
+    class GoodScout(md_scout.BaseScout):
+        def search(self, title, author, **kwargs):
+            return {"genres": ["g1"]}
+
+    class BoomScout(md_scout.BaseScout):
+        def search(self, title, author, **kwargs):
+            raise RuntimeError("429 boom")
+
+    mgr = md_scout.ScoutManager()
+    mgr.register_scout(GoodScout(), priority=1)
+    mgr.register_scout(BoomScout(), priority=2)
+
+    merged = mgr.enrich("T", "A")  # must NOT raise
+    assert "g1" in merged["genres"]
+    assert "BoomScout scout failed" in capsys.readouterr().out
+
+
 def test_flatten_style_map_hoists_nested_and_drops_nonstrings():
     from agentic_librarian.scouts.metadata_scout import _flatten_style_map
 
