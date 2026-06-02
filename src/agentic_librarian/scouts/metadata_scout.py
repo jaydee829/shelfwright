@@ -264,7 +264,7 @@ class HardcoverScout(APIScout):
             # Bidirectional substring match on purpose: tolerate abbreviated/extended author names
             # between the caller and Hardcover (e.g. "S. King" vs "Stephen King"). Author names are
             # never single chars in practice, so this stays specific enough.
-            return any(a and (a in norm(n) or norm(n) in a) for n in (d.get("author_names") or []))
+            return any(a and norm(n) and (a in norm(n) or norm(n) in a) for n in (d.get("author_names") or []))
 
         def reads(d: dict) -> int:
             return d.get("users_read_count") or 0
@@ -322,7 +322,7 @@ class HardcoverScout(APIScout):
 
         audio_seconds = selected.get("audio_seconds")
         contributors = []
-        for c in book.get("contributions", []):
+        for c in book.get("contributions") or []:
             name = (c.get("author") or {}).get("name")
             role = c.get("contribution") or "Author"
             if name:

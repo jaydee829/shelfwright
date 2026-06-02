@@ -27,7 +27,9 @@ def _iter_style_items(style_data: dict | None, owner_label: str):
     response can nest a value as a dict/list; passing that to standardize_style would make it a
     Style.name and raise 'can't adapt type dict'. Skip + warn instead so persistence degrades
     gracefully (REC-021)."""
-    for attr_type, style_name in (style_data or {}).items():
+    if not isinstance(style_data, dict):
+        return
+    for attr_type, style_name in style_data.items():
         if isinstance(style_name, str) and style_name.strip():
             yield attr_type, style_name.strip()
         elif style_name:

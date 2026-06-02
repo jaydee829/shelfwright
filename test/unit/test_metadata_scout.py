@@ -198,6 +198,19 @@ def test_hardcover_select_hit_prefers_author_match_and_reads():
     assert scout._select_hit([], "Elena Armas") is None
 
 
+def test_hardcover_select_hit_ignores_blank_author_names():
+    import agentic_librarian.scouts.metadata_scout as md_scout
+
+    # A blank author_name ("") must not falsely author-match (else any query matches it). The real
+    # author's hit wins even with far fewer reads.
+    scout = md_scout.HardcoverScout(api_key="key")
+    hits = [
+        {"document": {"id": "9", "title": "X", "author_names": [""], "users_read_count": 999}},
+        {"document": {"id": "1", "title": "X", "author_names": ["Elena Armas"], "users_read_count": 5}},
+    ]
+    assert scout._select_hit(hits, "Elena Armas") == 1
+
+
 def test_hardcover_search_two_step_parses_canonical_book(monkeypatch):
     import agentic_librarian.scouts.metadata_scout as md_scout
 

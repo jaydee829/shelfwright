@@ -12,3 +12,9 @@ def test_iter_style_items_keeps_strings_skips_nonstrings(capsys):
 
 def test_iter_style_items_handles_none():
     assert list(_iter_style_items(None, "Work 'X'")) == []
+
+
+def test_iter_style_items_handles_non_dict():
+    # A non-dict (e.g. a list/str from a malformed response) must not crash on .items().
+    assert list(_iter_style_items(["not", "a", "dict"], "Work 'X'")) == []
+    assert list(_iter_style_items("a string", "Work 'X'")) == []
