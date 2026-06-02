@@ -128,10 +128,16 @@ def persist_enriched_work(
     # 3. Edition & Narrators
     edition = session.query(Edition).filter_by(work_id=work.id, format=row["format"]).first()
 
-    # Resolve Narrators
+    # Resolve Narrators. A row may carry narrator_names/styles as NaN (float) — pandas fills the
+    # column with NaN for rows that lack it (e.g. skip_enrichment rows mixed with audiobook rows in
+    # the same partition DataFrame). Coerce non-list/dict to empty so persist never crashes on it.
     narrator_objs = []
-    narrator_names = row.get("narrator_names", [])
-    narrator_styles = row.get("narrator_styles", {})
+    narrator_names = row.get("narrator_names")
+    if not isinstance(narrator_names, list):
+        narrator_names = []
+    narrator_styles = row.get("narrator_styles")
+    if not isinstance(narrator_styles, dict):
+        narrator_styles = {}
 
     for n_name in narrator_names:
         narrator = session.query(Narrator).filter(Narrator.name == n_name).first()
