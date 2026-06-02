@@ -144,19 +144,20 @@ def test_safe_extract_json_handles_fences_prose_and_none():
 
 
 def test_extract_text_falls_back_to_candidate_parts():
-    """When response.text is empty (grounded responses), text comes from the parts."""
-    scout = md_scout.LLMTropeScout(api_key="fake-key")
+    """When response.text is empty (grounded responses), text comes from the candidate parts."""
+
+    from agentic_librarian.scouts.grounded_llm import _extract_text
 
     direct = MagicMock()
     direct.text = "hello"
-    assert scout._extract_text(direct) == "hello"
+    assert _extract_text(direct) == "hello"
 
     grounded = MagicMock()
     grounded.text = None
     part = MagicMock()
     part.text = '{"x": 1}'
     grounded.candidates = [MagicMock(content=MagicMock(parts=[part]))]
-    assert scout._extract_text(grounded) == '{"x": 1}'
+    assert _extract_text(grounded) == '{"x": 1}'
 
 
 @pytest.mark.api_dependent

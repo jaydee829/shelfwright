@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 
 import requests
-from agentic_librarian.llm_retry import genai_http_options
+from agentic_librarian.scouts.grounded_llm import GroundedLLM, get_grounded_llm
 from bs4 import BeautifulSoup
-from google import genai
 from googleapiclient.discovery import build
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -94,36 +93,19 @@ class APIScout(BaseScout):
 class LLMScout(BaseScout):
     """Abstract base class for scouts using LLMs for unstructured data."""
 
-    def __init__(self, api_key: str = None, model_name: str = None):
-        # Fallback to GOOGLE_SEARCH_API_KEY if no specific key provided
+    def __init__(self, api_key: str = None, model_name: str = None, llm: GroundedLLM | None = None):
+        # Fallback to GOOGLE_SEARCH_API_KEY if no specific key provided (also used by AudiobookScout's
+        # Custom Search and by the Gemini provider/embeddings).
         key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not key:
             raise ValueError(f"{self.__class__.__name__} requires a Google API key.")
         super().__init__(key)
-        # http_options carries the shared transient-error retry so grounded calls ride through
-        # 429/5xx demand spikes instead of crashing the run (REC-020).
-        self._client = genai.Client(api_key=self.api_key, http_options=genai_http_options())
-        # These scouts use Gemini-native Search grounding ({"google_search": {}}), so they need a
-        # grounding-capable model. Defaults to gemini-2.5-flash (reliable free-tier grounding);
-        # GROUNDING_MODEL/EXPLORER_MODEL override it. (Non-grounding mesh agents use GEMINI_MODEL.)
+        # Backend-selectable grounding LLM (Gemini default; Claude when AGENT_BACKEND=claude). Injectable
+        # for tests. model_name kept for back-compat; the Gemini provider owns the model (GROUNDING_MODEL).
         self.model_name = (
             model_name or os.environ.get("GROUNDING_MODEL") or os.environ.get("EXPLORER_MODEL") or "gemini-2.5-flash"
         )
-
-    def _extract_text(self, response) -> str | None:
-        """Return the response text, falling back to concatenated candidate parts.
-
-        Grounded / multi-part responses can leave ``response.text`` empty even though
-        the answer is present in the candidate parts.
-        """
-        if getattr(response, "text", None):
-            return response.text
-        try:
-            parts = response.candidates[0].content.parts or []
-        except (AttributeError, IndexError, TypeError):
-            return None
-        texts = [p.text for p in parts if getattr(p, "text", None)]
-        return "".join(texts) if texts else None
+        self._llm = llm or get_grounded_llm(self.api_key)
 
     def _safe_extract_json(self, response_text: str, title: str, author: str, retry_count: int = 0) -> dict | None:
         """Cleans and parses LLM JSON output with descriptive error logging."""
@@ -388,11 +370,11 @@ class AudiobookScout(LLMScout):
         CRITICAL: If the information is not present in the text, return an empty object {{}}.
         DO NOT hallucinate or guess.
         """
-        response = self._client.models.generate_content(model=self.model_name, contents=prompt)
-        data = self._safe_extract_json(self._extract_text(response), title, author)
+        text = self._llm.generate(prompt, grounded=False)
+        data = self._safe_extract_json(text, title, author)
         if data is None:
-            response = self._client.models.generate_content(model=self.model_name, contents=prompt + "\nJSON ONLY.")
-            data = self._safe_extract_json(self._extract_text(response), title, author, retry_count=1)
+            text = self._llm.generate(prompt + "\nJSON ONLY.", grounded=False)
+            data = self._safe_extract_json(text, title, author, retry_count=1)
 
         # Normalize keys
         if data and "narrators" in data:
@@ -426,23 +408,12 @@ class DirectKnowledgeScout(LLMScout):
         DO NOT guess or provide info from your internal memory if it is not verified by search.
         """
 
-        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
-
-        response = self._client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config={"tools": [{"google_search": {}}] if use_grounding else []},
-        )
-
-        data = self._safe_extract_json(self._extract_text(response), title, author)
+        text = self._llm.generate(prompt, grounded=True)
+        data = self._safe_extract_json(text, title, author)
         if data is None:
             prompt += "\n\nSTRICT: Return valid JSON ONLY."
-            response = self._client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config={"tools": [{"google_search": {}}] if use_grounding else []},
-            )
-            data = self._safe_extract_json(self._extract_text(response), title, author, retry_count=1)
+            text = self._llm.generate(prompt, grounded=True)
+            data = self._safe_extract_json(text, title, author, retry_count=1)
 
         if data and "narrators" in data:
             data["narrator_names"] = data.pop("narrators")
@@ -515,13 +486,8 @@ class StyleScout(LLMScout):
         Return ONLY a raw JSON object with these keys.
         If an attribute is identical to the author's general baseline, omit it from the JSON.
         """
-        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
-        response = self._client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config={"tools": [{"google_search": {}}] if use_grounding else []},
-        )
-        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Work Style", title))
+        text = self._llm.generate(prompt, grounded=True)
+        return _flatten_style_map(self._safe_extract_json(text, "Work Style", title))
 
     def scout_author_style(self, name: str) -> dict:
         """Extracts style attributes for an author."""
@@ -541,13 +507,8 @@ class StyleScout(LLMScout):
         Return ONLY a raw JSON object with these nine keys.
         If unknown, return empty strings for those keys.
         """
-        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
-        response = self._client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config={"tools": [{"google_search": {}}] if use_grounding else []},
-        )
-        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Author Style", name))
+        text = self._llm.generate(prompt, grounded=True)
+        return _flatten_style_map(self._safe_extract_json(text, "Author Style", name))
 
     def scout_narrator_style(self, name: str) -> dict:
         """Extracts performance attributes for an audiobook narrator."""
@@ -566,13 +527,8 @@ class StyleScout(LLMScout):
         Return ONLY a raw JSON object with these keys. Use short descriptive phrases (3-5 words max).
         If unknown, return empty strings for those keys.
         """
-        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
-        response = self._client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config={"tools": [{"google_search": {}}] if use_grounding else []},
-        )
-        return _flatten_style_map(self._safe_extract_json(self._extract_text(response), "Narrator Style", name))
+        text = self._llm.generate(prompt, grounded=True)
+        return _flatten_style_map(self._safe_extract_json(text, "Narrator Style", name))
 
 
 class LLMTropeScout(LLMScout):
@@ -594,13 +550,8 @@ class LLMTropeScout(LLMScout):
         CRITICAL: Focus on narrative devices and archetypes. Avoid broad genres (Fantasy, Sci-Fi) or simple moods.
         Return ONLY a raw JSON object with a 'tropes' key containing a list of these trope objects.
         """
-        use_grounding = os.environ.get("USE_SEARCH_GROUNDING", "1") == "1"
-        response = self._client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config={"tools": [{"google_search": {}}] if use_grounding else []},
-        )
-        return self._safe_extract_json(self._extract_text(response), "Tropes", title) or {"tropes": []}
+        text = self._llm.generate(prompt, grounded=True)
+        return self._safe_extract_json(text, "Tropes", title) or {"tropes": []}
 
 
 # --- THE MANAGER ---
