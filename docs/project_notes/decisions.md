@@ -540,3 +540,24 @@ This file documents key architectural decisions, their context, and trade-offs.
   the Explorer/scouts can move to `GROUNDING_MODEL=gemini-3.x` for higher limits. Gemma 4 31B was considered
   as a high-limit grounding option but rejected: Gemma on the Gemini API generally lacks the grounding tool
   and is a smaller model (weaker for the grounding/reasoning roles).
+
+### ADR-043: Hardcover Lookup via Fuzzy Search + Book-by-Id (2026-06-01)
+**Context:**
+- `HardcoverScout` filtered editions with three exact-match clauses (`book.title _eq` AND
+  `edition_format _eq "ebook"` AND US `country _eq`). These almost never all matched real data, so
+  Hardcover (priority-1 scout) silently contributed nothing to web-discovered books (REC-022). Hasura
+  blocks `_ilike`/fuzzy operators on the editions filter, but Hardcover exposes a fuzzy `search` query.
+
+**Decision:**
+- Two-step lookup: (1) `search(query: <title>, query_type:"Book")` — by title only (adding the author
+  surfaces companion "workbook" entries) — then select the hit whose `author_names` matches and that
+  has the most `users_read_count`, excluding companion titles; (2) `books(where:{id:{_eq}})` for
+  description/pages/contributions/cached_tags/editions. Format/country preference is applied in Python
+  over the returned editions (prefer requested format + US, else format, else any). Note: the live API
+  exposes a scalar `contribution` field on `contributions` (not `author_role { name }`).
+
+**Consequences:**
+- Hardcover now returns real metadata for known titles, including ones whose stored title differs
+  (`&` vs "and", articles) since matching is fuzzy. Two API calls per book instead of one (acceptable —
+  priority-1 short-circuits the other scouts; Hardcover quota is generous). Companion/workbook hits are
+  filtered heuristically; a future refinement could weight series/edition signals.

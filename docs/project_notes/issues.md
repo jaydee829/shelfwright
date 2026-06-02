@@ -113,6 +113,10 @@ This file tracks work history and ticket references.
     4. **Multi-agent final-response extraction**: in some delegation runs the Librarian ends on a tool/transfer event with no text, so `asend` returned "(no response)". Harden the runtime's final-text extraction for multi-agent chains.
     - Interim safety net shipped in Spec 2: `get_work_details` guards non-UUID ids (see bugs.md).
     - Items 1 (web-candidate de-dup) and 2 (scout-enrichment of discoveries) are handled by `enrich_and_persist_work`; items 3 (one-shot determinism) and 4 (final-response extraction) are handled by the fixed-order SequentialAgent pipeline returning `state['recommendation']` (ADR-040).
+    - **[2026-06-01]** Item 3 (one-shot commitment) addressed: the SequentialAgent already enforces step
+      order, and CRITIC_INSTRUCTION now tells the Critic to always commit to a best-effort recommendation
+      (never ask a clarifying question / never return empty). Item 4 (multi-agent final-text extraction)
+      remains open — re-evaluate after a post-enrichment-hardening e2e.
 
 ### 2026-05-31 - REC-018: Spec 4 Follow-ups (Critic ranking + live e2e verification)
 - **Status**: Open (Spec 5 / next quota window)
@@ -135,13 +139,13 @@ This file tracks work history and ticket references.
 - **Notes**: A transient 5xx from one agent's LLM call should not crash the whole recommendation. Add retry-with-backoff on transient 5xx (ADK retry config or a wrapper) for the mesh/pipeline LLM calls; consider light rate-limiting / backoff for the per-discovery Google Books enrichment burst. Re-running when Gemini is not under load should succeed. (The array-truthiness bug surfaced in the same run is fixed + regression-tested.)
 
 ### 2026-06-01 - REC-021: Style "name" can be a dict — enrich_and_persist_work crashes on persist (live e2e finding)
-- **Status**: Open (deferred to a subsequent enrichment-hardening branch)
+- **Status**: Resolved (2026-06-01) — StyleScout output normalized to {attr: str} (_flatten_style_map hoists one nested level, drops non-strings) and persist_enriched_work guards every style loop via _iter_style_items (skips+warns on non-string values). Unit + db_integration regression tests.
 - **Description**: During the successful PR #22 live e2e, `enrich_and_persist_work` for one discovered book failed with `psycopg2.ProgrammingError: can't adapt type 'dict'`. A Style was looked up/created with `styles.name` = a nested analysis dict (`{'prose_density': '…', …}`) instead of a string label. The StyleScout's structured style analysis is being passed through as the Style *name*. Caught by the `except Exception` in `enrich_and_persist_work` (degrades gracefully — that work's styles aren't persisted; the run continued and still produced a recommendation).
 - **URL**: N/A
 - **Notes**: Fix in `persist_enriched_work` / the StyleScout→Style mapping (mcp/server.py + scouts): a Style needs a scalar string name; the prose-density-style analysis object should map to `Style.description` or be decomposed into named style rows, not used as the name. Add a regression test that persists a discovered work whose StyleScout output is a dict-shaped style.
 
 ### 2026-06-01 - REC-022: Hardcover enrichment silently returns nothing — over-strict `_eq` filters (live e2e finding)
-- **Status**: Open (deferred to a subsequent enrichment-hardening branch)
+- **Status**: Resolved (2026-06-01) — HardcoverScout rewritten as a 2-step fuzzy search->books-by-id lookup with author-matched, read-count-ranked hit selection (companion titles excluded); format/country preference applied in Python. ADR-043. Live-verified for a known title.
 - **Description**: Verifying the PR #22 e2e, HardcoverScout (priority 1, the *primary* physical/ebook + audiobook-length/mood source) contributed nothing for every web-discovered book. The token is valid (HTTP 200), but the GraphQL query filters editions with three exact-match `_eq` clauses — `book.title _eq $title` AND `edition_format _eq $format` ("ebook") AND `country.name _eq "United States of America"` — which almost never all match real data: e.g. "The Spanish Love Deception" *exists* (8 editions) but their `edition_format` values are `""`/`null`/`"Paperback"` (never lowercase "ebook") and most lack the US country row; "The Serpent & The Wings of Night" returns 0 on exact title (the `&`/article differs from Hardcover's stored title). `_make_request` swallows non-200s, so failures are invisible. Note: Hardcover blocks `_ilike` ("not permitted on this server"), so fuzzy title matching needs another approach (normalized exact title, or `book` lookup then editions).
 - **URL**: N/A
 - **Notes**: Loosen the query in `HardcoverScout.search` (metadata_scout.py:195): drop/relax the `edition_format` and `country` `_eq` filters (select editions, then prefer a format/country match in Python — the scout already loops editions for format selection); normalize the title or query `books` by title then fetch editions. Add a test asserting a known title returns a non-empty result. Until fixed, ebook/physical discoveries rely on Google Books (rate-limited, REC-016) + LLM scouts only.
