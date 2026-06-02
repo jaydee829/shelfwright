@@ -360,3 +360,15 @@ def test_flatten_style_map_hoists_nested_and_drops_nonstrings():
         "tone": "darker",
     }
     assert _flatten_style_map("not a dict") == {}
+
+
+@pytest.mark.api_dependent
+def test_claude_grounded_scouts_produce_styles_and_tropes(monkeypatch):
+    """Live (needs an authenticated claude CLI): AGENT_BACKEND=claude yields usable style/trope JSON."""
+    monkeypatch.setenv("AGENT_BACKEND", "claude")
+    from agentic_librarian.scouts.metadata_scout import LLMTropeScout, StyleScout
+
+    tropes = LLMTropeScout(api_key="x").search("The Way of Kings", "Brandon Sanderson")
+    assert tropes.get("tropes"), "expected non-empty tropes from the Claude LLMTropeScout"
+    style = StyleScout(api_key="x").scout_author_style("Brandon Sanderson")
+    assert style, "expected non-empty author style from the Claude StyleScout"

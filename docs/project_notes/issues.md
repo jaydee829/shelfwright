@@ -157,7 +157,7 @@ This file tracks work history and ticket references.
 - **Notes**: This is the defensive fix. The deeper issue (the Claude backend still depending on Gemini `generate_content` for enrichment) is REC-024.
 
 ### 2026-06-01 - REC-024: Claude backend's enrichment scouts still use Gemini (next spec)
-- **Status**: Open (next spec, after enrichment-hardening)
+- **Status**: Resolved (2026-06-02) — GroundedLLM seam (scouts/grounded_llm.py): GeminiGroundedLLM + ClaudeGroundedLLM chosen by AGENT_BACKEND, injected into LLMScout. All four LLM scouts route through it; AGENT_BACKEND=claude runs the scouts (recommendation + Flow-1 ETL) on the Max subscription. Embeddings stay Gemini. ADR-044.
 - **Description**: PR #23 / ADR-041 abstracted only the recommendation MESH (Analyst/Explorer/Critic) to Claude + shared MCP DB tools. The per-discovery `enrich_and_persist_work` still runs the shared Flow-1 `ScoutManager`, whose LLM scouts (StyleScout/LLMTropeScout/DirectKnowledgeScout) do **Gemini-native grounding** (`gemini-2.5-flash` via `GROUNDING_MODEL`) and whose trope/style dedup uses Gemini embeddings. So a Claude-backend run is NOT free of the Gemini `generate_content` free-tier daily cap — under that cap the grounding scouts 429 and contribute nothing (REC-023 keeps Hardcover/REST data; styles/tropes are still lost).
 - **URL**: N/A
 - **Notes**: Next spec: give StyleScout/LLMTropeScout/DirectKnowledgeScout backend-selectable **Claude variants** (Claude + WebSearch for grounding) so a Claude run's enrichment is off Gemini `generate_content`. Embeddings (`gemini-embedding-001`, separate low-volume quota) may stay on Gemini initially. Mirror the `RecommendationBackend` strategy seam (ADR-041) at the scout layer.
