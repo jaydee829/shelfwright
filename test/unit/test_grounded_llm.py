@@ -119,3 +119,25 @@ def test_claude_generate_collects_result_and_sets_tools(monkeypatch):
     assert captured["model"] == "claude-test"
     assert llm.generate("p", grounded=False) == "CLAUDE_JSON"
     assert captured["allowed_tools"] == []
+
+
+def test_claude_generate_works_inside_running_loop(monkeypatch):
+    import asyncio
+
+    class FakeMsg:
+        def __init__(self, result):
+            self.result = result
+
+    async def fake_query(prompt, options):
+        yield FakeMsg("CLAUDE_JSON")
+
+    fake_sdk = MagicMock()
+    fake_sdk.query = fake_query
+    fake_sdk.ClaudeAgentOptions = lambda **kw: MagicMock(**kw)
+    monkeypatch.setitem(__import__("sys").modules, "claude_agent_sdk", fake_sdk)
+
+    async def driver():
+        # generate() is sync but invoked from within a running loop — must offload, not raise.
+        return gl.ClaudeGroundedLLM().generate("p", grounded=True)
+
+    assert asyncio.run(driver()) == "CLAUDE_JSON"

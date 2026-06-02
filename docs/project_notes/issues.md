@@ -119,7 +119,7 @@ This file tracks work history and ticket references.
       remains open — re-evaluate after a post-enrichment-hardening e2e.
 
 ### 2026-05-31 - REC-018: Spec 4 Follow-ups (Critic ranking + live e2e verification)
-- **Status**: Open (Spec 5 / next quota window)
+- **Status**: Item 2 **Resolved (2026-06-02)** — the full live chain ran end-to-end: the ADK backend (`test_recommendation_e2e`) and the Claude backend (`test_claude_e2e`) each produced a justified recommendation and logged a Suggestion (verified in the DB). Item 1 (explicit candidate ranking) remains **Open** as a recommendation-quality refinement.
 - **Description**: Refinements surfaced by the Spec 4 final review.
 - **URL**: N/A
 - **Notes**:

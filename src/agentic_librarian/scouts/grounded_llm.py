@@ -65,7 +65,17 @@ class ClaudeGroundedLLM:
         self.model = model or os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
     def generate(self, prompt: str, grounded: bool = True) -> str:
-        return asyncio.run(self._agenerate(prompt, grounded))
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop (the normal synchronous scout path) — drive the coroutine directly.
+            return asyncio.run(self._agenerate(prompt, grounded))
+        # Called from within a running event loop (async test runner / framework): asyncio.run can't
+        # run inside one, so offload to a worker thread that gets its own loop.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(lambda: asyncio.run(self._agenerate(prompt, grounded))).result()
 
     async def _agenerate(self, prompt: str, grounded: bool) -> str:
         from claude_agent_sdk import ClaudeAgentOptions, query
