@@ -47,6 +47,12 @@ def _nan_to_none(value):
         return value
 
 
+def _nan_to_list(value):
+    """Return value if it is a list, else [] — so an enrichment column that pandas filled with NaN
+    (a float) or None doesn't crash downstream iteration/set() with 'float object is not iterable'."""
+    return value if isinstance(value, list) else []
+
+
 def persist_enriched_work(
     session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
 ) -> Work | None:
@@ -94,6 +100,22 @@ def persist_enriched_work(
 
         work_contributors_list.append(WorkContributor(author=author, role=role))
 
+    # Coerce every enrichment/CSV field that pandas may deliver as NaN before it reaches the ORM.
+    # Scalars -> None (SQL NULL); list-typed fields -> [] so downstream iteration/set() can't crash
+    # on a float NaN. This single pass is the guard against both 'float object is not iterable' and
+    # DatatypeMismatch (NaN into an Integer/Date column) across the whole persist path.
+    original_publication_year = _nan_to_none(row.get("original_publication_year"))
+    description = _nan_to_none(row.get("description"))
+    genres = _nan_to_list(row.get("genres"))
+    moods = _nan_to_list(row.get("moods"))
+    enriched_tropes = _nan_to_list(row.get("enriched_tropes"))
+    user_rating = _nan_to_none(row.get("user_rating"))
+    user_notes = _nan_to_none(row.get("user_notes"))
+    isbn_13 = _nan_to_none(row.get("isbn_13"))
+    page_count = _nan_to_none(row.get("page_count"))
+    audio_minutes = _nan_to_none(row.get("audio_minutes"))
+    publication_date = _nan_to_none(row.get("publication_date"))
+
     # 2. Work. no_autoflush: the not-yet-added WorkContributor objects above must not be
     # cascaded by this query's autoflush (raises a SAWarning and could flush incomplete rows).
     with session.no_autoflush:
@@ -109,19 +131,19 @@ def persist_enriched_work(
         work = Work(
             title=row["Title"],
             contributors=work_contributors_list,
-            original_publication_year=row.get("original_publication_year"),
-            description=row.get("description"),
-            genres=row.get("genres"),
-            moods=row.get("moods"),
+            original_publication_year=original_publication_year,
+            description=description,
+            genres=genres,
+            moods=moods,
         )
         session.add(work)
         session.flush()
     elif not row.get("skip_enrichment"):
         # Update existing work if new metadata found
-        work.original_publication_year = row.get("original_publication_year") or work.original_publication_year
-        work.description = row.get("description") or work.description
-        work.genres = row.get("genres") or work.genres
-        work.moods = row.get("moods") or work.moods
+        work.original_publication_year = original_publication_year or work.original_publication_year
+        work.description = description or work.description
+        work.genres = genres or work.genres
+        work.moods = moods or work.moods
 
     # 2.5 Work Styles
     work_style_data = row.get("work_style", {})
@@ -172,14 +194,6 @@ def persist_enriched_work(
 
         narrator_objs.append(narrator)
 
-    # Coerce pandas NaN -> None so typed columns (date/int) receive SQL NULL, not a float NaN.
-    # Without this a missing publication_date/page_count/audio_minutes raises DatatypeMismatch on
-    # INSERT, and in the update branch `nan or edition.x` would keep the NaN (NaN is truthy).
-    isbn_13 = _nan_to_none(row.get("isbn_13"))
-    page_count = _nan_to_none(row.get("page_count"))
-    audio_minutes = _nan_to_none(row.get("audio_minutes"))
-    publication_date = _nan_to_none(row.get("publication_date"))
-
     if not edition:
         edition = Edition(
             work=work,
@@ -218,20 +232,16 @@ def persist_enriched_work(
             history_entry = ReadingHistory(
                 edition=edition,
                 date_completed=date_completed,
-                user_rating=row.get("user_rating"),
-                user_notes=row.get("user_notes"),
+                user_rating=user_rating,
+                user_notes=user_notes,
             )
             session.add(history_entry)
 
-    # 5. Tropes (Only if enriched)
+    # 5. Tropes (Only if enriched). enriched_tropes/genres/moods were NaN-coerced to lists above,
+    # so the truthy check and set() iteration below are safe even when pandas filled them with NaN.
     if not row.get("skip_enrichment"):
-        # Handle Enriched Tropes (LLMTropeScout)
-        enriched_tropes = row.get("enriched_tropes", [])
-
         # Handle Fallback Tags (Moods/Genres)
-        raw_genres = row.get("genres", [])
-        raw_moods = row.get("moods", [])
-        all_fallback_tags = set(raw_genres) | set(raw_moods)
+        all_fallback_tags = set(genres) | set(moods)
 
         if enriched_tropes:
             for t_data in enriched_tropes:
