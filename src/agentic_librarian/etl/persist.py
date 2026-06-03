@@ -36,6 +36,17 @@ def _iter_style_items(style_data: dict | None, owner_label: str):
             print(f"Warning: skipping non-string style '{attr_type}'={type(style_name).__name__} for {owner_label}")
 
 
+def _nan_to_none(value):
+    """Coerce a pandas NaN/NaT scalar to None so it inserts as SQL NULL. Enrichment/CSV columns
+    arrive via pandas, which fills missing scalars with NaN (a float); inserting that into a typed
+    column (date/int) raises DatatypeMismatch. Real values — including strings — pass through, and a
+    non-scalar (list/dict) is returned unchanged rather than raising on pd.isna."""
+    try:
+        return None if pd.isna(value) else value
+    except (TypeError, ValueError):
+        return value
+
+
 def persist_enriched_work(
     session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
 ) -> Work | None:
@@ -161,14 +172,22 @@ def persist_enriched_work(
 
         narrator_objs.append(narrator)
 
+    # Coerce pandas NaN -> None so typed columns (date/int) receive SQL NULL, not a float NaN.
+    # Without this a missing publication_date/page_count/audio_minutes raises DatatypeMismatch on
+    # INSERT, and in the update branch `nan or edition.x` would keep the NaN (NaN is truthy).
+    isbn_13 = _nan_to_none(row.get("isbn_13"))
+    page_count = _nan_to_none(row.get("page_count"))
+    audio_minutes = _nan_to_none(row.get("audio_minutes"))
+    publication_date = _nan_to_none(row.get("publication_date"))
+
     if not edition:
         edition = Edition(
             work=work,
-            isbn_13=row.get("isbn_13"),
+            isbn_13=isbn_13,
             format=row.get("format"),
-            page_count=row.get("page_count"),
-            audio_minutes=row.get("audio_minutes"),
-            publication_date=row.get("publication_date"),
+            page_count=page_count,
+            audio_minutes=audio_minutes,
+            publication_date=publication_date,
             narrators=narrator_objs,
         )
         session.add(edition)
@@ -176,9 +195,9 @@ def persist_enriched_work(
     else:
         if not row.get("skip_enrichment"):
             # Update existing edition if new metadata found
-            edition.isbn_13 = row.get("isbn_13") or edition.isbn_13
-            edition.page_count = row.get("page_count") or edition.page_count
-            edition.audio_minutes = row.get("audio_minutes") or edition.audio_minutes
+            edition.isbn_13 = isbn_13 or edition.isbn_13
+            edition.page_count = page_count or edition.page_count
+            edition.audio_minutes = audio_minutes or edition.audio_minutes
 
         # Update narrators if needed
         if narrator_objs:
