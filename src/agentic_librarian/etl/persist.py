@@ -70,6 +70,12 @@ def persist_enriched_work(
             if name and not pd.isna(name):
                 raw_contributors.append({"name": name, "role": "Author"})
 
+    # Drop contributors without a usable name: malformed scout output can yield {"name": None} (or
+    # blank/NaN), which violates the authors.name NOT NULL constraint on insert.
+    raw_contributors = [
+        c for c in raw_contributors if isinstance(c, dict) and isinstance(c.get("name"), str) and c["name"].strip()
+    ]
+
     if not raw_contributors:
         return None
 
@@ -78,8 +84,8 @@ def persist_enriched_work(
     author_style_data = row.get("author_style", {})
 
     for c_data in raw_contributors:
-        name = c_data["name"]
-        role = c_data["role"]
+        name = c_data["name"].strip()
+        role = c_data.get("role") or "Author"
         author = session.query(Author).filter(Author.name == name).first()
         if not author:
             author = Author(name=name)
