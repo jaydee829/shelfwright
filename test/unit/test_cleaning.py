@@ -98,3 +98,22 @@ def test_split_narrators():
     result = split_narrators(df)
     assert result.iloc[0]["Narrator_1"] == "Narrator 1"
     assert result.iloc[0]["Narrator_2"] == "Narrator 2"
+
+
+def test_split_authors_after_multiformat_explode():
+    # Regression: split_formats explodes multi-format rows, duplicating index labels. split_authors
+    # then concats author columns with axis=1, which raised InvalidIndexError on the non-unique index.
+    # split_formats now resets the index so the column-wise concat aligns.
+    df = pd.DataFrame(
+        {
+            "Title": ["Multi", "Single"],
+            "Author": ["Solo Author", "First Author and Second Author"],
+            "format": ["hardcover, audiobook", "ebook"],
+        }
+    )
+    result = split_authors(split_formats(df))
+    assert result.index.is_unique
+    assert len(result) == 3  # the multi-format row exploded into two
+    assert sorted(result["format"].tolist()) == ["audiobook", "ebook", "hardcover"]
+    single = result[result["Title"] == "Single"].iloc[0]
+    assert single["Author_1"] == "First Author" and single["Author_2"] == "Second Author"

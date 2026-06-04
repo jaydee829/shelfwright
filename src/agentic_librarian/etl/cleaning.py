@@ -12,6 +12,9 @@ def split_formats(df: pd.DataFrame) -> pd.DataFrame:
     df["format"] = df["format"].str.split(",")
     df = df.explode("format")
     df["format"] = df["format"].str.strip()
+    # explode() duplicates index labels for multi-format rows; reset so the downstream column-wise
+    # concats in split_authors/split_narrators can align (a non-unique index raises InvalidIndexError).
+    df = df.reset_index(drop=True)
     return df
 
 
