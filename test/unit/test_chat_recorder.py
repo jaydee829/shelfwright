@@ -48,3 +48,17 @@ def test_unreachable_mlflow_degrades_to_local_jsonl(tmp_path, monkeypatch, capsy
     assert rec.run_id is None
     assert len(_read_jsonl(rec.transcript_path)) == 1
     assert "mlflow capture disabled" in capsys.readouterr().out
+
+
+def test_close_ends_run_even_when_artifact_upload_fails(tmp_path, monkeypatch):
+    import mlflow
+
+    uri = (tmp_path / "mlruns").as_uri()
+    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    mlflow.set_tracking_uri(uri)
+    rec = ConversationRecorder("adk", "m", "u", "chat", log_dir=str(tmp_path / "logs"))
+    rec.record_turn("hi", "hello", [], 1.0)
+    monkeypatch.setattr(rec._mlflow, "log_artifact", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("upload failed")))
+    rec.close()  # must not raise, and must still end the run
+    assert mlflow.get_run(rec.run_id).info.status == "FINISHED"

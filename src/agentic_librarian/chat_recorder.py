@@ -75,6 +75,11 @@ class ConversationRecorder:
             self._mlflow.log_metric("duration_s", time.monotonic() - self._t0)
             if self.transcript_path.exists():
                 self._mlflow.log_artifact(str(self.transcript_path))
-            self._mlflow.end_run(status=status)
         except Exception as e:
             print(f"warning: mlflow close failed ({type(e).__name__}: {e})")
+        # end_run gets its own guard so a failed metric/artifact upload can't leave the
+        # run stuck in RUNNING (mlflow's active run is process-global).
+        try:
+            self._mlflow.end_run(status=status)
+        except Exception as e:
+            print(f"warning: mlflow end_run failed ({type(e).__name__}: {e})")
