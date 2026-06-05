@@ -96,3 +96,66 @@ def test_persist_tolerates_nan_enrichment_fields(db_url, monkeypatch):
         # Scalars coerced to NULL, not NaN.
         assert work.original_publication_year is None
         assert work.genres == []
+
+
+@pytest.mark.db_integration
+def test_persist_skips_nameless_contributors(db_url, monkeypatch):
+    # Regression: malformed scout output can include a contributor with a None/blank name. Inserting
+    # it violates the authors.name NOT NULL constraint and crashes the partition. Persist must skip
+    # nameless contributors and still create the work from the valid ones.
+    monkeypatch.setenv("GOOGLE_SEARCH_API_KEY", "dummy-key-for-construction")
+    dbm = DatabaseManager(db_url)
+    with dbm.get_session() as session:
+        tm = TropeManager(session=session)
+        sm = StyleManager(session=session)
+        row = {
+            "Title": "Nameless Contributor Book",
+            "Author_1": "Real Author",
+            "format": "audiobook",
+            "skip_enrichment": True,
+            "date_completed": None,
+            "contributors": [
+                {"name": None, "role": "Author"},
+                {"name": "Real Author", "role": "Author"},
+                {"name": "   ", "role": "Narrator"},
+            ],
+        }
+        work = persist_enriched_work(session, row, tm, sm)
+        session.flush()
+        assert work is not None and work.title == "Nameless Contributor Book"
+        names = [c.author.name for c in work.contributors]
+        assert names == ["Real Author"]  # the None and blank contributors are skipped
+
+
+@pytest.mark.db_integration
+def test_persist_defaults_blank_or_invalid_role_to_author(db_url, monkeypatch):
+    # Regression (PR #30 review, gemini-code-assist): a whitespace-only role is truthy, so
+    # `role or "Author"` would persist it as-is — a malformed role value in work_contributors.
+    # Non-string roles from malformed scout output must also fall back to "Author"; a valid
+    # role keeps its stripped value.
+    monkeypatch.setenv("GOOGLE_SEARCH_API_KEY", "dummy-key-for-construction")
+    dbm = DatabaseManager(db_url)
+    with dbm.get_session() as session:
+        tm = TropeManager(session=session)
+        sm = StyleManager(session=session)
+        row = {
+            "Title": "Blank Role Book",
+            "Author_1": "Whitespace Role Author",
+            "format": "ebook",
+            "skip_enrichment": True,
+            "date_completed": None,
+            "contributors": [
+                {"name": "Whitespace Role Author", "role": "   "},
+                {"name": "Padded Role Editor", "role": " Editor "},
+                {"name": "Numeric Role Author", "role": 7},
+            ],
+        }
+        work = persist_enriched_work(session, row, tm, sm)
+        session.flush()
+        assert work is not None and work.title == "Blank Role Book"
+        roles = {c.author.name: c.role for c in work.contributors}
+        assert roles == {
+            "Whitespace Role Author": "Author",
+            "Padded Role Editor": "Editor",
+            "Numeric Role Author": "Author",
+        }
