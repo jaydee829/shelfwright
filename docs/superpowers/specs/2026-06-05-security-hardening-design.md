@@ -67,7 +67,7 @@ never raise):
 
 | Tool | Validation |
 |---|---|
-| `log_suggestion` | `work_id` via `_parse_uuid` (error on invalid); **referent check**: `session.get(Work, uuid)` must exist (error on missing — no more FK-exception-as-validation); `justification` capped at 2000 chars, `context` at 200, `conversation_id` at 100 (truncate, don't reject — they're free text by design) |
+| `log_suggestion` | `work_id` via `_parse_uuid` (error on invalid); **referent check**: `session.get(Work, uuid)` must exist (error on missing — no more FK-exception-as-validation); `justification` capped at 2000 chars, `context` at 200 (truncate, don't reject — free text by design); `conversation_id` via `_parse_uuid` → NULL on non-UUID (the column is `PG_UUID`, not free text — corrected from the original draft during implementation; also closes a latent psycopg2-cast crash) |
 | `update_suggestion_status` | `work_id` via `_parse_uuid`; `status` via `_normalize_status` against `{"Accepted", "Dismissed", "Already Read"}` — unknown rejected with an error listing allowed values |
 | `update_reading_status` | `status` via `_normalize_status` against `{"read"}` — the only status the function actually implements; unknown values now return an ERROR instead of today's silent false-success. `title`/`author` must be non-empty strings ≤ 500 chars. `notes` capped at 2000 |
 | `enrich_and_persist_work` | `title`/`author` must be non-empty strings ≤ 500 chars (web-derived input); `format` ≤ 50 chars |
