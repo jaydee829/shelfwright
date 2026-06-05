@@ -594,9 +594,17 @@ This file documents key architectural decisions, their context, and trade-offs.
   (`send`/`close`), so multi-turn means the SAME thing on both backends: a stateful Librarian session
   calling DB/web tools on demand. ADK wraps the existing `LibrarianConversation` (+ optional event
   callback in `asend`); Claude gains a true conversational mode via a persistent `ClaudeSDKClient`
-  session (LIBRARIAN_INSTRUCTION + full librarian MCP toolset + WebSearch) on a background event-loop
-  thread (PR #26 async precedent). Rejected: CLI-managed transcript replay over the one-shot pipeline
-  (re-runs the full pipeline per turn: slow, quota-hungry, logs a spurious Suggestion per turn).
+  session on a background event-loop thread (PR #26 async precedent). Rejected: CLI-managed transcript
+  replay over the one-shot pipeline (re-runs the full pipeline per turn: slow, quota-hungry, logs a
+  spurious Suggestion per turn).
+- **Full mesh parity on Claude** (amended same day, user decision): the Claude conversational
+  Librarian delegates to the SAME specialist mesh as ADK via programmatic SDK subagents
+  (`ClaudeAgentOptions(agents={"analyst"/"explorer"/"critic": AgentDefinition(prompt=<specialist
+  instruction>, tools=<scoped like the ADK mesh>)})`, invoked through the `Task` tool — the analogue
+  of ADK's `AgentTool`). A single-agent variant was rejected: it doesn't exercise the specialist
+  prompts, and ADK-vs-Claude conversation comparisons would conflate backend with architecture.
+  Cost accepted: slower turns / more Max quota per turn. VERIFY live (REC-019 pattern): subagent
+  visibility of the in-process MCP server via `AgentDefinition.mcpServers=["librarian"]`.
 - New `librarian` console script (argparse REPL; `--once`, `--backend`, `--quiet`, `--no-mlflow`)
   printing replies plus a compact key-event trace (`on_event(kind, detail)`).
 - Each conversation is one MLflow run (experiment `librarian_conversations`: params backend/model/

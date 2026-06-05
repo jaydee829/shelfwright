@@ -65,19 +65,37 @@ The only `runtime.py` change: `LibrarianConversation.asend` gains an optional ev
 callback, fired from the `run_async` event stream it already iterates (function calls /
 agent-author transitions). Default `None` — zero behavior change for existing callers.
 
-### 3. Claude conversation — `agents/backends/claude.py`
+### 3. Claude conversation — `agents/backends/claude.py` (full mesh parity)
 
 New `ClaudeConversation` holding one persistent `ClaudeSDKClient` session
 (verified current via Context7 `/anthropics/claude-agent-sdk-python`: each
 `client.query()` continues the same session; `receive_response()` yields messages
-until the turn's `ResultMessage`):
+until the turn's `ResultMessage`).
 
-- `system_prompt=LIBRARIAN_INSTRUCTION`, the existing in-process librarian MCP server
-  (`build_librarian_mcp_server()`), `allowed_tools` = **every** tool registered on that
-  server (enumerated from the server definition, `mcp__librarian__<name>`) +
-  `"WebSearch"`, model from `CLAUDE_MODEL` (default `claude-sonnet-4-6`).
-- `send()` = `query()` + collect `TextBlock`s from `receive_response()`; each
-  `ToolUseBlock` fires `on_event`.
+**Mesh parity (user decision, 2026-06-05):** the conversational Librarian delegates to
+the SAME specialist mesh ADK uses, via programmatic SDK subagents
+(`ClaudeAgentOptions(agents={...: AgentDefinition(...)})`, invoked through the `Task`
+tool — the direct analogue of ADK's `AgentTool`). A single-agent variant was rejected:
+it can do the same tasks but doesn't exercise the specialist prompts, and cross-backend
+MLflow comparisons would conflate backend with architecture.
+
+- Subagents reuse the specialist prompts verbatim, tool-scoped like the ADK mesh:
+  `analyst` (ANALYST_INSTRUCTION; `get_user_trope_preferences`), `explorer`
+  (EXPLORER_INSTRUCTION; `WebSearch`), `critic` (CRITIC_INSTRUCTION;
+  `search_internal_database`, `get_work_details`, `check_reading_history`).
+- The Librarian session: `system_prompt=LIBRARIAN_INSTRUCTION` (delegation-flavored,
+  mirroring the ADK Librarian's inline instruction), the in-process librarian MCP
+  server (`build_librarian_mcp_server()`), `allowed_tools` = `"Task"` + the Librarian's
+  direct tools (`get_unacted_suggestions`, `update_reading_status`,
+  `update_suggestion_status`, `log_suggestion`), model from `CLAUDE_MODEL`
+  (default `claude-sonnet-4-6`).
+- `send()` = `query()` + collect the turn result from `receive_response()`; each
+  `ToolUseBlock` fires `on_event` — a `Task` block maps to `("agent",
+  <subagent_type>)`, everything else to `("tool", <name>)`, matching the ADK trace.
+- **VERIFY on first live run** (REC-019 pattern): subagents see the parent's
+  in-process MCP server via `AgentDefinition.mcpServers=["librarian"]` — if the
+  in-process server is not visible to subagents, fall back to scoping those tools on
+  the Librarian and letting the critic receive tool RESULTS in its Task prompt.
 - The SDK is async; the REPL is sync. The session lives on a **background event-loop
   thread** (the same running-loop constraint `ClaudeGroundedLLM.generate` solved in
   PR #26 — follow that precedent; `asyncio.run` per send would tear down the session).
