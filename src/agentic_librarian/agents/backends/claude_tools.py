@@ -82,6 +82,12 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
         _schema({"work_id": _STR, "status": _STR}, required=["work_id", "status"]),
         mcp_server.update_suggestion_status,
     ),
+    (
+        "enrich_and_persist_work",
+        "Verify + enrich a discovered book via the scouts and persist it to the catalog; returns the work id, or null if the title does not resolve.",
+        _schema({"title": _STR, "author": _STR, "format": _STR}, required=["title", "author"]),
+        mcp_server.enrich_and_persist_work,
+    ),
 ]
 
 LIBRARIAN_TOOL_NAMES = [f"mcp__{_SERVER_NAME}__{short}" for short, _, _, _ in _TOOL_SCHEMAS]
