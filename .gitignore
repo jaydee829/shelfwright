@@ -54,3 +54,6 @@ mlruns/
 data/backups/
 *.dump
 *.sql.gz
+
+# CLI chat harness local transcripts (MLflow holds the durable copy)
+.chat_logs/
