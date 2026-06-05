@@ -227,3 +227,13 @@ def test_normalize_status_matches_case_insensitively():
     assert server._normalize_status("Banana", allowed) is None
     assert server._normalize_status(None, allowed) is None
     assert server._normalize_status(7, allowed) is None
+
+
+def test_enrich_and_persist_work_rejects_invalid_input(capsys):
+    from agentic_librarian.mcp import server
+
+    assert server.enrich_and_persist_work(title="", author="A") is None
+    assert server.enrich_and_persist_work(title="T", author="   ") is None
+    assert server.enrich_and_persist_work(title="x" * 501, author="A") is None
+    assert server.enrich_and_persist_work(title="T", author=None) is None  # type: ignore[arg-type]
+    assert "rejected invalid" in capsys.readouterr().out  # visible, not silent (no-silent-except rule)

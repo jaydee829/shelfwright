@@ -295,9 +295,27 @@ def check_reading_history(title: str, author: str) -> dict:
         return {"status": "Unread", "is_re_read_candidate": True}
 
 
+_READING_STATUSES = ("read",)
+
+
+def _valid_name(value, max_len: int = 500) -> bool:
+    """Non-empty string within length bounds — for agent-supplied titles/authors (SEC-002)."""
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= max_len
+
+
 @mcp.tool()
 def update_reading_status(title: str, author: str, status: str, notes: str | None = None) -> str:
     """Updates history based on feedback (e.g. 'I read that years ago')."""
+    if not _valid_name(title):
+        return "Error: title must be a non-empty string of at most 500 characters."
+    if not _valid_name(author):
+        return "Error: author must be a non-empty string of at most 500 characters."
+    canonical = _normalize_status(status, _READING_STATUSES)
+    if canonical is None:
+        # Previously any unknown status returned success while writing NOTHING (silent
+        # false-success). Reject honestly instead (SEC-002).
+        return f"Error: status must be one of {', '.join(_READING_STATUSES)}; got {status!r}."
+    notes = notes[:2000] if isinstance(notes, str) else None
     try:
         with db_manager.get_session() as session:
             # Find the work/edition first
@@ -319,7 +337,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
                 session.add(edition)
                 session.flush()
 
-            if status.lower() == "read":
+            if canonical == "read":
                 history = ReadingHistory(
                     edition=edition,
                     date_completed=date.today(),  # Placeholder for manual addition
@@ -477,6 +495,14 @@ def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> s
     and persist it as a Work (no reading history). Returns the work_id, or None if enrichment
     found nothing. This is the single write surface for discoveries — a future authorization
     layer (SEC-002) wraps here."""
+    # SEC-002: this is a write path fed by web-derived strings — validate shape upfront.
+    if not _valid_name(title):
+        print(f"Warning: enrich_and_persist_work rejected invalid title {title!r}")
+        return None
+    if not _valid_name(author):
+        print(f"Warning: enrich_and_persist_work rejected invalid author {author!r}")
+        return None
+    format = (format or "ebook")[:50]
     try:
         with db_manager.get_session() as session:
             # 1. De-dup (Case 1): match an existing Work by normalized title + author.

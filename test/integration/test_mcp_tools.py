@@ -1,8 +1,9 @@
 import json
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
-from agentic_librarian.db.models import Author, Suggestions, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import Author, ReadingHistory, Suggestions, Trope, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server as mcp_server
 from agentic_librarian.mcp.server import (
@@ -177,3 +178,27 @@ def test_update_suggestion_status_enforces_enum(db_url, seeded_work_id):
             Suggestions.suggested_at.desc()
         ).first()
         assert row.status == "Already Read"
+
+
+@pytest.mark.db_integration
+def test_update_reading_status_rejects_unknown_status_instead_of_false_success(db_url, seeded_work_id):
+    # SEC-002 regression: unknown statuses previously returned "Successfully updated..."
+    # while writing NOTHING. They must now return an honest error and write nothing.
+    with mcp_server.db_manager.get_session() as session:
+        work = session.get(Work, UUID(seeded_work_id))
+        title = work.title
+        author = work.contributors[0].author.name
+        before = session.query(ReadingHistory).count()
+    out = mcp_server.update_reading_status(title=title, author=author, status="abandoned")
+    assert "Error" in out and "read" in out  # names the allowed values
+    with mcp_server.db_manager.get_session() as session:
+        assert session.query(ReadingHistory).count() == before  # nothing written
+
+
+@pytest.mark.db_integration
+def test_update_reading_status_validates_title_author_shape(db_url):
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    assert "Error" in mcp_server.update_reading_status(title="  ", author="A", status="read")
+    assert "Error" in mcp_server.update_reading_status(title="T", author="", status="read")
+    assert "Error" in mcp_server.update_reading_status(title="x" * 501, author="A", status="read")
