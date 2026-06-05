@@ -117,3 +117,23 @@ def test_split_authors_after_multiformat_explode():
     assert sorted(result["format"].tolist()) == ["audiobook", "ebook", "hardcover"]
     single = result[result["Title"] == "Single"].iloc[0]
     assert single["Author_1"] == "First Author" and single["Author_2"] == "Second Author"
+
+
+def test_split_authors_preserves_nondefault_index():
+    # Regression (PR #32 review, gemini-code-assist): split_authors built the Author_X frame with a
+    # default RangeIndex, discarding the input's index. On any non-default index (e.g. a filtered
+    # frame) the axis=1 concat then aligned by label and silently misaligned — NaN authors and
+    # phantom rows. The Author_X frame must be built with index=df.index.
+    df = pd.DataFrame(
+        {
+            "Title": ["Keep A", "Drop", "Keep B"],
+            "Author": ["Author One", "Author Two", "Author Three and Author Four"],
+        }
+    )
+    df = df[df["Title"] != "Drop"]  # filtered frame keeps index labels [0, 2]
+    result = split_authors(df)
+    assert len(result) == 2
+    assert list(result.index) == [0, 2]
+    assert result.loc[0, "Author_1"] == "Author One"
+    assert result.loc[2, "Author_1"] == "Author Three"
+    assert result.loc[2, "Author_2"] == "Author Four"

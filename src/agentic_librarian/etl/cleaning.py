@@ -122,8 +122,10 @@ def split_authors(df: pd.DataFrame) -> pd.DataFrame:
     # Apply the logic to each row
     author_lists = df["Author"].apply(process_row)
 
-    # Convert lists to a DataFrame of numbered columns
-    author_splits = pd.DataFrame(author_lists.tolist())
+    # Convert lists to a DataFrame of numbered columns. Build it on df's own index —
+    # .tolist() discards it, and the axis=1 concat below aligns by label, so a default
+    # RangeIndex would silently misalign on any non-default input index (PR #32 review).
+    author_splits = pd.DataFrame(author_lists.tolist(), index=df.index)
     author_splits.columns = [f"Author_{i + 1}" for i in range(author_splits.shape[1])]
 
     # Merge back and drop original
