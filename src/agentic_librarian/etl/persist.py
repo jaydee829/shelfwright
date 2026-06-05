@@ -85,7 +85,10 @@ def persist_enriched_work(
 
     for c_data in raw_contributors:
         name = c_data["name"].strip()
-        role = c_data.get("role") or "Author"
+        # A whitespace-only role is truthy and a non-string role would persist as-is; both
+        # must fall back to "Author" (PR #30 review). Valid roles keep their stripped value.
+        role = c_data.get("role")
+        role = role.strip() if isinstance(role, str) and role.strip() else "Author"
         author = session.query(Author).filter(Author.name == name).first()
         if not author:
             author = Author(name=name)
