@@ -33,3 +33,5 @@ def test_librarian_instruction_delegates_to_the_mesh():
     assert "'critic'" in text
     assert "log_suggestion" in text
     assert "update_suggestion_status" in text
+    assert "update_reading_status" in text
+    assert "get_unacted_suggestions" in text
