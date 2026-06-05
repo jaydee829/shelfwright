@@ -98,3 +98,42 @@ def test_split_narrators():
     result = split_narrators(df)
     assert result.iloc[0]["Narrator_1"] == "Narrator 1"
     assert result.iloc[0]["Narrator_2"] == "Narrator 2"
+
+
+def test_split_authors_after_multiformat_explode():
+    # Regression: split_formats explodes multi-format rows, duplicating index labels. split_authors
+    # then concats author columns with axis=1, which raised InvalidIndexError on the non-unique index.
+    # split_formats now resets the index so the column-wise concat aligns.
+    df = pd.DataFrame(
+        {
+            "Title": ["Multi", "Single"],
+            "Author": ["Solo Author", "First Author and Second Author"],
+            "format": ["hardcover, audiobook", "ebook"],
+        }
+    )
+    result = split_authors(split_formats(df))
+    assert result.index.is_unique
+    assert len(result) == 3  # the multi-format row exploded into two
+    assert sorted(result["format"].tolist()) == ["audiobook", "ebook", "hardcover"]
+    single = result[result["Title"] == "Single"].iloc[0]
+    assert single["Author_1"] == "First Author" and single["Author_2"] == "Second Author"
+
+
+def test_split_authors_preserves_nondefault_index():
+    # Regression (PR #32 review, gemini-code-assist): split_authors built the Author_X frame with a
+    # default RangeIndex, discarding the input's index. On any non-default index (e.g. a filtered
+    # frame) the axis=1 concat then aligned by label and silently misaligned — NaN authors and
+    # phantom rows. The Author_X frame must be built with index=df.index.
+    df = pd.DataFrame(
+        {
+            "Title": ["Keep A", "Drop", "Keep B"],
+            "Author": ["Author One", "Author Two", "Author Three and Author Four"],
+        }
+    )
+    df = df[df["Title"] != "Drop"]  # filtered frame keeps index labels [0, 2]
+    result = split_authors(df)
+    assert len(result) == 2
+    assert list(result.index) == [0, 2]
+    assert result.loc[0, "Author_1"] == "Author One"
+    assert result.loc[2, "Author_1"] == "Author Three"
+    assert result.loc[2, "Author_2"] == "Author Four"
