@@ -35,3 +35,29 @@ def test_librarian_instruction_delegates_to_the_mesh():
     assert "update_suggestion_status" in text
     assert "update_reading_status" in text
     assert "get_unacted_suggestions" in text
+
+
+def test_explorer_has_a_search_budget_and_keeps_its_contract():
+    text = prompts.EXPLORER_INSTRUCTION
+    assert "SEARCH BUDGET" in text
+    assert "ONE broad search" in text
+    assert "per-title verification searches" in text
+    assert "Never invent" in text  # anti-hallucination stays
+    assert '{"books"' in text  # JSON contract consumed by the one-shot pipeline is preserved
+    assert "FIRST" in text  # report the series opener for later volumes
+
+
+def test_critic_has_the_series_rule():
+    text = prompts.CRITIC_INSTRUCTION
+    assert "SERIES RULE" in text
+    assert "FIRST book" in text
+    assert "NEXT unread" in text
+    assert "check_reading_history" in text
+
+
+def test_librarian_routes_internal_first_and_enriches_discoveries():
+    text = prompts.LIBRARIAN_INSTRUCTION
+    assert "ONLY when" in text  # explorer is conditional, not default
+    assert "enrich_and_persist_work" in text
+    assert "drop that candidate" in text  # hallucination-tolerant by filtering
+    assert "SERIES" in text

@@ -109,11 +109,14 @@ def _conversation_options() -> ClaudeAgentOptions:
             prompt=prompts.ANALYST_INSTRUCTION,
             tools=["mcp__librarian__get_user_trope_preferences"],
             mcpServers=["librarian"],
+            model="haiku",  # easy structured extraction — large latency win (tuning spec)
+            maxTurns=4,
         ),
         "explorer": AgentDefinition(
             description="Discovers new candidate books on the web.",
             prompt=prompts.EXPLORER_INSTRUCTION,
             tools=["WebSearch"],
+            maxTurns=25,  # runaway guard only — the search BUDGET lives in the prompt
         ),
         "critic": AgentDefinition(
             description="Ranks candidates and writes a grounded Trope-RAG justification.",
@@ -124,6 +127,7 @@ def _conversation_options() -> ClaudeAgentOptions:
                 "mcp__librarian__check_reading_history",
             ],
             mcpServers=["librarian"],
+            maxTurns=8,
         ),
     }
     return ClaudeAgentOptions(

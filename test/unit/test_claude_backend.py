@@ -143,6 +143,14 @@ def test_conversation_options_wire_the_specialist_mesh():
     assert "Agent" in options.allowed_tools
     assert options.system_prompt == prompts.LIBRARIAN_INSTRUCTION
 
+    # Conversation-tuning knobs: fast analyst, roomy explorer, careful critic.
+    assert options.agents["analyst"].model == "haiku"
+    assert options.agents["analyst"].maxTurns == 4
+    assert options.agents["explorer"].maxTurns == 25
+    assert options.agents["explorer"].model is None  # inherit (sonnet)
+    assert options.agents["critic"].maxTurns == 8
+    assert options.agents["critic"].model is None  # inherit (sonnet)
+
 
 def test_claude_conversation_close_is_idempotent():
     from agentic_librarian.agents.backends.claude import ClaudeConversation

@@ -32,3 +32,17 @@ def test_critic_tool_assignment():
     tool_names = [t.name for t in critic.tools]
     assert "search_internal_database" in tool_names
     assert "check_reading_history" in tool_names
+
+
+def test_librarian_has_the_enrich_tool():
+    mesh = create_agent_mesh()
+    tool_names = [t.name for t in mesh["librarian"].tools]
+    assert "enrich_and_persist_work" in tool_names
+
+
+def test_librarian_instruction_is_internal_first_and_series_aware():
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    assert "ONLY when" in text
+    assert "enrich_and_persist_work" in text
+    assert "SERIES" in text

@@ -67,7 +67,7 @@ def test_repl_two_turns_then_quit(monkeypatch, capsys, no_mlflow_dir):
     assert rc == 0
     assert "librarian> first reply" in out
     assert "librarian> second reply" in out
-    assert "· tool: search_internal_database" in out  # event trace
+    assert "tool: search_internal_database" in out  # event trace
     assert fake.conversation.closed
 
 
@@ -94,7 +94,8 @@ def test_quiet_suppresses_event_trace_but_still_records(tmp_path, monkeypatch, c
     transcripts = list(tmp_path.glob("*.jsonl"))
     assert len(transcripts) == 1
     record = json.loads(transcripts[0].read_text(encoding="utf-8").splitlines()[0])
-    assert record["events"] == ["tool: search_internal_database"]  # recorded even when not printed
+    assert len(record["events"]) == 1
+    assert record["events"][0].endswith("tool: search_internal_database")  # carries elapsed prefix
 
 
 def test_backend_flag_sets_env(monkeypatch, capsys, no_mlflow_dir):
@@ -115,3 +116,15 @@ def test_unknown_backend_fails_fast(monkeypatch, capsys, no_mlflow_dir):
     rc = cli.main(["--once", "x", "--no-mlflow"])
     assert rc == 2
     assert "Unknown AGENT_BACKEND" in capsys.readouterr().err
+
+
+def test_events_carry_elapsed_seconds_prefix(monkeypatch, capsys, no_mlflow_dir):
+    import re
+
+    fake = _FakeBackend(replies=("ok",))
+    monkeypatch.setattr(cli, "get_backend", lambda: fake)
+    _feed_stdin(monkeypatch, ["hi", "/quit"])
+    cli.main(["--no-mlflow"])
+    out = capsys.readouterr().out
+    # "  · 0.0s tool: search_internal_database" — elapsed-seconds-into-turn prefix (tuning spec)
+    assert re.search(r"· \d+\.\ds tool: search_internal_database", out)

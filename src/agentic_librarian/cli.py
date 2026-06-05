@@ -69,11 +69,13 @@ def _run_once(backend, args, recorder) -> int:
 
 def _run_repl(backend, args, recorder) -> int:
     turn_events: list[str] = []
+    turn_t0 = time.monotonic()  # on_event reads the enclosing scope's current value (closure cell)
 
     def on_event(kind: str, detail: str) -> None:
-        turn_events.append(f"{kind}: {detail}")
+        entry = f"{time.monotonic() - turn_t0:.1f}s {kind}: {detail}"
+        turn_events.append(entry)
         if not args.quiet:
-            print(f"  · {kind}: {detail}")
+            print(f"  · {entry}")
 
     try:
         conversation = backend.start_conversation(user_id=args.user_id, on_event=on_event)
@@ -99,6 +101,7 @@ def _run_repl(backend, args, recorder) -> int:
                 break
             turn_events.clear()
             t0 = time.monotonic()
+            turn_t0 = t0
             try:
                 reply = conversation.send(line)
             except KeyboardInterrupt:

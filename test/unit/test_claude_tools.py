@@ -18,3 +18,11 @@ def test_feedback_tools_are_exposed():
 
     assert "mcp__librarian__update_reading_status" in LIBRARIAN_TOOL_NAMES
     assert "mcp__librarian__update_suggestion_status" in LIBRARIAN_TOOL_NAMES
+
+
+def test_enrich_tool_is_exposed():
+    # Verification-by-enrichment (conversation tuning spec): the Librarian enriches explorer
+    # discoveries; a null return is the existence check failing.
+    from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES
+
+    assert "mcp__librarian__enrich_and_persist_work" in LIBRARIAN_TOOL_NAMES

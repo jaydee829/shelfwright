@@ -181,3 +181,10 @@ This file tracks work history and ticket references.
     - **Live verification (updated 2026-06-05, same day)**: item (1) **resolved positive** — subagents DO see the in-process librarian MCP server; the first live test instead surfaced a permission-layer bug (`AgentDefinition.tools` scopes but doesn't grant — see bugs.md 2026-06-05) fixed in the follow-up PR, with a live re-probe returning the user's real 20-trope profile via `agent: analyst` delegation. Still pending: (2) explorer's `WebSearch` live exercise; (3) the full 2-turn smoke per backend (`test/integration/test_cli_chat_live.py`, api_dependent); (4) MLflow connect speed at CLI startup (escape hatch `--no-mlflow`).
     - Invocation in the app container: `python -m agentic_librarian.cli` always works; the `librarian` script is installed at `/home/appuser/.local/bin/librarian` (not on default exec PATH — add to PATH in Dockerfile/compose as a follow-up, or rebuild the image so the build-time editable install picks up [project.scripts]).
     - Known minor follow-ups from final review: no banner on `--once`; consider MLFLOW_HTTP_REQUEST_TIMEOUT in compose.
+
+### 2026-06-05 - TUNE-027: Conversation tuning round (spec/conversation-tuning)
+- **Status**: In Progress (live verification pending)
+- **Description**: Explorer search budget (prompt) + maxTurns=25 guard; verification-by-enrichment (enrich_and_persist_work exposed to BOTH conversational Librarians; null = drop candidate, continue); internal-first routing with novelty triggers; series rule in critic+librarians; analyst on haiku; elapsed-seconds event trace. Spec: docs/superpowers/specs/2026-06-05-conversation-tuning-design.md.
+- **URL**: N/A (PR pending)
+- **Notes**:
+    - **Tracked follow-up (schema, ask-first)**: add `series_name`/`series_position` to `works`, populated from Hardcover `featured_series` + a backfill pass over the existing catalog — makes the series rule deterministic instead of model-knowledge-based.
