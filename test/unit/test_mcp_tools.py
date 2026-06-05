@@ -215,6 +215,8 @@ def test_parse_uuid_accepts_valid_and_rejects_garbage():
     assert server._parse_uuid("the daughters war") is None  # the REC-016 crash class
     assert server._parse_uuid(None) is None
     assert server._parse_uuid(42) is None
+    assert server._parse_uuid("") is None  # falsy fast-path
+    assert server._parse_uuid(UUID(valid)) == UUID(valid)  # already-parsed UUID passes through
 
 
 def test_normalize_status_matches_case_insensitively():

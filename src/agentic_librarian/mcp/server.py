@@ -43,6 +43,10 @@ def _parse_uuid(value) -> UUID | None:
     """Validate an agent-supplied id as a UUID; None on anything else (SEC-002).
     Agents may pass titles or garbage where ids belong (REC-016) — never let that
     reach a psycopg2 UUID cast."""
+    if not value:
+        return None
+    if isinstance(value, UUID):
+        return value
     try:
         return UUID(str(value).strip())
     except (ValueError, TypeError):
