@@ -14,7 +14,14 @@ def test_transcript_written_without_mlflow(tmp_path):
     rec.close()
     records = _read_jsonl(rec.transcript_path)
     assert len(records) == 2
-    assert records[0] == {"turn": 0, "user": "hi", "reply": "hello", "events": ["tool: x"], "latency_s": 1.25, "error": None}
+    assert records[0] == {
+        "turn": 0,
+        "user": "hi",
+        "reply": "hello",
+        "events": ["tool: x"],
+        "latency_s": 1.25,
+        "error": None,
+    }
     assert records[1]["error"] == "boom"
     assert rec.run_id is None
 
@@ -59,7 +66,9 @@ def test_close_ends_run_even_when_artifact_upload_fails(tmp_path, monkeypatch):
     mlflow.set_tracking_uri(uri)
     rec = ConversationRecorder("adk", "m", "u", "chat", log_dir=str(tmp_path / "logs"))
     rec.record_turn("hi", "hello", [], 1.0)
-    monkeypatch.setattr(rec._mlflow, "log_artifact", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("upload failed")))
+    monkeypatch.setattr(
+        rec._mlflow, "log_artifact", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("upload failed"))
+    )
     rec.close()  # must not raise, and must still end the run
     assert mlflow.get_run(rec.run_id).info.status == "FINISHED"
 
@@ -71,9 +80,7 @@ def test_init_ends_run_when_param_logging_fails(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     mlflow.set_tracking_uri(uri)
-    monkeypatch.setattr(
-        mlflow, "log_params", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("params failed"))
-    )
+    monkeypatch.setattr(mlflow, "log_params", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("params failed")))
     rec = ConversationRecorder("adk", "m", "u", "chat", log_dir=str(tmp_path / "logs"))
     assert rec.run_id is None
     assert mlflow.active_run() is None  # no leaked RUNNING run polluting process-global state
