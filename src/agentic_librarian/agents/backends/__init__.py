@@ -5,7 +5,20 @@ quota) is selectable with AGENT_BACKEND=claude."""
 from __future__ import annotations
 
 import os
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class BackendConversation(Protocol):
+    """A stateful multi-turn Librarian session (ADR-045)."""
+
+    def send(self, message: str) -> str:
+        """Send one user message; return the Librarian's reply for this turn."""
+        ...
+
+    def close(self) -> None:
+        """Release session resources. Idempotent."""
+        ...
 
 
 @runtime_checkable
@@ -14,6 +27,15 @@ class RecommendationBackend(Protocol):
 
     def run_recommendation(self, prompt: str, user_id: str = "local") -> str:
         """Run the one-shot recommendation pipeline and return the recommendation text."""
+        ...
+
+    def start_conversation(
+        self,
+        user_id: str = "local",
+        on_event: Callable[[str, str], None] | None = None,
+    ) -> BackendConversation:
+        """Open a multi-turn conversation. `on_event(kind, detail)` receives key events
+        (e.g. ("tool", "search_internal_database"), ("agent", "Explorer"))."""
         ...
 
 

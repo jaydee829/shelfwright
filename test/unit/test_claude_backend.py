@@ -49,3 +49,160 @@ def test_claude_backend_sequences_pipeline_and_returns_recommendation():
     assert "recommend" in out.lower()
     assert calls["i"] == 3  # Analyst, Explorer, Critic each queried once
     mock_log.assert_called_once()  # the top candidate was logged
+
+
+class _FakeTextBlock:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeToolUseBlock:
+    def __init__(self, name):
+        self.name = name
+        self.input = {}
+
+
+class _FakeAssistantMessage:
+    def __init__(self, blocks):
+        self.content = blocks
+
+
+class _FakeResultMessage:
+    def __init__(self, result):
+        self.result = result
+        self.content = []
+
+
+class _FakeSDKClient:
+    """Duck-typed ClaudeSDKClient: connect/query/receive_response/disconnect."""
+
+    def __init__(self):
+        self.connected = False
+        self.disconnected = False
+        self.queries = []
+
+    async def connect(self):
+        self.connected = True
+
+    async def query(self, prompt, session_id="default"):
+        self.queries.append(prompt)
+
+    async def receive_response(self):
+        task_block = _FakeToolUseBlock("Task")
+        task_block.input = {"subagent_type": "explorer", "prompt": "find books"}
+        yield _FakeAssistantMessage(
+            [
+                task_block,
+                _FakeToolUseBlock("mcp__librarian__get_unacted_suggestions"),
+                _FakeTextBlock("thinking..."),
+            ]
+        )
+        yield _FakeResultMessage(f"reply-{len(self.queries)}")
+
+    async def disconnect(self):
+        self.disconnected = True
+
+
+def test_claude_conversation_reuses_one_session_and_fires_events():
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    fake = _FakeSDKClient()
+    seen = []
+    conv = ClaudeConversation(on_event=lambda k, d: seen.append((k, d)), client_factory=lambda: fake)
+    try:
+        assert conv.send("first") == "reply-1"
+        assert conv.send("second") == "reply-2"
+    finally:
+        conv.close()
+    assert fake.queries == ["first", "second"]  # ONE client, one session, two turns
+    assert ("agent", "explorer") in seen  # Task delegation maps to an agent event (ADK parity)
+    assert ("tool", "mcp__librarian__get_unacted_suggestions") in seen
+    assert fake.disconnected
+
+
+def test_conversation_options_wire_the_specialist_mesh():
+    from agentic_librarian.agents import prompts
+    from agentic_librarian.agents.backends.claude import _conversation_options
+
+    options = _conversation_options()
+    assert set(options.agents) == {"analyst", "explorer", "critic"}
+    assert options.agents["analyst"].prompt == prompts.ANALYST_INSTRUCTION
+    assert options.agents["explorer"].prompt == prompts.EXPLORER_INSTRUCTION
+    assert options.agents["explorer"].tools == ["WebSearch"]
+    assert options.agents["critic"].prompt == prompts.CRITIC_INSTRUCTION
+    assert "mcp__librarian__search_internal_database" in options.agents["critic"].tools
+    assert "Task" in options.allowed_tools  # the Librarian delegates via the Task tool
+    assert "mcp__librarian__log_suggestion" in options.allowed_tools
+    assert options.system_prompt == prompts.LIBRARIAN_INSTRUCTION
+
+
+def test_claude_conversation_close_is_idempotent():
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    conv = ClaudeConversation(client_factory=_FakeSDKClient)
+    conv.close()
+    conv.close()  # second close must not raise
+
+
+def test_claude_backend_start_conversation_satisfies_protocol():
+    from agentic_librarian.agents.backends import BackendConversation
+    from agentic_librarian.agents.backends.claude import ClaudeBackend
+
+    conv = ClaudeBackend().start_conversation(client_factory=_FakeSDKClient)
+    try:
+        assert isinstance(conv, BackendConversation)
+        assert conv.send("hi") == "reply-1"
+    finally:
+        conv.close()
+
+
+def test_claude_conversation_connect_failure_stops_loop_thread():
+    import threading
+
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    before = {t.ident for t in threading.enumerate()}
+    with pytest.raises(RuntimeError, match="no auth"):
+        ClaudeConversation(client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no auth")))
+    leaked = [t for t in threading.enumerate() if t.ident not in before and t.is_alive()]
+    assert not leaked, f"connect failure leaked loop thread(s): {leaked}"
+
+
+def test_claude_conversation_close_survives_disconnect_error(capsys):
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    class _ExplodingDisconnectClient(_FakeSDKClient):
+        async def disconnect(self):
+            raise RuntimeError("socket gone")
+
+    conv = ClaudeConversation(client_factory=_ExplodingDisconnectClient)
+    conv.close()  # must not raise
+    assert "disconnect failed" in capsys.readouterr().out
+
+
+def test_claude_conversation_close_closes_the_loop():
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    conv = ClaudeConversation(client_factory=_FakeSDKClient)
+    loop = conv._loop
+    conv.close()
+    assert loop.is_closed()  # selector resources released, not just stopped (PR #33 review)
+
+
+def test_claude_conversation_connect_failure_closes_the_loop(monkeypatch):
+    import asyncio as _asyncio
+
+    from agentic_librarian.agents.backends import claude as claude_mod
+
+    created = []
+    real_new_event_loop = _asyncio.new_event_loop
+
+    def _capturing_new_event_loop():
+        loop = real_new_event_loop()
+        created.append(loop)
+        return loop
+
+    monkeypatch.setattr(claude_mod.asyncio, "new_event_loop", _capturing_new_event_loop)
+    with pytest.raises(RuntimeError, match="no auth"):
+        claude_mod.ClaudeConversation(client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no auth")))
+    assert created and created[0].is_closed()

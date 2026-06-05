@@ -22,3 +22,16 @@ def test_services_use_shared_prompts(monkeypatch):
     assert mesh["analyst"].instruction == prompts.ANALYST_INSTRUCTION
     assert mesh["explorer"].instruction == prompts.EXPLORER_INSTRUCTION
     assert mesh["critic"].instruction == prompts.CRITIC_INSTRUCTION
+
+
+def test_librarian_instruction_delegates_to_the_mesh():
+    # The Claude conversational Librarian delegates to the SAME specialist mesh as ADK
+    # (SDK subagents named analyst/explorer/critic) and keeps the feedback/logging tools direct.
+    text = prompts.LIBRARIAN_INSTRUCTION
+    assert "'analyst'" in text
+    assert "'explorer'" in text
+    assert "'critic'" in text
+    assert "log_suggestion" in text
+    assert "update_suggestion_status" in text
+    assert "update_reading_status" in text
+    assert "get_unacted_suggestions" in text

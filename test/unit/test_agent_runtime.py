@@ -169,6 +169,51 @@ def test_explorer_has_a_google_search_tool():
     assert any("GoogleSearch" in name for name in tool_types), tool_types
 
 
+class _FakeFunctionCall:
+    def __init__(self, name):
+        self.name = name
+
+
+class _FakeToolEvent(_FakeEvent):
+    """An intermediate event carrying tool calls from a named agent."""
+
+    def __init__(self, author, tool_names):
+        super().__init__("")
+        self.author = author
+        self._tool_names = tool_names
+
+    def is_final_response(self) -> bool:
+        return False
+
+    def get_function_calls(self):
+        return [_FakeFunctionCall(n) for n in self._tool_names]
+
+
+def test_asend_fires_on_event_for_tools_and_agents():
+    class _EventfulRunner(_FakeRunner):
+        async def run_async(self, user_id, session_id, new_message):
+            yield _FakeToolEvent("Librarian", ["get_unacted_suggestions"])
+            yield _FakeToolEvent("Explorer", ["google_search"])
+            final = _FakeEvent("Try Hyperion")
+            final.author = "Librarian"
+            yield final
+
+    seen = []
+    conv = runtime.LibrarianConversation(
+        _EventfulRunner(), "u", "s", on_event=lambda kind, detail: seen.append((kind, detail))
+    )
+    assert conv.send("recommend sci-fi") == "Try Hyperion"
+    assert ("tool", "get_unacted_suggestions") in seen
+    assert ("tool", "google_search") in seen
+    assert ("agent", "Explorer") in seen
+
+
+def test_asend_without_on_event_is_unchanged():
+    conv = runtime.LibrarianConversation(_FakeRunner(reply="Try Dune"), "u", "s")
+    assert conv.send("recommend sci-fi") == "Try Dune"
+    assert conv.close() is None  # close() exists and is a no-op
+
+
 @pytest.mark.api_dependent
 def test_explorer_discovers_real_books():
     # The Explorer in isolation: its grounded google_search should return a

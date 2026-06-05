@@ -46,17 +46,31 @@ class LibrarianConversation:
     """A multi-turn conversation with the Librarian. Reusing one session across
     sends is what gives the agent conversational memory (ADR-036)."""
 
-    def __init__(self, runner: Runner, user_id: str, session_id: str):
+    def __init__(self, runner: Runner, user_id: str, session_id: str, on_event=None):
         self._runner = runner
         self.user_id = user_id
         self.session_id = session_id
+        # Optional visibility hook (ADR-045): on_event(kind, detail) for ("tool", name) /
+        # ("agent", author). Duck-typed event introspection so unit-test fakes keep working.
+        self.on_event = on_event
 
     async def asend(self, message: str) -> str:
         content = types.Content(role="user", parts=[types.Part(text=message)])
         final = ""
+        last_author = None
         async for event in self._runner.run_async(
             user_id=self.user_id, session_id=self.session_id, new_message=content
         ):
+            if self.on_event:
+                author = getattr(event, "author", None)
+                if author and author != last_author:
+                    self.on_event("agent", author)
+                    last_author = author
+                get_calls = getattr(event, "get_function_calls", None)
+                for fc in (get_calls() if callable(get_calls) else []) or []:
+                    name = getattr(fc, "name", None)
+                    if name:
+                        self.on_event("tool", name)
             if event.is_final_response() and event.content and event.content.parts:
                 parts_text = [p.text for p in event.content.parts if p.text]
                 if parts_text:
@@ -66,16 +80,24 @@ class LibrarianConversation:
     def send(self, message: str) -> str:
         return asyncio.run(self.asend(message))
 
+    def close(self) -> None:
+        """No session resources to release (InMemorySessionService); exists for
+        BackendConversation conformance (ADR-045)."""
 
-async def astart_conversation(user_id: str = "local", runner: Runner | None = None) -> LibrarianConversation:
+
+async def astart_conversation(
+    user_id: str = "local", runner: Runner | None = None, on_event=None
+) -> LibrarianConversation:
     runner = runner or build_runner()
     session_id = uuid.uuid4().hex
     await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
-    return LibrarianConversation(runner, user_id, session_id)
+    return LibrarianConversation(runner, user_id, session_id, on_event=on_event)
 
 
-def start_conversation(user_id: str = "local", runner: Runner | None = None) -> LibrarianConversation:
-    return asyncio.run(astart_conversation(user_id=user_id, runner=runner))
+def start_conversation(
+    user_id: str = "local", runner: Runner | None = None, on_event=None
+) -> LibrarianConversation:
+    return asyncio.run(astart_conversation(user_id=user_id, runner=runner, on_event=on_event))
 
 
 def run_recommendation(prompt: str, user_id: str = "local") -> str:

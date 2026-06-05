@@ -581,3 +581,39 @@ This file documents key architectural decisions, their context, and trade-offs.
   `ClaudeGroundedLLM.generate` must be called from a synchronous context (it uses `asyncio.run`); scouts
   always are. A full ETL on Claude issues many WebSearch calls — validate Agent SDK rate limits on a
   small batch first.
+
+### ADR-045: Conversation Seam on the Backend Protocol + CLI Chat Harness (2026-06-05)
+**Context:**
+- No command-line way to exercise the conversational piece. `RecommendationBackend` (ADR-041) is
+  one-shot only; multi-turn (`LibrarianConversation`, ADR-036) exists only on ADK, and the Claude
+  backend is a fixed pipeline of independent `query()` calls (ADR-040) with no conversational mode.
+  Spec: docs/superpowers/specs/2026-06-05-cli-chat-design.md.
+
+**Decision:**
+- Extend the strategy seam with `start_conversation(user_id, on_event) -> BackendConversation`
+  (`send`/`close`), so multi-turn means the SAME thing on both backends: a stateful Librarian session
+  calling DB/web tools on demand. ADK wraps the existing `LibrarianConversation` (+ optional event
+  callback in `asend`); Claude gains a true conversational mode via a persistent `ClaudeSDKClient`
+  session on a background event-loop thread (PR #26 async precedent). Rejected: CLI-managed transcript
+  replay over the one-shot pipeline (re-runs the full pipeline per turn: slow, quota-hungry, logs a
+  spurious Suggestion per turn).
+- **Full mesh parity on Claude** (amended same day, user decision): the Claude conversational
+  Librarian delegates to the SAME specialist mesh as ADK via programmatic SDK subagents
+  (`ClaudeAgentOptions(agents={"analyst"/"explorer"/"critic": AgentDefinition(prompt=<specialist
+  instruction>, tools=<scoped like the ADK mesh>)})`, invoked through the `Task` tool — the analogue
+  of ADK's `AgentTool`). A single-agent variant was rejected: it doesn't exercise the specialist
+  prompts, and ADK-vs-Claude conversation comparisons would conflate backend with architecture.
+  Cost accepted: slower turns / more Max quota per turn. VERIFY live (REC-019 pattern): subagent
+  visibility of the in-process MCP server via `AgentDefinition.mcpServers=["librarian"]`.
+- New `librarian` console script (argparse REPL; `--once`, `--backend`, `--quiet`, `--no-mlflow`)
+  printing replies plus a compact key-event trace (`on_event(kind, detail)`).
+- Each conversation is one MLflow run (experiment `librarian_conversations`: params backend/model/
+  mode, per-turn latency metrics, `transcript.jsonl` artifact) owned by the CLI-layer
+  `ConversationRecorder` — backends stay pure. Degradation posture: MLflow failures warn once and
+  never block the chat; transcript falls back to a local gitignored `.chat_logs/<ts>.jsonl`
+  (informed by the 2026-05-31 MLflow 403 bug).
+
+**Consequences:**
+- The conversational piece becomes testable on both quota pools, and ADK-vs-Claude conversations are
+  comparable in the MLflow UI. The Claude one-shot pipeline is untouched. The new protocol method is
+  additive (existing callers unaffected).

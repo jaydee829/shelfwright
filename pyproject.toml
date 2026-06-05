@@ -36,6 +36,9 @@ dependencies = [
     "psycopg2-binary>=2.9.11"
 ]
 
+[project.scripts]
+librarian = "agentic_librarian.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pre-commit>=4.5.1",
