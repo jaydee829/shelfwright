@@ -22,7 +22,7 @@ def test_claude_subagents_have_no_write_tools():
         assert not (granted & WRITE_TOOLS), f"subagent {name!r} was granted write tools: {granted & WRITE_TOOLS}"
     # And the Librarian session DOES hold them (it is the authorization point):
     session_tools = {t.split("__")[-1] for t in options.allowed_tools}
-    assert WRITE_TOOLS <= session_tools
+    assert session_tools >= WRITE_TOOLS
 
 
 def test_adk_specialists_have_no_write_tools():
@@ -33,4 +33,4 @@ def test_adk_specialists_have_no_write_tools():
         granted = {t.name for t in mesh[name].tools} & WRITE_TOOLS
         assert not granted, f"ADK {name} was granted write tools: {granted}"
     librarian_tools = {t.name for t in mesh["librarian"].tools}
-    assert WRITE_TOOLS <= librarian_tools
+    assert librarian_tools >= WRITE_TOOLS
