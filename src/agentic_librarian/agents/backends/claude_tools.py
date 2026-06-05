@@ -67,6 +67,21 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
         ),
         mcp_server.log_suggestion,
     ),
+    (
+        "update_reading_status",
+        "Update reading history from user feedback (e.g. 'I read that').",
+        _schema(
+            {"title": _STR, "author": _STR, "status": _STR, "notes": _STR},
+            required=["title", "author", "status"],
+        ),
+        mcp_server.update_reading_status,
+    ),
+    (
+        "update_suggestion_status",
+        "Update a suggestion's status (Accepted / Dismissed / Already Read).",
+        _schema({"work_id": _STR, "status": _STR}, required=["work_id", "status"]),
+        mcp_server.update_suggestion_status,
+    ),
 ]
 
 LIBRARIAN_TOOL_NAMES = [f"mcp__{_SERVER_NAME}__{short}" for short, _, _, _ in _TOOL_SCHEMAS]
