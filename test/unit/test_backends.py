@@ -35,3 +35,14 @@ def test_backend_conversation_protocol_is_runtime_checkable():
 
     assert isinstance(_Conv(), BackendConversation)
     assert not isinstance(_NotConv(), BackendConversation)
+
+
+def test_adk_backend_start_conversation_satisfies_protocol():
+    from agentic_librarian.agents.backends import BackendConversation
+    from agentic_librarian.agents.backends.adk import ADKBackend
+    from test.unit.test_agent_runtime import _FakeRunner
+
+    conv = ADKBackend().start_conversation(user_id="u", runner=_FakeRunner(reply="ok"))
+    assert isinstance(conv, BackendConversation)
+    assert conv.send("hi") == "ok"
+    conv.close()

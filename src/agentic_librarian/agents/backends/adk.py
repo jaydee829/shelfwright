@@ -6,7 +6,7 @@ import asyncio
 import uuid
 
 from agentic_librarian.agents.pipeline import create_recommendation_pipeline
-from agentic_librarian.agents.runtime import APP_NAME, _ensure_adk_credentials
+from agentic_librarian.agents.runtime import APP_NAME, _ensure_adk_credentials, start_conversation as _runtime_start_conversation
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -35,3 +35,8 @@ class ADKBackend:
 
     def run_recommendation(self, prompt: str, user_id: str = "local") -> str:
         return asyncio.run(self.arun(prompt, user_id))
+
+    def start_conversation(self, user_id: str = "local", on_event=None, runner=None):
+        """Multi-turn conversational Librarian (the mesh dispatcher, ADR-036/ADR-045).
+        `runner` is injectable for tests; default builds the mesh runner."""
+        return _runtime_start_conversation(user_id=user_id, runner=runner, on_event=on_event)
