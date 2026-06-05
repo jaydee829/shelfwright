@@ -178,3 +178,31 @@ def test_claude_conversation_close_survives_disconnect_error(capsys):
     conv = ClaudeConversation(client_factory=_ExplodingDisconnectClient)
     conv.close()  # must not raise
     assert "disconnect failed" in capsys.readouterr().out
+
+
+def test_claude_conversation_close_closes_the_loop():
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    conv = ClaudeConversation(client_factory=_FakeSDKClient)
+    loop = conv._loop
+    conv.close()
+    assert loop.is_closed()  # selector resources released, not just stopped (PR #33 review)
+
+
+def test_claude_conversation_connect_failure_closes_the_loop(monkeypatch):
+    import asyncio as _asyncio
+
+    from agentic_librarian.agents.backends import claude as claude_mod
+
+    created = []
+    real_new_event_loop = _asyncio.new_event_loop
+
+    def _capturing_new_event_loop():
+        loop = real_new_event_loop()
+        created.append(loop)
+        return loop
+
+    monkeypatch.setattr(claude_mod.asyncio, "new_event_loop", _capturing_new_event_loop)
+    with pytest.raises(RuntimeError, match="no auth"):
+        claude_mod.ClaudeConversation(client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no auth")))
+    assert created and created[0].is_closed()

@@ -162,8 +162,7 @@ class ClaudeConversation:
             self._run(self._connect())
         except BaseException:
             # Don't leak the loop thread when the client can't connect (e.g. no `claude` auth).
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            self._thread.join(timeout=5)
+            self._teardown_loop()
             raise
 
     @staticmethod
@@ -211,6 +210,15 @@ class ClaudeConversation:
     def send(self, message: str) -> str:
         return self._run(self._asend(message))
 
+    def _teardown_loop(self) -> None:
+        """Stop the background loop, join its thread, then close the loop so selector
+        resources are released (PR #33 review). Close only once the thread is gone —
+        closing a still-running loop raises RuntimeError."""
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(timeout=5)
+        if not self._thread.is_alive():
+            self._loop.close()
+
     def close(self) -> None:
         if self._closed:
             return
@@ -223,8 +231,7 @@ class ClaudeConversation:
             # over either way. Warn for visibility (matches the project's no-silent-except rule).
             print(f"warning: claude conversation disconnect failed ({type(e).__name__}: {e})")
         finally:
-            self._loop.call_soon_threadsafe(self._loop.stop)
-            self._thread.join(timeout=5)
+            self._teardown_loop()
 
 
 class ClaudeBackend:

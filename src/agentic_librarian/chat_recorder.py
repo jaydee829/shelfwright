@@ -36,11 +36,20 @@ class ConversationRecorder:
 
                 mlflow.set_experiment(_EXPERIMENT)
                 run = mlflow.start_run(run_name=f"{backend}-{mode}")
-                mlflow.log_params({"backend": backend, "model": model, "user_id": user_id, "mode": mode})
                 self._mlflow = mlflow
                 self.run_id = run.info.run_id
+                mlflow.log_params({"backend": backend, "model": model, "user_id": user_id, "mode": mode})
             except Exception as e:  # degradation posture: warn once, never block the chat
                 print(f"warning: mlflow capture disabled ({type(e).__name__}: {e})")
+                if self._mlflow:
+                    # A run was already started: end it FAILED so it can't leak in RUNNING state
+                    # (mlflow's active run is process-global).
+                    try:
+                        self._mlflow.end_run(status="FAILED")
+                    except Exception as end_err:
+                        print(f"warning: failed to end leaked mlflow run ({type(end_err).__name__}: {end_err})")
+                    self._mlflow = None
+                    self.run_id = None
 
     def record_turn(
         self,

@@ -62,3 +62,19 @@ def test_close_ends_run_even_when_artifact_upload_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(rec._mlflow, "log_artifact", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("upload failed")))
     rec.close()  # must not raise, and must still end the run
     assert mlflow.get_run(rec.run_id).info.status == "FINISHED"
+
+
+def test_init_ends_run_when_param_logging_fails(tmp_path, monkeypatch, capsys):
+    import mlflow
+
+    uri = (tmp_path / "mlruns").as_uri()
+    monkeypatch.setenv("MLFLOW_ALLOW_FILE_STORE", "true")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
+    mlflow.set_tracking_uri(uri)
+    monkeypatch.setattr(
+        mlflow, "log_params", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("params failed"))
+    )
+    rec = ConversationRecorder("adk", "m", "u", "chat", log_dir=str(tmp_path / "logs"))
+    assert rec.run_id is None
+    assert mlflow.active_run() is None  # no leaked RUNNING run polluting process-global state
+    assert "mlflow capture disabled" in capsys.readouterr().out
