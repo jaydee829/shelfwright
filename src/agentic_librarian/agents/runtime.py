@@ -94,9 +94,7 @@ async def astart_conversation(
     return LibrarianConversation(runner, user_id, session_id, on_event=on_event)
 
 
-def start_conversation(
-    user_id: str = "local", runner: Runner | None = None, on_event=None
-) -> LibrarianConversation:
+def start_conversation(user_id: str = "local", runner: Runner | None = None, on_event=None) -> LibrarianConversation:
     return asyncio.run(astart_conversation(user_id=user_id, runner=runner, on_event=on_event))
 
 

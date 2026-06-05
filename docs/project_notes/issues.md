@@ -172,3 +172,12 @@ This file tracks work history and ticket references.
     3. **#31** (gitignore db dumps): merged as-is, no findings.
     4. **#32** (cleaning non-unique index): also fixed the latent `split_authors` misalignment — Author_X frame now built with `index=df.index` (see bugs.md 2026-06-05).
     - Gemini Code Assist consumer code review sunsets 2026-07-17 (new installs blocked 2026-06-18) — PR review automation will need a replacement (e.g. /code-review).
+
+### 2026-06-05 - CLI-026: librarian CLI chat harness (ADR-045, PR #33)
+- **Status**: Merged (d82f0cb); live verification pending
+- **Description**: `librarian` console-script REPL with multi-turn conversations on BOTH backends — ADK wraps LibrarianConversation (+ event callback); Claude gains a true conversational mode (persistent ClaudeSDKClient session delegating to the analyst/explorer/critic specialist mesh via SDK subagents/Task tool). MLflow conversation capture (`librarian_conversations` experiment) with never-block degradation. Built spec→plan→subagent-driven TDD; 206 offline tests pass.
+- **URL**: https://github.com/jaydee829/agentic_librarian/pull/33
+- **Notes**:
+    - **Live verification (updated 2026-06-05, same day)**: item (1) **resolved positive** — subagents DO see the in-process librarian MCP server; the first live test instead surfaced a permission-layer bug (`AgentDefinition.tools` scopes but doesn't grant — see bugs.md 2026-06-05) fixed in the follow-up PR, with a live re-probe returning the user's real 20-trope profile via `agent: analyst` delegation. Still pending: (2) explorer's `WebSearch` live exercise; (3) the full 2-turn smoke per backend (`test/integration/test_cli_chat_live.py`, api_dependent); (4) MLflow connect speed at CLI startup (escape hatch `--no-mlflow`).
+    - Invocation in the app container: `python -m agentic_librarian.cli` always works; the `librarian` script is installed at `/home/appuser/.local/bin/librarian` (not on default exec PATH — add to PATH in Dockerfile/compose as a follow-up, or rebuild the image so the build-time editable install picks up [project.scripts]).
+    - Known minor follow-ups from final review: no banner on `--once`; consider MLFLOW_HTTP_REQUEST_TIMEOUT in compose.

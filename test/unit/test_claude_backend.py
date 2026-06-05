@@ -131,8 +131,16 @@ def test_conversation_options_wire_the_specialist_mesh():
     assert options.agents["explorer"].tools == ["WebSearch"]
     assert options.agents["critic"].prompt == prompts.CRITIC_INSTRUCTION
     assert "mcp__librarian__search_internal_database" in options.agents["critic"].tools
-    assert "Task" in options.allowed_tools  # the Librarian delegates via the Task tool
-    assert "mcp__librarian__log_suggestion" in options.allowed_tools
+    from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES
+
+    # Session-level allowlist must PERMIT the whole mesh: every librarian MCP tool (the
+    # subagents' AgentDefinition.tools only scope, they don't grant permission — live-verified)
+    # plus web search for the explorer and both delegation tool names.
+    for name in LIBRARIAN_TOOL_NAMES:
+        assert name in options.allowed_tools
+    assert "WebSearch" in options.allowed_tools
+    assert "Task" in options.allowed_tools
+    assert "Agent" in options.allowed_tools
     assert options.system_prompt == prompts.LIBRARIAN_INSTRUCTION
 
 
@@ -206,3 +214,45 @@ def test_claude_conversation_connect_failure_closes_the_loop(monkeypatch):
     with pytest.raises(RuntimeError, match="no auth"):
         claude_mod.ClaudeConversation(client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no auth")))
     assert created and created[0].is_closed()
+
+
+def test_agent_tool_block_maps_to_agent_event():
+    # The current SDK names the delegation tool "Agent" (older: "Task") — both must map to
+    # ("agent", subagent_type) so delegations show as agent events, not tool events.
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    class _AgentBlockClient(_FakeSDKClient):
+        async def receive_response(self):
+            agent_block = _FakeToolUseBlock("Agent")
+            agent_block.input = {"subagent_type": "analyst", "prompt": "get tropes"}
+            yield _FakeAssistantMessage([agent_block])
+            yield _FakeResultMessage("done")
+
+    seen = []
+    conv = ClaudeConversation(on_event=lambda k, d: seen.append((k, d)), client_factory=_AgentBlockClient)
+    try:
+        conv.send("hi")
+    finally:
+        conv.close()
+    assert ("agent", "analyst") in seen
+
+
+def test_agent_block_with_non_dict_input_does_not_crash_the_turn():
+    # Defensive (PR #34 review): a malformed delegation block whose `input` is a non-dict
+    # truthy value (e.g. a raw string) must not raise inside the event emitter.
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    class _MalformedAgentBlockClient(_FakeSDKClient):
+        async def receive_response(self):
+            bad_block = _FakeToolUseBlock("Agent")
+            bad_block.input = "analyst"  # non-dict truthy input
+            yield _FakeAssistantMessage([bad_block])
+            yield _FakeResultMessage("done")
+
+    seen = []
+    conv = ClaudeConversation(on_event=lambda k, d: seen.append((k, d)), client_factory=_MalformedAgentBlockClient)
+    try:
+        assert conv.send("hi") == "done"
+    finally:
+        conv.close()
+    assert ("agent", "subagent") in seen  # falls back to the generic label

@@ -5,7 +5,8 @@ quota) is selectable with AGENT_BACKEND=claude."""
 from __future__ import annotations
 
 import os
-from typing import Callable, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
