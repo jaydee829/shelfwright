@@ -6,12 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 
 from agentic_librarian.agents import prompts
 from agentic_librarian.agents.backends.claude_tools import build_librarian_mcp_server
 from agentic_librarian.agents.candidates import coerce_schema_value, extract_candidate_ids, extract_discovery_pairs
 from agentic_librarian.mcp.server import enrich_and_persist_work, log_suggestion
-from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, query
 
 
 def _model() -> str:
@@ -96,8 +97,131 @@ async def _arun(prompt: str) -> str:
     return recommendation
 
 
+def _conversation_options() -> ClaudeAgentOptions:
+    """Options for the conversational Librarian (ADR-045): the SAME specialist mesh as ADK,
+    as programmatic SDK subagents invoked via the Task tool (the analogue of ADK's AgentTool).
+    Specialist prompts are reused verbatim; tools are scoped like the ADK mesh. VERIFY on the
+    first live run (REC-019 pattern): subagents must see the in-process 'librarian' MCP server
+    via mcpServers=["librarian"]; if not, rescope those tools onto the Librarian itself."""
+    agents = {
+        "analyst": AgentDefinition(
+            description="Turns user vibes into structured trope/style targets and constraints.",
+            prompt=prompts.ANALYST_INSTRUCTION,
+            tools=["mcp__librarian__get_user_trope_preferences"],
+            mcpServers=["librarian"],
+        ),
+        "explorer": AgentDefinition(
+            description="Discovers new candidate books on the web.",
+            prompt=prompts.EXPLORER_INSTRUCTION,
+            tools=["WebSearch"],
+        ),
+        "critic": AgentDefinition(
+            description="Ranks candidates and writes a grounded Trope-RAG justification.",
+            prompt=prompts.CRITIC_INSTRUCTION,
+            tools=[
+                "mcp__librarian__search_internal_database",
+                "mcp__librarian__get_work_details",
+                "mcp__librarian__check_reading_history",
+            ],
+            mcpServers=["librarian"],
+        ),
+    }
+    return ClaudeAgentOptions(
+        system_prompt=prompts.LIBRARIAN_INSTRUCTION,
+        model=_model(),
+        mcp_servers={"librarian": build_librarian_mcp_server()},
+        agents=agents,
+        # Task = subagent delegation; the rest are the Librarian's DIRECT tools (mirrors the
+        # ADK Librarian's FunctionTools in services.py).
+        allowed_tools=[
+            "Task",
+            "mcp__librarian__get_unacted_suggestions",
+            "mcp__librarian__update_reading_status",
+            "mcp__librarian__update_suggestion_status",
+            "mcp__librarian__log_suggestion",
+        ],
+    )
+
+
+class ClaudeConversation:
+    """Multi-turn conversational Librarian on a persistent ClaudeSDKClient session (ADR-045).
+    The SDK is async and the REPL is sync, and the session must outlive each send — so the
+    client lives on a dedicated background event-loop thread (cf. the running-loop constraint
+    ClaudeGroundedLLM solved in PR #26; asyncio.run per send would tear down the session)."""
+
+    def __init__(self, user_id: str = "local", on_event=None, client_factory=None):
+        self.user_id = user_id
+        self.on_event = on_event
+        self._client_factory = client_factory or self._default_client
+        self._client = None
+        self._closed = False
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
+        self._thread.start()
+        self._run(self._connect())
+
+    @staticmethod
+    def _default_client():
+        from claude_agent_sdk import ClaudeSDKClient
+
+        return ClaudeSDKClient(options=_conversation_options())
+
+    def _run(self, coro):
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+
+    async def _connect(self):
+        self._client = self._client_factory()
+        await self._client.connect()
+
+    def _emit_block_event(self, block) -> None:
+        """Map a ToolUseBlock to the trace: Task delegations -> ("agent", subagent), everything
+        else -> ("tool", name) — matching the ADK event shape."""
+        tool_name = getattr(block, "name", None)
+        if not (tool_name and hasattr(block, "input") and self.on_event):
+            return
+        if tool_name == "Task":
+            self.on_event("agent", (block.input or {}).get("subagent_type", "subagent"))
+        else:
+            self.on_event("tool", str(tool_name))
+
+    async def _asend(self, message: str) -> str:
+        await self._client.query(message)
+        text_parts: list[str] = []
+        result_text = ""
+        async for msg in self._client.receive_response():
+            # ResultMessage carries the authoritative turn result (same duck-typing as _ask).
+            result_val = getattr(msg, "result", None)
+            if result_val and isinstance(result_val, str):
+                result_text = result_val
+            for block in getattr(msg, "content", None) or []:
+                block_text = getattr(block, "text", None)
+                if isinstance(block_text, str):
+                    text_parts.append(block_text)
+                self._emit_block_event(block)
+        return result_text or "".join(text_parts) or "(no response)"
+
+    def send(self, message: str) -> str:
+        return self._run(self._asend(message))
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._client is not None:
+                self._run(self._client.disconnect())
+        finally:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=5)
+
+
 class ClaudeBackend:
     name = "claude"
 
     def run_recommendation(self, prompt: str, user_id: str = "local") -> str:
         return asyncio.run(_arun(prompt))
+
+    def start_conversation(self, user_id: str = "local", on_event=None, client_factory=None):
+        """Multi-turn conversational Librarian on a persistent SDK session (ADR-045).
+        `client_factory` is injectable for tests."""
+        return ClaudeConversation(user_id=user_id, on_event=on_event, client_factory=client_factory)
