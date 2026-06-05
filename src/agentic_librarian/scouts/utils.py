@@ -24,11 +24,16 @@ def _throttle_embedding() -> None:
     if _EMBED_MIN_INTERVAL <= 0:
         return
     global _last_embed
+    # Reserve the next wake-up slot atomically, then sleep OUTSIDE the lock so
+    # concurrent callers can schedule themselves immediately instead of
+    # serializing on the full sleep of whoever acquired the lock first.
+    now = time.monotonic()
     with _embed_lock:
-        wait = _EMBED_MIN_INTERVAL - (time.monotonic() - _last_embed)
-        if wait > 0:
-            time.sleep(wait)
-        _last_embed = time.monotonic()
+        scheduled = max(now, _last_embed + _EMBED_MIN_INTERVAL)
+        _last_embed = scheduled
+    wait = scheduled - now
+    if wait > 0:
+        time.sleep(wait)
 
 
 @lru_cache(maxsize=128)
