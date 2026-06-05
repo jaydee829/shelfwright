@@ -82,12 +82,19 @@ def test_repl_survives_a_failed_turn(monkeypatch, capsys, no_mlflow_dir):
     assert "librarian> recovered" in out
 
 
-def test_quiet_suppresses_event_trace(monkeypatch, capsys, no_mlflow_dir):
+def test_quiet_suppresses_event_trace_but_still_records(tmp_path, monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr(cli, "_LOG_DIR", str(tmp_path))
     fake = _FakeBackend(replies=("ok",))
     monkeypatch.setattr(cli, "get_backend", lambda: fake)
     _feed_stdin(monkeypatch, ["hi", "/quit"])
     cli.main(["--no-mlflow", "--quiet"])
     assert "· tool:" not in capsys.readouterr().out
+    transcripts = list(tmp_path.glob("*.jsonl"))
+    assert len(transcripts) == 1
+    record = json.loads(transcripts[0].read_text(encoding="utf-8").splitlines()[0])
+    assert record["events"] == ["tool: search_internal_database"]  # recorded even when not printed
 
 
 def test_backend_flag_sets_env(monkeypatch, capsys, no_mlflow_dir):
