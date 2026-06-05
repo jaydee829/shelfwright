@@ -9,7 +9,7 @@ import os
 import threading
 
 from agentic_librarian.agents import prompts
-from agentic_librarian.agents.backends.claude_tools import build_librarian_mcp_server
+from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES, build_librarian_mcp_server
 from agentic_librarian.agents.candidates import coerce_schema_value, extract_candidate_ids, extract_discovery_pairs
 from agentic_librarian.mcp.server import enrich_and_persist_work, log_suggestion
 from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, query
@@ -131,15 +131,11 @@ def _conversation_options() -> ClaudeAgentOptions:
         model=_model(),
         mcp_servers={"librarian": build_librarian_mcp_server()},
         agents=agents,
-        # Task = subagent delegation; the rest are the Librarian's DIRECT tools (mirrors the
-        # ADK Librarian's FunctionTools in services.py).
-        allowed_tools=[
-            "Task",
-            "mcp__librarian__get_unacted_suggestions",
-            "mcp__librarian__update_reading_status",
-            "mcp__librarian__update_suggestion_status",
-            "mcp__librarian__log_suggestion",
-        ],
+        # Session-level PERMISSION for the whole mesh: AgentDefinition.tools above only SCOPES
+        # what each subagent may use — it does not grant permission (live-verified, PR #33
+        # follow-up: the analyst's tool call was permission-denied). Subagent scoping still
+        # applies, and the Librarian's instruction still routes specialist work through Task.
+        allowed_tools=["Task", "Agent", *LIBRARIAN_TOOL_NAMES, "WebSearch"],
     )
 
 
@@ -181,12 +177,12 @@ class ClaudeConversation:
         await self._client.connect()
 
     def _emit_block_event(self, block) -> None:
-        """Map a ToolUseBlock to the trace: Task delegations -> ("agent", subagent), everything
-        else -> ("tool", name) — matching the ADK event shape."""
+        """Map a ToolUseBlock to the trace: Task/Agent delegations -> ("agent", subagent),
+        everything else -> ("tool", name) — matching the ADK event shape."""
         tool_name = getattr(block, "name", None)
         if not (tool_name and hasattr(block, "input") and self.on_event):
             return
-        if tool_name == "Task":
+        if tool_name in ("Task", "Agent"):
             self.on_event("agent", (block.input or {}).get("subagent_type", "subagent"))
         else:
             self.on_event("tool", str(tool_name))
