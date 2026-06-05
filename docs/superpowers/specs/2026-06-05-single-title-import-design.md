@@ -47,17 +47,32 @@ add_book_to_history(
   (including floats — no silent rounding).
 - `format` capped at 50 chars (defaults "ebook"); `notes` capped at 2000.
 
-**Flow:**
+**Flow (new-row-per-read model — user decision):**
+Reading history is a log of READ EVENTS: each completed read is its own row with its
+own date (and optionally its own rating). Re-read count is the row count per work —
+derived for free, no schema column (the "gee-whiz" stat without machinery). Logging a
+re-read refreshes recency, so a just-re-read book stops qualifying for >2-year re-read
+suggestions naturally.
+
 1. Get-or-create the enriched Work by calling `enrich_and_persist_work(title, author,
    format)` — reuses dedup (normalized title+author) and the full scout enrichment.
    `None` → return `"Error: could not resolve '<title>' by <author> — check the
    spelling, or the scouts found nothing."`
 2. Get-or-create the Edition for the requested format (same pattern persist uses).
-3. **Duplicate guard**: if ANY ReadingHistory row exists for this work (any edition),
-   return `"'<title>' is already in your reading history (completed <date>). No new
-   entry written."` — single-user history never double-counts a work.
+3. **Duplicate guard (same-date only)**: if a ReadingHistory row for this work (any
+   edition) already has this exact `date_completed`, return `"'<title>' is already
+   logged as completed <date>. No new entry written."` — catches accidental
+   double-sends. A row with a DIFFERENT date is a re-read: insert a new row (the
+   conversational CONFIRM step verifies with the user first; the CLI is explicit by
+   nature). The success message names the read count: `"Added '<title>' … (read #2)."`
 4. Insert the `ReadingHistory` row (edition link, `date_completed`, `user_rating`,
-   `user_notes`). Return `"Added '<title>' to your reading history (work <id>)."`
+   `user_notes`). Return `"Added '<title>' to your reading history (work <id>, read #N)."`
+
+**Required audit (same change-set):** `check_reading_history`'s >2-year re-read
+eligibility must evaluate the LATEST `date_completed` for a work — add
+`order_by(ReadingHistory.date_completed.desc())` (or `max()`) if it currently grabs an
+arbitrary row. Regression test: a work with an old read + a recent re-read is NOT
+re-read eligible.
 
 ### 2. Conversational entry point
 
@@ -103,11 +118,14 @@ librarian add "Project Hail Mary" --author "Andy Weir"
 ## Testing
 
 1. db_integration (isolated test DB): happy path (row with rating/date/notes); dedup
-   to an EXISTING work (no second Work created, history added); duplicate-history
-   guard (second add → message, count unchanged); omitted date → row carries today;
+   to an EXISTING work (no second Work created, history added); same-date duplicate
+   guard (second identical add → message, row count unchanged); **re-read path**
+   (different date → second row inserted, message says "read #2", original row
+   untouched); omitted date → row carries today; `check_reading_history` re-read
+   eligibility uses the LATEST read (old read + recent re-read → not eligible);
    rejections — bad date (format / future), bad rating (0, 6, 3.5, "five"), blank
-   title — each asserting **no row written**. Enrichment is stubbed (monkeypatch `enrich_and_persist_work`) so tests
-   are offline-deterministic.
+   title — each asserting **no row written**. Enrichment is stubbed (monkeypatch
+   `enrich_and_persist_work`) so tests are offline-deterministic.
 2. CLI: subcommand parse + dispatch with the tool monkeypatched (success exit 0,
    error exit 1, REPL default unaffected, `--once` unaffected).
 3. Prompt assertions: IMPORT flow + extended CONFIRM clause in both Librarian variants.
