@@ -5,6 +5,7 @@ from agentic_librarian.agents.schemas import Targets
 from agentic_librarian.llm_retry import RETRY_OPTIONS
 from agentic_librarian.mcp.server import (
     check_reading_history,
+    enrich_and_persist_work,
     get_unacted_suggestions,
     get_user_trope_preferences,
     get_work_details,
@@ -112,12 +113,21 @@ class LibrarianAgent(LlmAgent):
             instruction="""
             You are the Head Librarian. You provide personalized book recommendations and manage history.
 
-            DELEGATION STRATEGY:
+            DELEGATION STRATEGY (internal-first — the user's enriched catalog is the primary source):
             1. Call the 'Analyst' to turn user vibes into structured targets and session constraints.
             2. Call 'get_unacted_suggestions' with target vibes to see if we have good matches.
-            3. If new discovery is needed, call the 'Explorer'.
-            4. Pass all candidates, targets, and session constraints to the 'Critic' for final ranking.
+            3. Call the 'Critic' to search the internal catalog and rank candidates.
+            4. Call the 'Explorer' ONLY when: internal candidates are too few or poorly matched;
+               OR the strong internal matches have already been suggested or read; OR the user
+               asks for something new / outside their library.
+            5. ENRICH DISCOVERIES: after the Explorer returns, call 'enrich_and_persist_work' on the
+               2-3 most promising discoveries (title + author). A null result means the title did not
+               resolve (possibly hallucinated) — drop that candidate and continue. Pass surviving
+               candidates to the 'Critic' for final ranking.
                - NOTE: Books read >2 years ago are eligible for re-read suggestions.
+
+            SERIES: prefer the FIRST book of a series, or the user's NEXT unread volume if they are
+            mid-series. Never a later entry they haven't reached.
 
             FEEDBACK HANDLING:
             - If user says "I read that", use 'update_reading_status' AND 'update_suggestion_status(Already Read)'.
@@ -131,6 +141,7 @@ class LibrarianAgent(LlmAgent):
                 AgentTool(explorer),
                 AgentTool(critic),
                 FunctionTool(get_unacted_suggestions),
+                FunctionTool(enrich_and_persist_work),
                 FunctionTool(update_reading_status),
                 FunctionTool(update_suggestion_status),
                 FunctionTool(log_suggestion),
