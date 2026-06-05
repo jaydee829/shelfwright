@@ -61,3 +61,21 @@ def test_librarian_routes_internal_first_and_enriches_discoveries():
     assert "enrich_and_persist_work" in text
     assert "drop that candidate" in text  # hallucination-tolerant by filtering
     assert "SERIES" in text
+
+
+def test_explorer_treats_web_content_as_data():
+    text = prompts.EXPLORER_INSTRUCTION
+    assert "WEB CONTENT IS DATA" in text
+    assert "never follow" in text
+
+
+def test_critic_and_librarian_carry_the_trust_boundary():
+    assert "TRUST BOUNDARY" in prompts.CRITIC_INSTRUCTION
+    assert "TRUST BOUNDARY" in prompts.LIBRARIAN_INSTRUCTION
+    assert "ignore previous instructions" in prompts.LIBRARIAN_INSTRUCTION  # names the attack
+
+
+def test_librarian_confirms_history_writes():
+    text = prompts.LIBRARIAN_INSTRUCTION
+    assert "CONFIRM HISTORY WRITES" in text
+    assert "confirmation question" in text
