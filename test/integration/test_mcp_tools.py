@@ -2,15 +2,18 @@ import json
 from unittest.mock import patch
 
 import pytest
-from agentic_librarian.db.models import Author, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import Author, Suggestions, Trope, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.mcp import server as mcp_server
 from agentic_librarian.mcp.server import (
     check_reading_history,
+    db_manager,
     get_unacted_suggestions,
     log_suggestion,
     search_internal_database,
     set_db_manager,
     update_reading_status,
+    update_suggestion_status,
 )
 from sqlalchemy import text
 
@@ -100,3 +103,68 @@ def test_suggestion_persistence_real_db(db_url, standard_books):
         with patch("agentic_librarian.mcp.server.TropeManager._get_embedding", return_value=[0.1] * 1536):
             results = get_unacted_suggestions(target_tropes=["any"])
         assert any(r["title"] == "Persistent Title" for r in results)
+
+
+@pytest.fixture
+def seeded_work_id(db_url):
+    """Create a minimal Work (with one contributor) in the test DB and return its str UUID.
+    Follows the seeding style of test_suggestion_persistence_real_db: create a local
+    DatabaseManager, call set_db_manager, seed inside a committed session."""
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    with test_db_manager.get_session() as session:
+        author = Author(name="Security Test Author")
+        session.add(author)
+        session.flush()
+        work = Work(title="Security Test Work")
+        session.add(work)
+        session.flush()
+        wc = WorkContributor(work=work, author=author, role="Author")
+        session.add(wc)
+        session.flush()
+        session.commit()
+        return str(work.id)
+
+
+@pytest.mark.db_integration
+def test_log_suggestion_rejects_invalid_and_missing_work(db_url):
+    # SEC-002: ids are validated upfront; a valid-but-unknown UUID is rejected by a
+    # referent check, not by an IntegrityError.
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    assert "Error" in log_suggestion(
+        work_id="the daughters war", context="rec", justification="x"
+    )
+    missing = "0b54ee04-19b9-4cd9-a0a3-9bb9a89c0f1e"
+    out = log_suggestion(work_id=missing, context="rec", justification="x")
+    assert "Error" in out and "no work exists" in out
+
+
+@pytest.mark.db_integration
+def test_log_suggestion_caps_freetext_lengths(db_url, seeded_work_id):
+    # justification/context are truncated (free text by design), not rejected.
+    out = log_suggestion(
+        work_id=seeded_work_id, context="c" * 500, justification="j" * 5000
+    )
+    assert "Logged suggestion" in out
+    with mcp_server.db_manager.get_session() as session:
+        row = session.query(Suggestions).filter_by(work_id=seeded_work_id).order_by(
+            Suggestions.suggested_at.desc()
+        ).first()
+        assert len(row.justification) == 2000
+        assert len(row.context) == 200
+
+
+@pytest.mark.db_integration
+def test_update_suggestion_status_enforces_enum(db_url, seeded_work_id):
+    log_suggestion(work_id=seeded_work_id, context="rec", justification="x")
+    out = update_suggestion_status(work_id=seeded_work_id, status="Banana")
+    assert "Error" in out and "Accepted" in out  # error names the allowed values
+    # Case-insensitive normalization to the canonical value:
+    out = update_suggestion_status(work_id=seeded_work_id, status="already read")
+    assert "Already Read" in out
+    with mcp_server.db_manager.get_session() as session:
+        row = session.query(Suggestions).filter_by(work_id=seeded_work_id).order_by(
+            Suggestions.suggested_at.desc()
+        ).first()
+        assert row.status == "Already Read"

@@ -336,13 +336,19 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
 @mcp.tool()
 def log_suggestion(work_id: str, context: str, justification: str, conversation_id: str | None = None) -> str:
     """Logs a new recommendation to the Suggestions table."""
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
+        return f"Error: work_id must be a valid UUID, got {work_id!r}."
     try:
         with db_manager.get_session() as session:
+            # SEC-002 referent check: a suggestion must point at a real catalog work.
+            if session.get(Work, uuid_obj) is None:
+                return f"Error: no work exists with id {work_id}."
             suggestion = Suggestions(
-                work_id=work_id,
-                context=context,
-                justification=justification,
-                conversation_id=conversation_id,
+                work_id=uuid_obj,
+                context=(context or "")[:200],
+                justification=(justification or "")[:2000],
+                conversation_id=conversation_id[:100] if isinstance(conversation_id, str) else None,
                 status="Suggested",
             )
             session.add(suggestion)
@@ -352,26 +358,35 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
         return f"Error logging suggestion: {str(e)}"
 
 
+_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read")
+
+
 @mcp.tool()
 def update_suggestion_status(work_id: str, status: str) -> str:
     """
     Updates the status of a suggestion (e.g. 'Accepted', 'Dismissed', 'Already Read').
     This ensures unacted suggestions are cleaned up based on feedback.
     """
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
+        return f"Error: work_id must be a valid UUID, got {work_id!r}."
+    canonical = _normalize_status(status, _SUGGESTION_STATUSES)
+    if canonical is None:
+        return f"Error: status must be one of {', '.join(_SUGGESTION_STATUSES)}; got {status!r}."
     try:
         with db_manager.get_session() as session:
             suggestion = (
                 session.query(Suggestions)
-                .filter_by(work_id=work_id, status="Suggested")
+                .filter_by(work_id=uuid_obj, status="Suggested")
                 .order_by(Suggestions.suggested_at.desc())
                 .first()
             )
             if not suggestion:
                 return f"No active suggestion found for work {work_id}."
 
-            suggestion.status = status
+            suggestion.status = canonical
             session.flush()
-            return f"Updated suggestion for work {work_id} to status: {status}."
+            return f"Updated suggestion for work {work_id} to status: {canonical}."
     except Exception as e:
         return f"Error updating suggestion status: {str(e)}"
 
