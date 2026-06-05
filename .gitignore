@@ -49,3 +49,8 @@ mlruns/
 
 # uv
 .uv/
+
+# Database dumps / snapshots (use pg_dump; never commit DB backups)
+data/backups/
+*.dump
+*.sql.gz
