@@ -39,6 +39,28 @@ def set_db_manager(new_manager: DatabaseManager):
     db_manager = new_manager
 
 
+def _parse_uuid(value) -> UUID | None:
+    """Validate an agent-supplied id as a UUID; None on anything else (SEC-002).
+    Agents may pass titles or garbage where ids belong (REC-016) — never let that
+    reach a psycopg2 UUID cast."""
+    try:
+        return UUID(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_status(value, allowed: tuple[str, ...]) -> str | None:
+    """Case-insensitively match an agent-supplied status to a canonical member of
+    `allowed`; None if it matches nothing (SEC-002: strict enum, no coercion)."""
+    if not isinstance(value, str):
+        return None
+    needle = value.strip().lower()
+    for canonical in allowed:
+        if canonical.lower() == needle:
+            return canonical
+    return None
+
+
 @mcp.tool()
 def get_server_status() -> str:
     """Check if the Librarian MCP server is running and connected to DB."""
@@ -380,9 +402,8 @@ def get_work_details(work_id: str) -> dict:
     # UUID. Guard the lookup so a bad work_id returns no details rather than crashing the
     # run (the psycopg2 UUID cast would otherwise raise). Resolving discoveries to DB
     # works / enriching new ones is Spec 4.
-    try:
-        uuid_obj = UUID(str(work_id).strip())
-    except (ValueError, TypeError):
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
         return {}
 
     with db_manager.get_session() as session:

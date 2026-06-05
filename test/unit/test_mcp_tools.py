@@ -202,3 +202,28 @@ def test_get_work_details_returns_empty_on_non_uuid():
     # before any DB access, so no db_manager mock is needed).
     assert get_work_details("the daughters war") == {}
     assert get_work_details("") == {}
+
+
+def test_parse_uuid_accepts_valid_and_rejects_garbage():
+    from uuid import UUID
+
+    from agentic_librarian.mcp import server
+
+    valid = "0b54ee04-19b9-4cd9-a0a3-9bb9a89c0f1e"
+    assert server._parse_uuid(valid) == UUID(valid)
+    assert server._parse_uuid(f"  {valid}  ") == UUID(valid)  # whitespace tolerated
+    assert server._parse_uuid("the daughters war") is None  # the REC-016 crash class
+    assert server._parse_uuid(None) is None
+    assert server._parse_uuid(42) is None
+
+
+def test_normalize_status_matches_case_insensitively():
+    from agentic_librarian.mcp import server
+
+    allowed = ("Accepted", "Dismissed", "Already Read")
+    assert server._normalize_status("accepted", allowed) == "Accepted"
+    assert server._normalize_status("ALREADY READ", allowed) == "Already Read"
+    assert server._normalize_status("  Dismissed ", allowed) == "Dismissed"
+    assert server._normalize_status("Banana", allowed) is None
+    assert server._normalize_status(None, allowed) is None
+    assert server._normalize_status(7, allowed) is None
