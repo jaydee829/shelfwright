@@ -183,7 +183,12 @@ class ClaudeConversation:
         if not (tool_name and hasattr(block, "input") and self.on_event):
             return
         if tool_name in ("Task", "Agent"):
-            self.on_event("agent", (block.input or {}).get("subagent_type", "subagent"))
+            # block.input is normally a dict, but never trust a parsed payload's shape —
+            # a non-dict input must not raise inside the event emitter (PR #34 review).
+            subagent_type = "subagent"
+            if isinstance(block.input, dict):
+                subagent_type = block.input.get("subagent_type", "subagent")
+            self.on_event("agent", subagent_type)
         else:
             self.on_event("tool", str(tool_name))
 

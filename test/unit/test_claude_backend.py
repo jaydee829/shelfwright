@@ -235,3 +235,24 @@ def test_agent_tool_block_maps_to_agent_event():
     finally:
         conv.close()
     assert ("agent", "analyst") in seen
+
+
+def test_agent_block_with_non_dict_input_does_not_crash_the_turn():
+    # Defensive (PR #34 review): a malformed delegation block whose `input` is a non-dict
+    # truthy value (e.g. a raw string) must not raise inside the event emitter.
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    class _MalformedAgentBlockClient(_FakeSDKClient):
+        async def receive_response(self):
+            bad_block = _FakeToolUseBlock("Agent")
+            bad_block.input = "analyst"  # non-dict truthy input
+            yield _FakeAssistantMessage([bad_block])
+            yield _FakeResultMessage("done")
+
+    seen = []
+    conv = ClaudeConversation(on_event=lambda k, d: seen.append((k, d)), client_factory=_MalformedAgentBlockClient)
+    try:
+        assert conv.send("hi") == "done"
+    finally:
+        conv.close()
+    assert ("agent", "subagent") in seen  # falls back to the generic label
