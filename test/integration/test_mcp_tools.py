@@ -138,13 +138,16 @@ def test_log_suggestion_rejects_invalid_and_missing_work(db_url):
     missing = "0b54ee04-19b9-4cd9-a0a3-9bb9a89c0f1e"
     out = log_suggestion(work_id=missing, context="rec", justification="x")
     assert "Error" in out and "no work exists" in out
+    with mcp_server.db_manager.get_session() as session:
+        assert session.query(Suggestions).count() == 0  # rejections wrote NOTHING
 
 
 @pytest.mark.db_integration
 def test_log_suggestion_caps_freetext_lengths(db_url, seeded_work_id):
     # justification/context are truncated (free text by design), not rejected.
     out = log_suggestion(
-        work_id=seeded_work_id, context="c" * 500, justification="j" * 5000
+        work_id=seeded_work_id, context="c" * 500, justification="j" * 5000,
+        conversation_id="not-a-uuid",
     )
     assert "Logged suggestion" in out
     with mcp_server.db_manager.get_session() as session:
@@ -153,6 +156,7 @@ def test_log_suggestion_caps_freetext_lengths(db_url, seeded_work_id):
         ).first()
         assert len(row.justification) == 2000
         assert len(row.context) == 200
+        assert row.conversation_id is None
 
 
 @pytest.mark.db_integration
@@ -160,6 +164,11 @@ def test_update_suggestion_status_enforces_enum(db_url, seeded_work_id):
     log_suggestion(work_id=seeded_work_id, context="rec", justification="x")
     out = update_suggestion_status(work_id=seeded_work_id, status="Banana")
     assert "Error" in out and "Accepted" in out  # error names the allowed values
+    with mcp_server.db_manager.get_session() as session:
+        row = session.query(Suggestions).filter_by(work_id=seeded_work_id).order_by(
+            Suggestions.suggested_at.desc()
+        ).first()
+        assert row.status == "Suggested"  # rejection did not mutate
     # Case-insensitive normalization to the canonical value:
     out = update_suggestion_status(work_id=seeded_work_id, status="already read")
     assert "Already Read" in out

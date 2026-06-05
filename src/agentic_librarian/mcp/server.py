@@ -348,7 +348,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
                 work_id=uuid_obj,
                 context=(context or "")[:200],
                 justification=(justification or "")[:2000],
-                conversation_id=conversation_id[:100] if isinstance(conversation_id, str) else None,
+                conversation_id=_parse_uuid(conversation_id),
                 status="Suggested",
             )
             session.add(suggestion)
