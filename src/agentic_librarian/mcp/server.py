@@ -39,6 +39,32 @@ def set_db_manager(new_manager: DatabaseManager):
     db_manager = new_manager
 
 
+def _parse_uuid(value) -> UUID | None:
+    """Validate an agent-supplied id as a UUID; None on anything else (SEC-002).
+    Agents may pass titles or garbage where ids belong (REC-016) — never let that
+    reach a psycopg2 UUID cast."""
+    if not value:
+        return None
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(str(value).strip())
+    except (ValueError, TypeError):
+        return None
+
+
+def _normalize_status(value, allowed: tuple[str, ...]) -> str | None:
+    """Case-insensitively match an agent-supplied status to a canonical member of
+    `allowed`; None if it matches nothing (SEC-002: strict enum, no coercion)."""
+    if not isinstance(value, str):
+        return None
+    needle = value.strip().lower()
+    for canonical in allowed:
+        if canonical.lower() == needle:
+            return canonical
+    return None
+
+
 @mcp.tool()
 def get_server_status() -> str:
     """Check if the Librarian MCP server is running and connected to DB."""
@@ -273,9 +299,27 @@ def check_reading_history(title: str, author: str) -> dict:
         return {"status": "Unread", "is_re_read_candidate": True}
 
 
+_READING_STATUSES = ("read",)
+
+
+def _valid_name(value, max_len: int = 500) -> bool:
+    """Non-empty string within length bounds — for agent-supplied titles/authors (SEC-002)."""
+    return isinstance(value, str) and bool(value.strip()) and len(value) <= max_len
+
+
 @mcp.tool()
 def update_reading_status(title: str, author: str, status: str, notes: str | None = None) -> str:
     """Updates history based on feedback (e.g. 'I read that years ago')."""
+    if not _valid_name(title):
+        return "Error: title must be a non-empty string of at most 500 characters."
+    if not _valid_name(author):
+        return "Error: author must be a non-empty string of at most 500 characters."
+    canonical = _normalize_status(status, _READING_STATUSES)
+    if canonical is None:
+        # Previously any unknown status returned success while writing NOTHING (silent
+        # false-success). Reject honestly instead (SEC-002).
+        return f"Error: status must be one of {', '.join(_READING_STATUSES)}; got {status!r}."
+    notes = notes[:2000] if isinstance(notes, str) else None
     try:
         with db_manager.get_session() as session:
             # Find the work/edition first
@@ -297,7 +341,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
                 session.add(edition)
                 session.flush()
 
-            if status.lower() == "read":
+            if canonical == "read":
                 history = ReadingHistory(
                     edition=edition,
                     date_completed=date.today(),  # Placeholder for manual addition
@@ -314,13 +358,19 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
 @mcp.tool()
 def log_suggestion(work_id: str, context: str, justification: str, conversation_id: str | None = None) -> str:
     """Logs a new recommendation to the Suggestions table."""
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
+        return f"Error: work_id must be a valid UUID, got {work_id!r}."
     try:
         with db_manager.get_session() as session:
+            # SEC-002 referent check: a suggestion must point at a real catalog work.
+            if session.get(Work, uuid_obj) is None:
+                return f"Error: no work exists with id {work_id}."
             suggestion = Suggestions(
-                work_id=work_id,
-                context=context,
-                justification=justification,
-                conversation_id=conversation_id,
+                work_id=uuid_obj,
+                context=(context or "")[:200],
+                justification=(justification or "")[:2000],
+                conversation_id=_parse_uuid(conversation_id),
                 status="Suggested",
             )
             session.add(suggestion)
@@ -330,26 +380,35 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
         return f"Error logging suggestion: {str(e)}"
 
 
+_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read")
+
+
 @mcp.tool()
 def update_suggestion_status(work_id: str, status: str) -> str:
     """
     Updates the status of a suggestion (e.g. 'Accepted', 'Dismissed', 'Already Read').
     This ensures unacted suggestions are cleaned up based on feedback.
     """
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
+        return f"Error: work_id must be a valid UUID, got {work_id!r}."
+    canonical = _normalize_status(status, _SUGGESTION_STATUSES)
+    if canonical is None:
+        return f"Error: status must be one of {', '.join(_SUGGESTION_STATUSES)}; got {status!r}."
     try:
         with db_manager.get_session() as session:
             suggestion = (
                 session.query(Suggestions)
-                .filter_by(work_id=work_id, status="Suggested")
+                .filter_by(work_id=uuid_obj, status="Suggested")
                 .order_by(Suggestions.suggested_at.desc())
                 .first()
             )
             if not suggestion:
                 return f"No active suggestion found for work {work_id}."
 
-            suggestion.status = status
+            suggestion.status = canonical
             session.flush()
-            return f"Updated suggestion for work {work_id} to status: {status}."
+            return f"Updated suggestion for work {work_id} to status: {canonical}."
     except Exception as e:
         return f"Error updating suggestion status: {str(e)}"
 
@@ -380,9 +439,8 @@ def get_work_details(work_id: str) -> dict:
     # UUID. Guard the lookup so a bad work_id returns no details rather than crashing the
     # run (the psycopg2 UUID cast would otherwise raise). Resolving discoveries to DB
     # works / enriching new ones is Spec 4.
-    try:
-        uuid_obj = UUID(str(work_id).strip())
-    except (ValueError, TypeError):
+    uuid_obj = _parse_uuid(work_id)
+    if uuid_obj is None:
         return {}
 
     with db_manager.get_session() as session:
@@ -441,6 +499,14 @@ def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> s
     and persist it as a Work (no reading history). Returns the work_id, or None if enrichment
     found nothing. This is the single write surface for discoveries — a future authorization
     layer (SEC-002) wraps here."""
+    # SEC-002: this is a write path fed by web-derived strings — validate shape upfront.
+    if not _valid_name(title):
+        print(f"Warning: enrich_and_persist_work rejected invalid title {title!r}")
+        return None
+    if not _valid_name(author):
+        print(f"Warning: enrich_and_persist_work rejected invalid author {author!r}")
+        return None
+    format = (format or "ebook")[:50]
     try:
         with db_manager.get_session() as session:
             # 1. De-dup (Case 1): match an existing Work by normalized title + author.

@@ -46,3 +46,10 @@ def test_librarian_instruction_is_internal_first_and_series_aware():
     assert "ONLY when" in text
     assert "enrich_and_persist_work" in text
     assert "SERIES" in text
+
+
+def test_adk_librarian_carries_trust_boundary_and_confirm():
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    assert "TRUST BOUNDARY" in text
+    assert "CONFIRM HISTORY WRITES" in text
