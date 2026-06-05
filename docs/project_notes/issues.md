@@ -161,3 +161,14 @@ This file tracks work history and ticket references.
 - **Description**: PR #23 / ADR-041 abstracted only the recommendation MESH (Analyst/Explorer/Critic) to Claude + shared MCP DB tools. The per-discovery `enrich_and_persist_work` still runs the shared Flow-1 `ScoutManager`, whose LLM scouts (StyleScout/LLMTropeScout/DirectKnowledgeScout) do **Gemini-native grounding** (`gemini-2.5-flash` via `GROUNDING_MODEL`) and whose trope/style dedup uses Gemini embeddings. So a Claude-backend run is NOT free of the Gemini `generate_content` free-tier daily cap — under that cap the grounding scouts 429 and contribute nothing (REC-023 keeps Hardcover/REST data; styles/tropes are still lost).
 - **URL**: N/A
 - **Notes**: Next spec: give StyleScout/LLMTropeScout/DirectKnowledgeScout backend-selectable **Claude variants** (Claude + WebSearch for grounding) so a Claude run's enrichment is off Gemini `generate_content`. Embeddings (`gemini-embedding-001`, separate low-volume quota) may stay on Gemini initially. Mirror the `RecommendationBackend` strategy seam (ADR-041) at the scout layer.
+
+### 2026-06-05 - PRS-025: Review + merge the 4 production-build fix PRs
+- **Status**: Completed
+- **Description**: Addressed Gemini Code Assist review findings on the open PRs from the production DB build, then squash-merged all four to main (in order #29 → #30 → #31 → #32). All fixes TDD'd (red→green) and verified with the full fast suite (198 passed) on merged main.
+- **URL**: https://github.com/jaydee829/agentic_librarian/pulls?q=is%3Apr+29..32
+- **Notes**:
+    1. **#29** (embed throttle): also fixed lock-held-during-`time.sleep()` — slot now reserved atomically inside `_embed_lock`, sleep outside (Gemini suggestion taken verbatim). `test/unit/test_embed_throttle.py`.
+    2. **#30** (null contributor name): also strip/validate `role` — whitespace-only or non-string roles fall back to "Author".
+    3. **#31** (gitignore db dumps): merged as-is, no findings.
+    4. **#32** (cleaning non-unique index): also fixed the latent `split_authors` misalignment — Author_X frame now built with `index=df.index` (see bugs.md 2026-06-05).
+    - Gemini Code Assist consumer code review sunsets 2026-07-17 (new installs blocked 2026-06-18) — PR review automation will need a replacement (e.g. /code-review).

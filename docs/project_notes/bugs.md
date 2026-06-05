@@ -83,3 +83,9 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
 - **Root Cause**: `get_work_details` assumed `work_id` is always a valid UUID. Web-discovered candidates have no DB row, so an agent may pass a title. The error was uncaught (unlike `log_suggestion`/`update_suggestion_status`, which wrap in try/except).
 - **Solution**: Validate `work_id` as a UUID at the top of `get_work_details`; return `{}` on a non-UUID before any DB access. Added a unit test.
 - **Prevention**: UUID-keyed MCP tools must validate input and degrade gracefully — an agent passing a bad id must never crash the run. Proper handling of web-discovered candidates (resolve / enrich) is Spec 4 (see issues.md REC-016).
+
+### 2026-06-05 - split_authors silently misaligned on non-default index (PR #32 review)
+- **Issue**: Beyond the InvalidIndexError fixed in PR #32, `split_authors` had a latent silent-corruption bug: on any non-default input index (e.g. a filtered frame) the Author_X columns misaligned — NaN authors on real rows plus phantom rows.
+- **Root Cause**: `pd.DataFrame(author_lists.tolist())` discards the input index (fresh RangeIndex), and `pd.concat(..., axis=1)` aligns by index *label*, not position. It only worked when df happened to have a clean 0..n RangeIndex.
+- **Solution**: Build the split frame on the input's index: `pd.DataFrame(author_lists.tolist(), index=df.index)`. Regression test `test_split_authors_preserves_nondefault_index`.
+- **Prevention**: Any `pd.concat(axis=1)` of a derived frame must construct that frame with `index=df.index` (or use `.str.split(expand=True)`, which preserves it — `split_narrators` was already safe). Watch for `.tolist()`/`.values` between an apply and a concat: both drop the index.
