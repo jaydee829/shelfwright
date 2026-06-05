@@ -158,7 +158,13 @@ class ClaudeConversation:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._loop.run_forever, daemon=True)
         self._thread.start()
-        self._run(self._connect())
+        try:
+            self._run(self._connect())
+        except BaseException:
+            # Don't leak the loop thread when the client can't connect (e.g. no `claude` auth).
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=5)
+            raise
 
     @staticmethod
     def _default_client():
@@ -167,6 +173,8 @@ class ClaudeConversation:
         return ClaudeSDKClient(options=_conversation_options())
 
     def _run(self, coro):
+        # Blocks the calling (REPL) thread until the turn completes; Ctrl-C in the main
+        # thread interrupts the wait (the CLI maps it to "turn aborted").
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
 
     async def _connect(self):
@@ -210,6 +218,10 @@ class ClaudeConversation:
         try:
             if self._client is not None:
                 self._run(self._client.disconnect())
+        except Exception as e:
+            # A failed disconnect must not mask the caller's exception path; the session is
+            # over either way. Warn for visibility (matches the project's no-silent-except rule).
+            print(f"warning: claude conversation disconnect failed ({type(e).__name__}: {e})")
         finally:
             self._loop.call_soon_threadsafe(self._loop.stop)
             self._thread.join(timeout=5)

@@ -154,3 +154,27 @@ def test_claude_backend_start_conversation_satisfies_protocol():
         assert conv.send("hi") == "reply-1"
     finally:
         conv.close()
+
+
+def test_claude_conversation_connect_failure_stops_loop_thread():
+    import threading
+
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    before = {t.ident for t in threading.enumerate()}
+    with pytest.raises(RuntimeError, match="no auth"):
+        ClaudeConversation(client_factory=lambda: (_ for _ in ()).throw(RuntimeError("no auth")))
+    leaked = [t for t in threading.enumerate() if t.ident not in before and t.is_alive()]
+    assert not leaked, f"connect failure leaked loop thread(s): {leaked}"
+
+
+def test_claude_conversation_close_survives_disconnect_error(capsys):
+    from agentic_librarian.agents.backends.claude import ClaudeConversation
+
+    class _ExplodingDisconnectClient(_FakeSDKClient):
+        async def disconnect(self):
+            raise RuntimeError("socket gone")
+
+    conv = ClaudeConversation(client_factory=_ExplodingDisconnectClient)
+    conv.close()  # must not raise
+    assert "disconnect failed" in capsys.readouterr().out
