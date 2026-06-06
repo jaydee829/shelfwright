@@ -153,7 +153,8 @@ def test_add_subcommand_success(monkeypatch, capsys):
 
 def test_add_subcommand_error_exits_1(monkeypatch, capsys):
     monkeypatch.setattr(
-        "agentic_librarian.mcp.server.add_book_to_history", lambda **kw: "Error: rating must be an integer from 1 to 5; got 9."
+        "agentic_librarian.mcp.server.add_book_to_history",
+        lambda **kw: "Error: rating must be an integer from 1 to 5; got 9.",
     )
     rc = cli.main(["add", "T", "--author", "A", "--rating", "9"])
     assert rc == 1

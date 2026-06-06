@@ -3,7 +3,16 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
-from agentic_librarian.db.models import Author, Edition, ReadingHistory, Suggestions, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import (
+    Author,
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Trope,
+    Work,
+    WorkContributor,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server as mcp_server
 from agentic_librarian.mcp.server import (
@@ -231,12 +240,7 @@ def test_add_book_logs_a_read_event(db_url, seeded_work_id, monkeypatch):
     )
     assert "Added 'Seeded Book'" in out and "read #1" in out
     with mcp_server.db_manager.get_session() as session:
-        rows = (
-            session.query(ReadingHistory)
-            .join(Edition)
-            .filter(Edition.work_id == UUID(seeded_work_id))
-            .all()
-        )
+        rows = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == UUID(seeded_work_id)).all()
         assert len(rows) == 1
         assert rows[0].date_completed.isoformat() == "2026-06-01"
         assert rows[0].user_rating == 5

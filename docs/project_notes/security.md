@@ -36,6 +36,8 @@ Run this pass during each spec's review and record any findings below.
   shape-checked (`_valid_name`). Unknown reading statuses now error instead of silently
   "succeeding". Writes exist ONLY on the Librarian — pinned by
   `test/unit/test_write_authorization.py` on both backends.
+  `add_book_to_history` (2026-06-05) joined the validated write set — same upfront
+  validation pattern; the invariant test now pins five write tools.
 
 ## Tracked Findings
 

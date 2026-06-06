@@ -400,12 +400,7 @@ def add_book_to_history(
                 edition = Edition(work_id=uuid_obj, format=format)
                 session.add(edition)
                 session.flush()
-            prior_reads = (
-                session.query(ReadingHistory)
-                .join(Edition)
-                .filter(Edition.work_id == uuid_obj)
-                .all()
-            )
+            prior_reads = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == uuid_obj).all()
             if any(r.date_completed == completed for r in prior_reads):
                 return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
             session.add(
