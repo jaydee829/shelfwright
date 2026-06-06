@@ -1,0 +1,114 @@
+"""Per-user isolation through the MCP tools (Lift 1, ADR-048): under as_user(A) a tool
+must see only A's rows; with no context every scoped tool fails CLOSED; and no tool
+schema may expose a user_id parameter for the LLM to inject."""
+
+import asyncio
+from datetime import date
+from uuid import UUID, uuid4
+
+import pytest
+from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user, current_user_id
+from agentic_librarian.db.models import Edition, ReadingHistory, Suggestions, User, Work, WorkContributor
+from agentic_librarian.db.models import Author as AuthorModel
+from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.mcp import server as mcp_server
+
+pytestmark = pytest.mark.db_integration
+
+FRIEND_ID = UUID("00000000-0000-4000-8000-000000000002")
+
+
+@pytest.fixture()
+def scoped_db(db_url):
+    """Point the MCP module at the test DB; seed one work read by BOTH users."""
+    manager = DatabaseManager(db_url)
+    original = mcp_server.db_manager
+    mcp_server.set_db_manager(manager)
+    with manager.get_session() as session:
+        session.add(User(id=FRIEND_ID, email="friend@example.com"))
+        author = AuthorModel(name="Frank Herbert")
+        work = Work(title="Dune", contributors=[WorkContributor(author=author, role="Author")])
+        edition = Edition(work=work, format="ebook")
+        session.add_all([author, work, edition])
+        session.flush()
+        session.add(
+            ReadingHistory(
+                edition_id=edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2020, 1, 1), user_rating=5
+            )
+        )
+        session.add(
+            ReadingHistory(
+                edition_id=edition.id, user_id=FRIEND_ID, date_completed=date(2024, 6, 1), user_rating=3
+            )
+        )
+        session.add(Suggestions(work_id=work.id, user_id=DEFAULT_USER_ID, justification="for me"))
+        session.add(Suggestions(work_id=work.id, user_id=FRIEND_ID, justification="for friend"))
+        session.flush()
+        work_id = str(work.id)
+    yield work_id
+    mcp_server.set_db_manager(original)
+
+
+def test_check_reading_history_sees_only_my_rows(scoped_db):
+    with as_user(DEFAULT_USER_ID):
+        mine = mcp_server.check_reading_history("Dune", "Frank Herbert")
+    assert mine["date_completed"] == "2020-01-01"  # NOT the friend's newer 2024 read
+    with as_user(FRIEND_ID):
+        theirs = mcp_server.check_reading_history("Dune", "Frank Herbert")
+    assert theirs["date_completed"] == "2024-06-01"
+
+
+def test_get_unacted_suggestions_isolated(scoped_db):
+    with as_user(FRIEND_ID):
+        result = mcp_server.get_unacted_suggestions([], [])
+    assert [s["justification"] for s in result] == ["for friend"]
+
+
+def test_update_suggestion_status_cannot_touch_other_users(scoped_db):
+    with as_user(FRIEND_ID):
+        mcp_server.update_suggestion_status(scoped_db, "Dismissed")
+    # the DEFAULT user's suggestion must still be active
+    with as_user(DEFAULT_USER_ID):
+        result = mcp_server.get_unacted_suggestions([], [])
+    assert [s["justification"] for s in result] == ["for me"]
+
+
+def test_get_user_trope_preferences_scoped(scoped_db):
+    # No tropes seeded — both users get [] but the query must not raise and must
+    # filter by user (regression net: the join chain gained a user filter).
+    with as_user(FRIEND_ID):
+        assert mcp_server.get_user_trope_preferences() == []
+
+
+def test_add_book_duplicate_guard_is_per_user(scoped_db):
+    """A friend logging a book on the SAME date the operator read it is NOT a duplicate
+    (review finding: reads that gate writes must be user-scoped too)."""
+    with as_user(FRIEND_ID):
+        result = mcp_server.add_book_to_history("Dune", "Frank Herbert", date_completed="2020-01-01")
+    assert "already logged" not in result
+
+
+def test_scoped_tools_fail_closed_without_context(scoped_db):
+    token = current_user_id.set(None)
+    try:
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.check_reading_history("Dune", "Frank Herbert")
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.get_unacted_suggestions([], [])
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.get_user_trope_preferences()
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.update_suggestion_status(str(uuid4()), "Dismissed")
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.log_suggestion(str(uuid4()), "c", "j")
+    finally:
+        current_user_id.reset(token)
+
+
+def test_no_tool_schema_exposes_user_id():
+    """SEC-001 extension: the LLM must never see a user_id parameter to inject into."""
+    tools = asyncio.run(mcp_server.mcp.list_tools())
+    assert tools, "expected the FastMCP server to expose tools"
+    for tool in tools:
+        properties = (tool.inputSchema or {}).get("properties", {})
+        assert "user_id" not in properties, f"{tool.name} exposes user_id to the LLM"

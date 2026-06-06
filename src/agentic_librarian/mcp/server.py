@@ -182,11 +182,12 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     Pulls previous recommendations that were never read or ignored,
     ranked by similarity to current target vibes.
     """
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
         query = (
             session.query(Suggestions)
-            .filter(Suggestions.status == "Suggested")
+            .filter(Suggestions.status == "Suggested", Suggestions.user_id == user_id)
             .options(
                 joinedload(Suggestions.work).options(
                     selectinload(Work.tropes).joinedload(WorkTrope.trope),
@@ -271,6 +272,7 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
 @mcp.tool()
 def check_reading_history(title: str, author: str) -> dict:
     """Checks if a book has been read and determines re-read eligibility."""
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         entry = (
             session.query(ReadingHistory)
@@ -278,6 +280,7 @@ def check_reading_history(title: str, author: str) -> dict:
             .join(Work)
             .join(WorkContributor)
             .join(Author)
+            .filter(ReadingHistory.user_id == user_id)
             .filter(Work.title == title)
             .filter(Author.name == author)
             .order_by(ReadingHistory.date_completed.desc())
@@ -401,7 +404,12 @@ def add_book_to_history(
             uuid_obj = _parse_uuid(work_id)
             # Duplicate guard FIRST (PR #37 review): on the no-op path nothing may be
             # created — not even an Edition (the session commits on clean exit).
-            prior_reads = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == uuid_obj).all()
+            prior_reads = (
+                session.query(ReadingHistory)
+                .join(Edition)
+                .filter(Edition.work_id == uuid_obj, ReadingHistory.user_id == user_id)
+                .all()
+            )
             if any(r.date_completed == completed for r in prior_reads):
                 return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
             edition = session.query(Edition).filter_by(work_id=uuid_obj, format=format).first()
@@ -466,11 +474,12 @@ def update_suggestion_status(work_id: str, status: str) -> str:
     canonical = _normalize_status(status, _SUGGESTION_STATUSES)
     if canonical is None:
         return f"Error: status must be one of {', '.join(_SUGGESTION_STATUSES)}; got {status!r}."
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             suggestion = (
                 session.query(Suggestions)
-                .filter_by(work_id=uuid_obj, status="Suggested")
+                .filter_by(work_id=uuid_obj, status="Suggested", user_id=user_id)
                 .order_by(Suggestions.suggested_at.desc())
                 .first()
             )
@@ -487,6 +496,7 @@ def update_suggestion_status(work_id: str, status: str) -> str:
 @mcp.tool()
 def get_user_trope_preferences(limit: int = 20) -> list[str]:
     """Aggregates frequent tropes from user's history."""
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         # Find tropes present in books read by user
         results = (
@@ -495,6 +505,7 @@ def get_user_trope_preferences(limit: int = 20) -> list[str]:
             .join(Work)
             .join(Edition)
             .join(ReadingHistory)
+            .filter(ReadingHistory.user_id == user_id)
             .group_by(Trope.name)
             .order_by(func.count(WorkTrope.work_id).desc())
             .limit(limit)
