@@ -128,3 +128,46 @@ def test_events_carry_elapsed_seconds_prefix(monkeypatch, capsys, no_mlflow_dir)
     out = capsys.readouterr().out
     # "  · 0.0s tool: search_internal_database" — elapsed-seconds-into-turn prefix (tuning spec)
     assert re.search(r"· \d+\.\ds tool: search_internal_database", out)
+
+
+def test_add_subcommand_success(monkeypatch, capsys):
+    captured = {}
+
+    def _fake_add(**kwargs):
+        captured.update(kwargs)
+        return "Added 'Project Hail Mary' to your reading history (work abc, read #1)."
+
+    monkeypatch.setattr("agentic_librarian.mcp.server.add_book_to_history", _fake_add)
+    rc = cli.main(["add", "Project Hail Mary", "--author", "Andy Weir", "--rating", "5", "--date", "2026-06-01"])
+    assert rc == 0
+    assert "Added 'Project Hail Mary'" in capsys.readouterr().out
+    assert captured == {
+        "title": "Project Hail Mary",
+        "author": "Andy Weir",
+        "date_completed": "2026-06-01",
+        "rating": 5,
+        "format": "ebook",
+        "notes": None,
+    }
+
+
+def test_add_subcommand_error_exits_1(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "agentic_librarian.mcp.server.add_book_to_history", lambda **kw: "Error: rating must be an integer from 1 to 5; got 9."
+    )
+    rc = cli.main(["add", "T", "--author", "A", "--rating", "9"])
+    assert rc == 1
+    assert "Error" in capsys.readouterr().out
+
+
+def test_add_requires_author(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["add", "Some Title"])  # argparse exits on missing --author
+
+
+def test_repl_default_unaffected_by_subparsers(monkeypatch, capsys, no_mlflow_dir):
+    # Bare `librarian` (no subcommand) must still enter the REPL path.
+    fake = _FakeBackend(replies=("ok",))
+    monkeypatch.setattr(cli, "get_backend", lambda: fake)
+    _feed_stdin(monkeypatch, ["hi", "/quit"])
+    assert cli.main(["--no-mlflow"]) == 0
