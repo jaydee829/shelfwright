@@ -657,3 +657,44 @@ This file documents key architectural decisions, their context, and trade-offs.
   built once against the auth'd contract; the most invasive work (schema) happens while
   the surface is smallest. Each lift gets its own spec/plan cycle; security.md must be
   formally re-reviewed before open signup.
+
+### ADR-047: Lift 0 walking-skeleton infrastructure (Cloud Run + Cloud SQL + WIF CD) (2026-06-05)
+**Status:** Accepted (2026-06-05)
+
+**Context:**
+- The approved roadmap (ADR-046) deferred five Lift-0 decisions: DB cost posture, access
+  gate, CD shape, region/budget, and provisioning style.
+- Spec: `docs/superpowers/specs/2026-06-05-lift0-walking-skeleton-design.md`.
+
+**Decision:**
+- **Database:** Cloud SQL Postgres 16 `db-f1-micro` (~$12/mo floor, accepted).
+- **Access gate:** Cloud Run IAM gate (`--no-allow-unauthenticated`) until Firebase Auth
+  (Lift 1) — zero throwaway code.
+- **CD:** GitHub Actions auto-deploy on merge to `main` via Workload Identity Federation
+  (keyless, repo-pinned).
+- **Region/budget:** us-central1; $25/mo budget with 50/90/100% email alerts.
+- **Provisioning:** Scripted-gcloud (`infra/` numbered scripts +
+  `docs/runbooks/gcp-walking-skeleton.md`).
+- **Secrets:** Secret Manager holds the full `DATABASE_URL`; Cloud Run injects secrets
+  verbatim — no string composition in the app.
+- **Image:** Prod image (`Dockerfile.api`) is separate from the dev image.
+- **API surface:** Ported scaffold (`/health`, `/health/db`, `/history`) plus `GET /works`.
+
+**Alternatives Considered:**
+- Neon/Supabase free-tier Postgres → $0/mo but a second vendor plus a migration back to
+  Cloud SQL for multi-user anyway; rejected.
+- IAP or an app-level bearer gate → both discarded by Lift 1's Firebase Auth; the IAM gate
+  is zero throwaway code; rejected.
+- Cloud Build triggers → a second CI system, deploy visibility outside GitHub; rejected.
+- Terraform from day one → two new systems at once for one environment; deferred to
+  ~Lift 3.
+- Stop-Cloud-SQL-when-idle → saves ~$10/mo now, breaks the moment friends have accounts;
+  rejected.
+
+**Consequences:**
+- ~$12–16/mo run cost; `main` is always what's deployed (path-filtered).
+- The service is invisible to unauthenticated traffic until Lift 1.
+- Infra changes go through PR-reviewed scripts; drift from console click-ops is possible
+  (accepted until Terraform).
+- `/history` remains unpaginated (consciously deferred to the Lift 2 API-contract work —
+  `/works` paginates; tracked follow-up INF-029).

@@ -25,6 +25,13 @@ class DatabaseManager:
             return
 
         db_url = self._db_url
+
+        # A full DATABASE_URL (e.g. Cloud Run injecting the Secret Manager connection
+        # string) takes priority over component vars — checked BEFORE demanding
+        # POSTGRES_USER/PASSWORD, which are only required for component-wise construction.
+        if db_url is None:
+            db_url = os.getenv("DATABASE_URL") or None  # "" (blanked secret) falls through to component vars
+
         if db_url is None:
             # Check for individual environment variables
             user = os.getenv("POSTGRES_USER")
@@ -41,18 +48,14 @@ class DatabaseManager:
             # Error if still missing and not interactive
             if not user or not password:
                 raise ValueError(
-                    "Database credentials not found. Please set POSTGRES_USER and "
-                    "POSTGRES_PASSWORD in your environment or .env file."
+                    "Database credentials not found. Please set DATABASE_URL, or "
+                    "POSTGRES_USER and POSTGRES_PASSWORD, in your environment or .env file."
                 )
 
             host = os.getenv("POSTGRES_HOST", "localhost")
             port = os.getenv("POSTGRES_PORT", "5432")
             db_name = os.getenv("POSTGRES_DB", "agentic_librarian")
-
-            # Allow full DATABASE_URL to override components if provided
-            db_url = os.getenv("DATABASE_URL")
-            if not db_url:
-                db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
+            db_url = f"postgresql://{user}:{password}@{host}:{port}/{db_name}"
 
         # Prepare connect_args for SSL and other driver-specific options
         connect_args = {}

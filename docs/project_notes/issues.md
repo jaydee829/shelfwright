@@ -182,6 +182,12 @@ This file tracks work history and ticket references.
     - Invocation in the app container: `python -m agentic_librarian.cli` always works; the `librarian` script is installed at `/home/appuser/.local/bin/librarian` (not on default exec PATH — add to PATH in Dockerfile/compose as a follow-up, or rebuild the image so the build-time editable install picks up [project.scripts]).
     - Known minor follow-ups from final review: no banner on `--once`; consider MLFLOW_HTTP_REQUEST_TIMEOUT in compose.
 
+### 2026-06-05 - INF-029: Unify /history and /works pagination contract (Lift 2)
+- **Status**: Open
+- **Description**: `/history` endpoint is unpaginated while `/works` paginates (limit 1-200); unify the API contract during Lift 2 front-end work. Tracked per Lift 0 / ADR-047.
+- **URL**: N/A
+- **Notes**: Consciously deferred from Lift 0; address alongside the front-end API-contract work in Lift 2.
+
 ### 2026-06-05 - IMP-028: Single-title import (spec/single-title-import)
 - **Status**: Merged pending live verification
 - **Description**: `add_book_to_history` MCP tool (new-row-per-read model: re-reads
