@@ -18,5 +18,7 @@ RUN pip install --no-cache-dir .
 USER appuser
 EXPOSE 8080
 
-# Cloud Run injects PORT (default 8080). Shell form for the env expansion; exec for signals.
-CMD exec uvicorn agentic_librarian.api.main:app --host 0.0.0.0 --port ${PORT:-8080}
+# Cloud Run injects PORT (default 8080). Shell form for the env expansion; exec for
+# signals (uvicorn becomes PID 1, receives SIGTERM). One process, no --workers: Cloud
+# Run scales via instances, and N workers would multiply the SQLAlchemy pool per instance.
+CMD exec uvicorn agentic_librarian.api.main:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-graceful-shutdown 25

@@ -13,7 +13,6 @@ htmlcov
 .dvc/tmp
 data/raw/*.csv
 mlruns
-mlruns/
 .env
 *.log
 data/
@@ -22,3 +21,11 @@ docs/
 test/
 *.egg-info
 __pycache__/
+scripts/
+diagrams/
+scratch/
+.devcontainer/
+.vscode/
+.agent/
+.gemini/
+.claude/
