@@ -13,5 +13,12 @@ htmlcov
 .dvc/tmp
 data/raw/*.csv
 mlruns
+mlruns/
 .env
 *.log
+data/
+.chat_logs/
+docs/
+test/
+*.egg-info
+__pycache__/

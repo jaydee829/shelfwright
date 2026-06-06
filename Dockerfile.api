@@ -1,0 +1,22 @@
+# Production API image (Lift 0). The dev image is ./Dockerfile — this one is slim:
+# no build tools, no Node/Claude CLI, no sudo, non-editable install, uvicorn entrypoint.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN useradd --create-home appuser
+WORKDIR /app
+
+# Non-editable install of the package + prod deps only (no [dev] or [claude] extras).
+# NOTE: copying src before install means dependency layers rebuild on code changes;
+# accepted for the skeleton (CI builds, ~minutes) — revisit if it starts to hurt.
+COPY pyproject.toml ./
+COPY src ./src
+RUN pip install --no-cache-dir .
+
+USER appuser
+EXPOSE 8080
+
+# Cloud Run injects PORT (default 8080). Shell form for the env expansion; exec for signals.
+CMD exec uvicorn agentic_librarian.api.main:app --host 0.0.0.0 --port ${PORT:-8080}
