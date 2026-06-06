@@ -210,9 +210,10 @@ a fresh clone does NOT have it. If the WSL clone is missing it, copy from the Wi
 clone first:
 
 ```bash
-mkdir -p ~/agentic_librarian/data/backups
+# From the WSL clone root (adjust the source if your Windows clone lives elsewhere):
+mkdir -p data/backups
 cp /mnt/c/dev/agentic_librarian/data/backups/agentic_librarian_FINAL_20260605_014912.sql.gz \
-   ~/agentic_librarian/data/backups/
+   data/backups/
 ```
 
 ### Pre-flight: confirm the vector extension is in the dump
@@ -337,7 +338,7 @@ manual password copying needed):
 ```bash
 URL=$(gcloud secrets versions access latest --secret=librarian-db-url)
 DBURL=$(echo "$URL" | sed 's#@/agentic_librarian?host=.*#@host.docker.internal:5433/agentic_librarian#')
-docker run --rm -e DATABASE_URL="$DBURL" -v ~/agentic_librarian:/app -w /app \
+docker run --rm -e DATABASE_URL="$DBURL" -v "$PWD":/app -w /app \
   agentic_librarian-app:latest python infra/verify_restore.py
 ```
 
