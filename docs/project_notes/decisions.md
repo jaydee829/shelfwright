@@ -639,6 +639,19 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Shared catalog / per-user history. MLflow+Dagster stay dev-only. DEBT-001: bulk
   enrichment remains operator-run local Dagster until demand justifies a Cloud Run Job.
 
+**Alternatives Considered:**
+- FE-first, GCP last (big-bang deploy) -> Rejected: saves the unfamiliar infra for the end
+  where it is hardest to debug, and friends need auth before anything is shareable — so
+  multi-user had to precede the beta regardless; skeleton-first converts deployment into
+  continuous delivery from week one.
+- FE before the multi-user foundation -> Rejected: would build the FE twice (once
+  single-user, once against the auth'd contract).
+- Claude API in prod now -> Deferred: ~5-15x flash-tier Gemini per conversation plus a
+  second vendor to meter before any revenue; kept one config-change away via the
+  AGENT_BACKEND seam.
+- Both-LLM user-selectable tier at launch -> Rejected: dual metering and parity
+  maintenance before product-market fit.
+
 **Consequences:**
 - Deployment becomes continuous from week one instead of a big-bang finale; the FE is
   built once against the auth'd contract; the most invasive work (schema) happens while
