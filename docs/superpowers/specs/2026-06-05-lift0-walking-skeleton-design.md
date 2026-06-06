@@ -56,7 +56,7 @@ GitHub (merge to main)
 | Cloud SQL (Postgres 16, `db-f1-micro`, 10 GB SSD) | The catalog; `pgvector` enabled via `CREATE EXTENSION vector` | ~$12/mo |
 | Cloud Run `librarian-api` | Runs the prod image; scale-to-zero; max 1 instance caps cost | ~$0 at this traffic |
 | Artifact Registry | Image store; tags = git SHAs | cents |
-| Secret Manager | DB password, injected into Cloud Run as env var **by reference** | cents |
+| Secret Manager | `librarian-db-url` — the full `DATABASE_URL` connection string (it embeds the DB password, hence secret), injected into Cloud Run as env var **by reference** | cents |
 | GCS bucket | pg_dump staging for `gcloud sql import sql` | cents |
 
 ### Service accounts (least privilege)
@@ -83,8 +83,10 @@ DATABASE_URL=postgresql://librarian:<from-secret>@/agentic_librarian?host=/cloud
 `DatabaseManager` already supports `DATABASE_URL` — but currently raises on missing
 `POSTGRES_USER`/`POSTGRES_PASSWORD` *before* checking it, making the override
 unreachable on its own. **Fix (TDD):** check `DATABASE_URL` first; fall back to
-component vars. The password portion is composed at deploy time from the Secret Manager
-reference (Cloud Run `--set-secrets`), never present in code, repo, image, or CI logs.
+component vars. The full URL (password included) lives in Secret Manager as
+`librarian-db-url` and is injected via Cloud Run `--set-secrets` — Cloud Run injects
+secrets verbatim (no string composition), so the secret is the whole URL, never present
+in code, repo, image, or CI logs.
 
 ## Repo changes
 
@@ -93,9 +95,12 @@ reference (Cloud Run `--set-secrets`), never present in code, repo, image, or CI
    `/health/db`, `GET /history`) plus its two test files, adapted to current `main`
    (model/session imports are unchanged). The `conductor/` scaffolding on that branch is
    NOT ported. After this merges, delete the legacy branch — its cargo is on `main`.
-2. **`GET /works`** — read-only catalog listing: `id, title, authors, tropes, styles,
-   narrative_style` per work, ordered by title, with `limit` (default 50, max 200) and
-   `offset` query params. Mirrors `/history`'s eager-loading pattern.
+2. **`GET /works`** — read-only catalog listing, ordered by title, with `limit`
+   (default 50, max 200) and `offset` query params. Per-work shape: `id`, `title`,
+   `authors` (names), `publication_year`, `genres`, `moods`, `tropes` (names), and
+   `styles` as `{attribute, name}` pairs (work styles are `(attribute_type, style)`
+   links — there is no separate `narrative_style` column). Uses `selectinload` for the
+   collections (joinedload + limit mis-paginates collection joins).
 3. **`Dockerfile.api`** — new production image, dev `Dockerfile` untouched:
    `python:3.11-slim`, prod deps only (no build-essential/Node/Claude CLI/sudo),
    non-editable install, non-root user, `EXPOSE 8080`, entrypoint
