@@ -1,6 +1,7 @@
 from agentic_librarian.db.models import Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload
 
@@ -20,7 +21,9 @@ def db_health_check():
             session.execute(text("SELECT 1"))
         return {"status": "connected"}
     except Exception as e:
-        return {"status": "error", "detail": str(e)}
+        # 503 so platform health probes and monitors see the failure (HTTP status,
+        # not body, is what they key on). Detail is safe: the service is IAM-gated.
+        return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
 
 
 @app.get("/history")
@@ -45,8 +48,8 @@ def get_history():
             {
                 "id": str(h.id),
                 "title": h.edition.work.title,
-                "authors": [c.author.name for c in h.edition.work.contributors if c.role == "Author"],
-                "date_completed": h.date_completed.isoformat() if h.date_completed else None,
+                "authors": [c.author.name for c in h.edition.work.contributors if c.role == "Author"],  # ETL always writes role="Author"
+                "date_completed": h.date_completed.isoformat() if h.date_completed else None,  # schema forbids NULL; guard is defensive only
                 "rating": h.user_rating,
                 "format": h.edition.format,
             }
