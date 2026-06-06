@@ -49,7 +49,9 @@ def main() -> int:
             for table in ("tropes", "styles"):
                 total = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
                 nulls = conn.execute(text(f"SELECT count(*) FROM {table} WHERE embedding IS NULL")).scalar()  # noqa: S608
-                check(f"{table} embeddings populated", total > 0 and nulls == 0, f"{total} rows, {nulls} NULL embeddings")
+                check(
+                    f"{table} embeddings populated", total > 0 and nulls == 0, f"{total} rows, {nulls} NULL embeddings"
+                )
 
             # 4. Similarity search actually works (operator + data, not just bytes).
             rows = conn.execute(

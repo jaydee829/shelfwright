@@ -3,11 +3,10 @@
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
-
 from agentic_librarian.api.main import app
 from agentic_librarian.db.models import Author, Style, Trope, Work, WorkContributor, WorkStyle, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
+from fastapi.testclient import TestClient
 
 
 @pytest.mark.db_integration

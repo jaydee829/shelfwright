@@ -7,7 +7,9 @@ def test_database_url_alone_is_sufficient(monkeypatch):
     """With only DATABASE_URL set (no POSTGRES_USER/PASSWORD), the engine builds from it."""
     monkeypatch.delenv("POSTGRES_USER", raising=False)
     monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
-    monkeypatch.setenv("DATABASE_URL", "postgresql://cloud_user:cloud_pw@/agentic_librarian?host=/cloudsql/proj:region:inst")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql://cloud_user:cloud_pw@/agentic_librarian?host=/cloudsql/proj:region:inst"
+    )
 
     manager = DatabaseManager()
     url = manager.engine.url

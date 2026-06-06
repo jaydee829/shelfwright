@@ -55,8 +55,12 @@ def get_history():
             {
                 "id": str(h.id),
                 "title": h.edition.work.title,
-                "authors": [c.author.name for c in h.edition.work.contributors if c.role == "Author"],  # ETL always writes role="Author"
-                "date_completed": h.date_completed.isoformat() if h.date_completed else None,  # schema forbids NULL; guard is defensive only
+                "authors": [
+                    c.author.name for c in h.edition.work.contributors if c.role == "Author"
+                ],  # ETL always writes role="Author"
+                "date_completed": h.date_completed.isoformat()
+                if h.date_completed
+                else None,  # schema forbids NULL; guard is defensive only
                 "rating": h.user_rating,
                 "format": h.edition.format,
             }
@@ -87,7 +91,9 @@ def get_works(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)
             {
                 "id": str(w.id),
                 "title": w.title,
-                "authors": [c.author.name for c in w.contributors if c.role == "Author"],  # ETL always writes role="Author"
+                "authors": [
+                    c.author.name for c in w.contributors if c.role == "Author"
+                ],  # ETL always writes role="Author"
                 "publication_year": w.original_publication_year,
                 "genres": w.genres or [],
                 "moods": w.moods or [],
