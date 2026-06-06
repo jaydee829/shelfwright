@@ -11,7 +11,9 @@ from sqlalchemy import create_engine
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False: command.upgrade() runs inside pytest sessions
+    # (conftest builds the test schema) — it must not silence app/test loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -19,6 +21,12 @@ target_metadata = Base.metadata
 def _url() -> str:
     # Tests/conftest inject via Config.set_main_option("sqlalchemy.url", ...);
     # otherwise resolve exactly like the app (DATABASE_URL first).
+    #
+    # Two known seams:
+    # - DB_SSL_MODE (a connect_args knob the app honors) is intentionally NOT
+    #   honored here — use a ?sslmode= URL parameter if migrations ever need SSL.
+    # - Values injected via Config.set_main_option pass through configparser
+    #   interpolation, so a literal % in a password must be escaped as %%.
     return config.get_main_option("sqlalchemy.url") or resolve_database_url()
 
 
@@ -46,7 +54,14 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     engine = create_engine(_url())
     with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, render_item=render_item)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            render_item=render_item,
+            # Models today have no server-side defaults; set explicitly so future
+            # autogenerates diff them instead of silently ignoring them.
+            compare_server_default=True,
+        )
         with context.begin_transaction():
             context.run_migrations()
     engine.dispose()
