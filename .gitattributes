@@ -1,0 +1,4 @@
+# Shell scripts must check out LF everywhere — a CRLF working copy breaks bash
+# (classic symptom: "syntax error: unexpected end of file"). The infra/ scripts are
+# run from the WSL clone, but this protects any checkout.
+*.sh text eol=lf
