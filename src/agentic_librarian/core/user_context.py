@@ -16,6 +16,10 @@ from uuid import UUID
 # entrypoints, and tests agree forever.
 DEFAULT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
+# The default user's email — the invite key Migration 0002 seeds and claim-by-email
+# matches. (The migration pins its own literal copy; migrations are frozen.)
+DEFAULT_USER_EMAIL = "jaydee829@gmail.com"
+
 # FastAPI's per-request auth dependency calls .set() directly on this var.
 # Reset is unnecessary there — the asyncio Task context is discarded at response time.
 # Use as_user() everywhere else (CLI, Dagster, tests).

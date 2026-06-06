@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,
     Edition,
@@ -95,7 +96,6 @@ def test_user_trope_preferences_ranked_by_frequency(db_url):
             edition = Edition(work=work, format="hardcover")
             session.add(edition)
             session.flush()
-            from agentic_librarian.core.user_context import DEFAULT_USER_ID
             session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2020, 1, 1)))
         session.commit()
 
@@ -124,7 +124,6 @@ def test_get_unacted_suggestions_scores_embedded_suggestion(db_url, monkeypatch)
         session.add(trope)
         session.flush()
         session.add(WorkTrope(work=work, trope=trope))
-        from agentic_librarian.core.user_context import DEFAULT_USER_ID
         session.add(Suggestions(work=work, user_id=DEFAULT_USER_ID, status="Suggested", justification="prior"))
         session.commit()
 

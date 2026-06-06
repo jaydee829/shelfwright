@@ -103,12 +103,14 @@ def _clean_db_tables(request):
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
         # Reseed the default user (Migration 0002 inserts it; TRUNCATE removed it).
+        from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
+
         conn.execute(
             text(
                 "INSERT INTO users (id, email, display_name, created_at) "
-                "VALUES (:id, 'jaydee829@gmail.com', 'Justin', now())"
+                "VALUES (:id, :email, 'Justin', timezone('utc', now()))"
             ),
-            {"id": "00000000-0000-4000-8000-000000000001"},
+            {"id": str(DEFAULT_USER_ID), "email": DEFAULT_USER_EMAIL},
         )
     engine.dispose()
     yield

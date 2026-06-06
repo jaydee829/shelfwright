@@ -3,6 +3,7 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.scouts.trope_manager import TropeManager
@@ -40,7 +41,6 @@ def test_full_ingestion_flow_real_db(db_url):
         assert edition.id is not None
 
         # 4. Create Reading History linked to Edition
-        from agentic_librarian.core.user_context import DEFAULT_USER_ID
         history = ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2024, 1, 1))
         session.add(history)
         session.flush()

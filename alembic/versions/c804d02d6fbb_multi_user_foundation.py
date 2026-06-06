@@ -40,7 +40,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "INSERT INTO users (id, email, display_name, created_at) "
-            "VALUES (:id, :email, 'Justin', now())"
+            "VALUES (:id, :email, 'Justin', timezone('utc', now()))"
         ).bindparams(id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL)
     )
     # 3. user_id, nullable first so existing rows survive the ALTER

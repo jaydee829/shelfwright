@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 import numpy as np
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -17,7 +18,6 @@ from agentic_librarian.db.models import (
     WorkStyle,
     WorkTrope,
 )
-from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
