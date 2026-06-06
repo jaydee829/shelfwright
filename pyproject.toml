@@ -139,4 +139,5 @@ markers = [
     "api_dependent: tests that require an external API key and should be skipped in pre-commit",
     "slow: tests that are slow to run and should be skipped for fast feedback loops",
     "integration: tests that verify components of the system integrated",
+    "live: tests against real external services (operator-run, never CI)",
 ]

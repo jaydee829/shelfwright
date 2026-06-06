@@ -74,7 +74,7 @@ jobs:
           POSTGRES_DB: agentic_librarian
           GOOGLE_SEARCH_API_KEY: dummy-key-for-construction
         run: |
-          pytest -m "not api_dependent and not slow"
+          pytest -m "not api_dependent and not slow and not live"
 
       - name: Build production image
         run: docker build -f Dockerfile.api -t "$IMAGE" .
@@ -118,6 +118,7 @@ jobs:
             --service-account=librarian-api-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
             --add-cloudsql-instances=${{ vars.GCP_CLOUDSQL_CONNECTION }}
             --set-secrets=DATABASE_URL=librarian-db-url:latest
+            --set-env-vars=SIGNUP_MODE=invite,GOOGLE_CLOUD_PROJECT=${{ vars.GCP_PROJECT_ID }}
             --max-instances=1
             --memory=512Mi
 
@@ -131,11 +132,18 @@ jobs:
           id_token_audience: ${{ steps.deploy.outputs.url }}
           id_token_include_email: true
 
-      - name: Live smoke test (/health and /health/db)
+      - name: Live smoke test (/health + auth enforcement)
         run: |
           URL="${{ steps.deploy.outputs.url }}"
           TOKEN="${{ steps.smoke-token.outputs.id_token }}"
           curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health"
-          curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health/db" -o /dev/null \
-            || { echo "::error::/health/db failed (503 = DB unreachable; body withheld from logs)"; exit 1; }
-          echo "Live smoke passed: /health and /health/db green."
+          # /history is Firebase-gated (Lift 1): IAM passes via X-Serverless-Authorization,
+          # no Firebase token supplied → the app MUST answer 401. DB connectivity is now
+          # verified by the operator runbook (the deployer cannot mint Firebase tokens).
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "X-Serverless-Authorization: Bearer ${TOKEN}" "${URL}/history")
+          if [ "${code}" != "401" ]; then
+            echo "::error::expected 401 from unauthenticated /history, got ${code}"
+            exit 1
+          fi
+          echo "Live smoke passed: /health green; auth layer enforcing (401 without Firebase token)."
