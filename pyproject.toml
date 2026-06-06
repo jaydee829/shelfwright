@@ -38,7 +38,9 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.34",
     # Schema migrations (Lift 1, ADR-048) — env.py reuses the app's URL resolution
-    "alembic>=1.13"
+    "alembic>=1.13",
+    # Firebase Auth verification (Lift 1, ADR-048) — ADC on Cloud Run, offline JWT checks
+    "firebase-admin>=6.5"
 ]
 
 [project.scripts]
