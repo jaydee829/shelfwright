@@ -17,6 +17,7 @@ from agentic_librarian.db.models import (
     WorkStyle,
     WorkTrope,
 )
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
@@ -320,6 +321,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
         # false-success). Reject honestly instead (SEC-002).
         return f"Error: status must be one of {', '.join(_READING_STATUSES)}; got {status!r}."
     notes = notes[:2000] if isinstance(notes, str) else None
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             # Find the work/edition first
@@ -344,6 +346,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
             if canonical == "read":
                 history = ReadingHistory(
                     edition=edition,
+                    user_id=user_id,
                     date_completed=date.today(),  # Placeholder for manual addition
                     user_notes=notes,
                 )
@@ -387,6 +390,7 @@ def add_book_to_history(
         return f"Error: rating must be an integer from 1 to 5; got {rating!r}."
     format = (format or "ebook")[:50]
     notes = notes[:2000] if isinstance(notes, str) else None
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
 
     work_id = enrich_and_persist_work(title=title, author=author, format=format)
     if work_id is None:
@@ -408,6 +412,7 @@ def add_book_to_history(
             session.add(
                 ReadingHistory(
                     edition_id=edition.id,
+                    user_id=user_id,
                     date_completed=completed,
                     user_rating=rating,
                     user_notes=notes,
@@ -425,6 +430,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
     uuid_obj = _parse_uuid(work_id)
     if uuid_obj is None:
         return f"Error: work_id must be a valid UUID, got {work_id!r}."
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             # SEC-002 referent check: a suggestion must point at a real catalog work.
@@ -432,6 +438,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
                 return f"Error: no work exists with id {work_id}."
             suggestion = Suggestions(
                 work_id=uuid_obj,
+                user_id=user_id,
                 context=(context or "")[:200],
                 justification=(justification or "")[:2000],
                 conversation_id=_parse_uuid(conversation_id),

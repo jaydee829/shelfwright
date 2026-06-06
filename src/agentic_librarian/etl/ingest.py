@@ -2,6 +2,7 @@ import re
 from collections.abc import Generator
 
 import pandas as pd
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import Author, Base, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.etl import cleaning
 
@@ -91,7 +92,9 @@ class HistoryIngestor:
 
             # 4. Reading History
             if row["date_completed"] and not pd.isna(row["date_completed"]):
-                reading_history = ReadingHistory(edition=edition, date_completed=row["date_completed"])
+                reading_history = ReadingHistory(
+                    edition=edition, user_id=get_required_user_id(), date_completed=row["date_completed"]
+                )
                 yield reading_history
 
             # Since relationships are defined, yielding reading_history

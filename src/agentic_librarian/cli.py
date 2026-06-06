@@ -10,6 +10,7 @@ import time
 
 from agentic_librarian.agents.backends import get_backend
 from agentic_librarian.chat_recorder import ConversationRecorder
+from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user
 
 _LOG_DIR = ".chat_logs"
 
@@ -40,6 +41,14 @@ def _model_label(backend_name: str) -> str:
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+    # Data identity (Lift 1, ADR-048): the CLI is the operator's machine — everything
+    # runs as the default user. NOTE: --user-id remains the ADK *session* label only;
+    # it is NOT data identity and must never be parsed into the user context.
+    with as_user(DEFAULT_USER_ID):
+        return _dispatch(args)
+
+
+def _dispatch(args) -> int:
     if getattr(args, "command", None) == "add":
         return _run_add(args)
     if args.backend:

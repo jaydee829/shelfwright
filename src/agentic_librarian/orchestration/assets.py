@@ -1,5 +1,9 @@
 import mlflow
+import os
 import pandas as pd
+from uuid import UUID
+
+from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user
 from agentic_librarian.db.models import (
     Author,
     Edition,
@@ -15,6 +19,13 @@ from agentic_librarian.scouts.trope_manager import TropeManager
 from dagster import AssetExecutionContext, DynamicPartitionsDefinition, MetadataValue, ResourceParam, asset
 
 csv_partitions = DynamicPartitionsDefinition(name="csv_files")
+
+
+def _ingest_user_id() -> UUID:
+    """Bulk imports are operator-run; INGEST_USER_ID targets a friend's account
+    (DEBT-001: 'friends send the operator a CSV'). Defaults to the operator."""
+    raw = os.environ.get("INGEST_USER_ID")
+    return UUID(raw) if raw else DEFAULT_USER_ID
 
 
 @asset(partitions_def=csv_partitions)
@@ -98,7 +109,7 @@ def vectorized_tropes(
 ) -> None:
     """Standardizes tropes/styles and saves metadata + reading history to the database."""
 
-    with db_manager.get_session() as session:
+    with as_user(_ingest_user_id()), db_manager.get_session() as session:
         trope_manager = TropeManager(session=session)
         style_manager = StyleManager(session=session)
         for _, row in enriched_metadata.iterrows():

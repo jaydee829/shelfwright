@@ -5,6 +5,7 @@ so both paths build the catalog identically (DRY)."""
 from __future__ import annotations
 
 import pandas as pd
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -240,6 +241,7 @@ def persist_enriched_work(
         if not existing_history:
             history_entry = ReadingHistory(
                 edition=edition,
+                user_id=get_required_user_id(),
                 date_completed=date_completed,
                 user_rating=user_rating,
                 user_notes=user_notes,

@@ -7,6 +7,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,
     Edition,
@@ -52,9 +53,9 @@ def _work(
     session.add(edition)
     session.flush()
     if read_on is not None:
-        session.add(ReadingHistory(edition=edition, date_completed=read_on))
+        session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=read_on))
     if suggested:
-        session.add(Suggestions(work=work, status="Suggested", justification="prior suggestion"))
+        session.add(Suggestions(work=work, user_id=DEFAULT_USER_ID, status="Suggested", justification="prior suggestion"))
     return work
 
 

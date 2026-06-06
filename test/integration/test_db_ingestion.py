@@ -40,7 +40,8 @@ def test_full_ingestion_flow_real_db(db_url):
         assert edition.id is not None
 
         # 4. Create Reading History linked to Edition
-        history = ReadingHistory(edition=edition, date_completed=date(2024, 1, 1))
+        from agentic_librarian.core.user_context import DEFAULT_USER_ID
+        history = ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2024, 1, 1))
         session.add(history)
         session.flush()
         assert history.id is not None
