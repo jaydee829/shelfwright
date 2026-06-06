@@ -157,9 +157,9 @@ all the bindings that let GitHub Actions deploy without a stored key.
   permissions: read the `librarian-db-url` secret, and connect to Cloud SQL as a
   client. It cannot push images, deploy itself, or read arbitrary GCS data.
 - `github-deployer` — what CI impersonates. It can push images to Artifact Registry,
-  deploy Cloud Run services, invoke (call) the service for smoke tests, and
-  impersonate `librarian-api-runtime` (needed to deploy with that SA). It cannot read
-  secrets or query the database.
+  administer Cloud Run services (`roles/run.admin` — deploy is what we use it for),
+  invoke (call) the service for smoke tests, and impersonate `librarian-api-runtime`
+  (needed to deploy with that SA). It cannot read secrets or query the database.
 
 **SA propagation gate:** GCP propagates new service accounts asynchronously. Binding
 IAM policies to an SA that hasn't fully propagated yet returns a cryptic 400 error.
@@ -315,8 +315,8 @@ All checks must pass before the first deploy. Expected passing output:
 [OK ] reading_history row count — expected 331, got 331
 [OK ] authors row count — expected 230, got 230
 [OK ] pgvector extension installed
-[OK ] tropes embeddings populated — 508 rows, 0 NULL embeddings
-[OK ] styles embeddings populated — 556 rows, 0 NULL embeddings
+[OK ] tropes embeddings populated — 556 rows, 0 NULL embeddings
+[OK ] styles embeddings populated — 508 rows, 0 NULL embeddings
 [OK ] similarity query returns ordered results — top-3 distances: [...]
 
 All restore checks passed.
