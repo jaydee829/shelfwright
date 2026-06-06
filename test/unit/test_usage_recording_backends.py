@@ -7,7 +7,7 @@ context propagation through run_coroutine_threadsafe)."""
 from types import SimpleNamespace
 from uuid import uuid4
 
-from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user
+from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user, get_required_user_id
 
 
 def test_adk_conversation_records_usage(monkeypatch):
@@ -82,8 +82,15 @@ def test_claude_conversation_records_usage(monkeypatch):
 
 
 def test_claude_loop_thread_sees_the_user_context():
-    """The trap this guards: identity must be explicitly re-applied on the background
-    loop thread for every turn — tools and the recorder read it from context there."""
+    """Pins CAPTURE-AT-CONSTRUCTION (ADR-048): identity captured in __init__ must be
+    re-applied per turn by _with_user. The send happens OUTSIDE the as_user block, so
+    implicit context propagation through run_coroutine_threadsafe would deliver None —
+    only the explicit capture can make the loop thread see the user (T8 review,
+    mutation-proven design).
+
+    The ambient context during the send is a DIFFERENT uuid so that if the
+    explicit capture is removed the assertion fails (seen gets the wrong uuid, not
+    DEFAULT_USER_ID)."""
     seen = []
 
     class FakeClient:
@@ -94,8 +101,6 @@ def test_claude_loop_thread_sees_the_user_context():
             pass
 
         async def receive_response(self):
-            from agentic_librarian.core.user_context import get_required_user_id
-
             seen.append(get_required_user_id())
             return
             yield  # makes this an async generator
@@ -106,9 +111,10 @@ def test_claude_loop_thread_sees_the_user_context():
     from agentic_librarian.agents.backends.claude import ClaudeConversation
 
     with as_user(DEFAULT_USER_ID):
-        convo = ClaudeConversation(client_factory=FakeClient)
-        try:
-            convo.send("hello")
-        finally:
-            convo.close()
+        convo = ClaudeConversation(client_factory=FakeClient)  # capture happens HERE
+    try:
+        with as_user(uuid4()):  # DIFFERENT ambient identity during the send
+            convo.send("hello")  # only the CAPTURED identity may reach the loop thread
+    finally:
+        convo.close()
     assert seen == [DEFAULT_USER_ID]

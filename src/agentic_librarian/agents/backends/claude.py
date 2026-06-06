@@ -246,6 +246,10 @@ class ClaudeConversation:
             if result_val and isinstance(result_val, str):
                 result_text = result_val
                 usage = getattr(msg, "usage", None)
+                # ResultMessage.usage is the TURN AGGREGATE attributed to _model();
+                # subagent (haiku) tokens land under the librarian's model label, and
+                # cache_read/cache_creation tokens are excluded. Fine for Lift 1
+                # observability; Lift 3 billing should iterate model_usage instead.
                 if isinstance(usage, dict):
                     record_llm_call(
                         vendor="anthropic",
