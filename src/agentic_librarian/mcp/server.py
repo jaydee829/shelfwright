@@ -356,6 +356,73 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
 
 
 @mcp.tool()
+def add_book_to_history(
+    title: str,
+    author: str,
+    date_completed: str | None = None,
+    rating: int | None = None,
+    format: str = "ebook",
+    notes: str | None = None,
+) -> str:
+    """Add ONE book to the reading history (single-title import). Enriches + persists the
+    work first if it isn't in the catalog (runs the scouts — takes a minute or two), then
+    logs a READ EVENT. History is a log of read events: a re-read (different completion
+    date) inserts a new row; the same work+date is a duplicate and is not double-logged.
+    date_completed defaults to today (the Phase-4 UI will auto-fill it visibly)."""
+    if not _valid_name(title):
+        return "Error: title must be a non-empty string of at most 500 characters."
+    if not _valid_name(author):
+        return "Error: author must be a non-empty string of at most 500 characters."
+    if date_completed is None:
+        completed = date.today()
+    else:
+        try:
+            completed = date.fromisoformat(str(date_completed))
+        except ValueError:
+            return f"Error: date_completed must be ISO YYYY-MM-DD; got {date_completed!r}."
+        if completed > date.today():
+            return f"Error: date_completed {completed.isoformat()} is in the future."
+    # bool is an int subclass — reject it explicitly so rating=True can't slip in as 1.
+    if rating is not None and (isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5):
+        return f"Error: rating must be an integer from 1 to 5; got {rating!r}."
+    format = (format or "ebook")[:50]
+    notes = notes[:2000] if isinstance(notes, str) else None
+
+    work_id = enrich_and_persist_work(title=title, author=author, format=format)
+    if work_id is None:
+        return f"Error: could not resolve '{title}' by {author} — check the spelling, or the scouts found nothing."
+
+    try:
+        with db_manager.get_session() as session:
+            uuid_obj = _parse_uuid(work_id)
+            edition = session.query(Edition).filter_by(work_id=uuid_obj, format=format).first()
+            if not edition:
+                edition = Edition(work_id=uuid_obj, format=format)
+                session.add(edition)
+                session.flush()
+            prior_reads = (
+                session.query(ReadingHistory)
+                .join(Edition)
+                .filter(Edition.work_id == uuid_obj)
+                .all()
+            )
+            if any(r.date_completed == completed for r in prior_reads):
+                return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
+            session.add(
+                ReadingHistory(
+                    edition_id=edition.id,
+                    date_completed=completed,
+                    user_rating=rating,
+                    user_notes=notes,
+                )
+            )
+            session.flush()
+            return f"Added '{title}' to your reading history (work {work_id}, read #{len(prior_reads) + 1})."
+    except Exception as e:
+        return f"Error adding to reading history: {str(e)}"
+
+
+@mcp.tool()
 def log_suggestion(work_id: str, context: str, justification: str, conversation_id: str | None = None) -> str:
     """Logs a new recommendation to the Suggestions table."""
     uuid_obj = _parse_uuid(work_id)
