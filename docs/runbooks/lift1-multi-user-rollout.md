@@ -26,7 +26,7 @@ The dev DB carries the same data prod was restored from — a free rehearsal. Fr
 dev container (or a throwaway app container on the compose network):
 
 ```bash
-alembic history                      # note the BASELINE revision id (the first entry)
+alembic history                      # note the BASELINE revision id (the LAST entry — history prints newest first)
 alembic stamp <baseline-rev>         # dev DB already has the baseline schema
 alembic upgrade head
 # verify: psql → \dt shows users/usage/user_credentials; then:
@@ -69,7 +69,7 @@ AND 401-enforcement on `/history`.
 ```bash
 # ADC if not already done: gcloud auth application-default login
 TOKEN=$(docker run --rm -v "$PWD":/app -w /app \
-  -v "$HOME/.config/gcloud:/root/.config/gcloud" \
+  -v "$HOME/.config/gcloud:/home/appuser/.config/gcloud" \
   -e GOOGLE_CLOUD_PROJECT=agentic-librarian-prod -e FIREBASE_WEB_API_KEY \
   agentic_librarian-app:latest python infra/get_firebase_token.py jaydee829@gmail.com)
 IAM="$(gcloud auth print-identity-token)"
@@ -80,7 +80,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "X-Serverless-Authorization: Bearer 
 # 2. your token → 200 + YOUR 331 read events (claim-by-email links user #1 on this first call)
 curl -s -H "X-Serverless-Authorization: Bearer $IAM" -H "Authorization: Bearer $TOKEN" "$URL/history" | head -c 400
 # 3. a non-invited account → 403
-TOKEN2=$(docker run --rm -v "$PWD":/app -w /app -v "$HOME/.config/gcloud:/root/.config/gcloud" \
+TOKEN2=$(docker run --rm -v "$PWD":/app -w /app -v "$HOME/.config/gcloud:/home/appuser/.config/gcloud" \
   -e GOOGLE_CLOUD_PROJECT=agentic-librarian-prod -e FIREBASE_WEB_API_KEY \
   agentic_librarian-app:latest python infra/get_firebase_token.py stranger-test@example.com)
 curl -s -o /dev/null -w '%{http_code}\n' -H "X-Serverless-Authorization: Bearer $IAM" \
