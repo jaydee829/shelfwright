@@ -50,3 +50,14 @@ def test_as_user_restores_on_exception():
         raise ValueError("boom")
     with pytest.raises(RuntimeError):
         get_required_user_id()
+
+
+def test_as_user_none_unsets_inside_outer():
+    """as_user(None) is the advertised way to shield a block from ambient identity —
+    it must fail closed inside and restore the outer identity after."""
+    outer = uuid4()
+    with as_user(outer):
+        with as_user(None):
+            with pytest.raises(RuntimeError):
+                get_required_user_id()
+        assert get_required_user_id() == outer

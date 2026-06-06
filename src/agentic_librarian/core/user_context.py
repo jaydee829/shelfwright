@@ -16,6 +16,9 @@ from uuid import UUID
 # entrypoints, and tests agree forever.
 DEFAULT_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
+# FastAPI's per-request auth dependency calls .set() directly on this var.
+# Reset is unnecessary there — the asyncio Task context is discarded at response time.
+# Use as_user() everywhere else (CLI, Dagster, tests).
 current_user_id: ContextVar[UUID | None] = ContextVar("current_user_id", default=None)
 
 
