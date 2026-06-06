@@ -49,3 +49,14 @@ def test_explicit_db_url_argument_still_wins(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql://env:env@envhost:5432/envdb")
     manager = DatabaseManager(db_url="postgresql://arg:arg@arghost:5432/argdb")
     assert manager.engine.url.host == "arghost"
+
+
+def test_empty_database_url_falls_through_to_component_vars(monkeypatch):
+    """DATABASE_URL set-but-empty (blanked secret) must not reach create_engine('')."""
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("POSTGRES_USER", "componentuser")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "componentpw")
+    monkeypatch.setenv("POSTGRES_HOST", "componenthost")
+
+    manager = DatabaseManager()
+    assert manager.engine.url.host == "componenthost"

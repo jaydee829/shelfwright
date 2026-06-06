@@ -30,7 +30,7 @@ class DatabaseManager:
         # string) takes priority over component vars — checked BEFORE demanding
         # POSTGRES_USER/PASSWORD, which are only required for component-wise construction.
         if db_url is None:
-            db_url = os.getenv("DATABASE_URL")
+            db_url = os.getenv("DATABASE_URL") or None  # "" (blanked secret) falls through to component vars
 
         if db_url is None:
             # Check for individual environment variables
