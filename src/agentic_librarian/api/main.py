@@ -1,9 +1,16 @@
-from agentic_librarian.db.models import Edition, ReadingHistory, Work, WorkContributor
+from agentic_librarian.db.models import (
+    Edition,
+    ReadingHistory,
+    Work,
+    WorkContributor,
+    WorkStyle,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()
@@ -54,4 +61,38 @@ def get_history():
                 "format": h.edition.format,
             }
             for h in history_entries
+        ]
+
+
+@app.get("/works")
+def get_works(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    """Enriched catalog listing — the walking skeleton's payload (Lift 0)."""
+    with db_manager.get_session() as session:
+        # selectinload for the collections: joinedload + LIMIT mis-paginates
+        # (the limit would apply to joined rows, not works).
+        works = (
+            session.query(Work)
+            .options(
+                selectinload(Work.contributors).joinedload(WorkContributor.author),
+                selectinload(Work.tropes).joinedload(WorkTrope.trope),
+                selectinload(Work.styles).joinedload(WorkStyle.style),
+            )
+            .order_by(Work.title)
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "id": str(w.id),
+                "title": w.title,
+                "authors": [c.author.name for c in w.contributors if c.role == "Author"],  # ETL always writes role="Author"
+                "publication_year": w.original_publication_year,
+                "genres": w.genres or [],
+                "moods": w.moods or [],
+                "tropes": [wt.trope.name for wt in w.tropes],
+                "styles": [{"attribute": ws.attribute_type, "name": ws.style.name} for ws in w.styles],
+            }
+            for w in works
         ]
