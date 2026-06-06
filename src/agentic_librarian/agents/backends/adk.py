@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from uuid import UUID
 
 from agentic_librarian.agents.pipeline import create_recommendation_pipeline
-from agentic_librarian.agents.runtime import APP_NAME, _ensure_adk_credentials
+from agentic_librarian.agents.runtime import APP_NAME, _ensure_adk_credentials, _record_event_usage
 from agentic_librarian.agents.runtime import start_conversation as _runtime_start_conversation
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -29,8 +30,9 @@ class ADKBackend:
         session_id = uuid.uuid4().hex
         await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
         content = types.Content(role="user", parts=[types.Part(text=prompt)])
-        async for _ in runner.run_async(user_id=user_id, session_id=session_id, new_message=content):
-            pass
+        conversation_id = UUID(session_id)
+        async for event in runner.run_async(user_id=user_id, session_id=session_id, new_message=content):
+            _record_event_usage(event, conversation_id)
         session = await runner.session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
         return session.state.get("recommendation") or "(no recommendation)"
 
