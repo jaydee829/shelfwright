@@ -18,7 +18,7 @@ Install the Google Cloud CLI in WSL following the Debian/Ubuntu apt repository
 instructions at <https://cloud.google.com/sdk/docs/install#deb>. The short version:
 
 ```bash
-curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --yes --dearmor -o /usr/share/keyrings/cloud.google.gpg
 echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
   | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
 sudo apt update && sudo apt install -y google-cloud-cli
@@ -200,8 +200,20 @@ that silently targets the wrong project.
 
 The restore script uploads `data/backups/agentic_librarian_FINAL_20260605_014912.sql.gz`
 to the GCS bucket, grants the Cloud SQL service agent read access to the bucket, and
-runs `gcloud sql import sql` to load it into the database. Run this from the WSL dev
-clone — a fresh clone does not have the dump (it is gitignored).
+runs `gcloud sql import sql` to load it into the database **as the `librarian` user**
+(`--user` — the default import user cannot `SET ROLE "librarian"` on PG16, which aborts
+the import at the dump's first `OWNER TO librarian` statement; importing as the owner
+makes those statements no-ops).
+
+Run this from a clone that actually holds the dump — `data/backups/` is gitignored, so
+a fresh clone does NOT have it. If the WSL clone is missing it, copy from the Windows
+clone first:
+
+```bash
+mkdir -p ~/agentic_librarian/data/backups
+cp /mnt/c/dev/agentic_librarian/data/backups/agentic_librarian_FINAL_20260605_014912.sql.gz \
+   ~/agentic_librarian/data/backups/
+```
 
 ### Pre-flight: confirm the vector extension is in the dump
 
@@ -282,14 +294,25 @@ curl -o cloud-sql-proxy https://storage.googleapis.com/cloud-sql-connectors/clou
 chmod +x cloud-sql-proxy
 ```
 
+**Set up Application Default Credentials** (one-time — distinct from `gcloud auth
+login`, which only authenticates the CLI; the proxy and Google client libraries read
+ADC):
+
+```bash
+gcloud auth application-default login   # browser flow, like gcloud init
+```
+
+(Alternative without ADC: add `--gcloud-auth` to the proxy command to borrow the CLI's
+credentials.)
+
 **Start the proxy** (replace `<CONNECTION_NAME>` with the value from step 2 or 5):
 
 ```bash
 ./cloud-sql-proxy <CONNECTION_NAME> --port 5433 &
 ```
 
-The `&` runs it in the background. You will see a line like
-`Listening on 127.0.0.1:5433` when it is ready.
+The `&` runs it in the background. The proxy prints `Listening on 127.0.0.1:5433` over
+your prompt — press Enter to get the prompt back; it's still running (`jobs` shows it).
 
 **Read the password from Secret Manager** — the secret stores the full DATABASE_URL,
 so you can paste it and change only the host:
@@ -305,6 +328,17 @@ gcloud secrets versions access latest --secret=librarian-db-url
 ```bash
 DATABASE_URL="postgresql://librarian:<hex-password>@localhost:5433/agentic_librarian" \
   python infra/verify_restore.py
+```
+
+WSL's bare `python3` has neither pip nor sqlalchemy — route through the app container
+instead (the container reaches the WSL-hosted proxy via `host.docker.internal`; no
+manual password copying needed):
+
+```bash
+URL=$(gcloud secrets versions access latest --secret=librarian-db-url)
+DBURL=$(echo "$URL" | sed 's#@/agentic_librarian?host=.*#@host.docker.internal:5433/agentic_librarian#')
+docker run --rm -e DATABASE_URL="$DBURL" -v ~/agentic_librarian:/app -w /app \
+  agentic_librarian-app:latest python infra/verify_restore.py
 ```
 
 All checks must pass before the first deploy. Expected passing output:
