@@ -16,6 +16,8 @@ gcloud services enable \
   secretmanager.googleapis.com \
   artifactregistry.googleapis.com \
   iamcredentials.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  iam.googleapis.com \
   billingbudgets.googleapis.com \
   storage.googleapis.com
 

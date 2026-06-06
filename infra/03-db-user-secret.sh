@@ -5,7 +5,7 @@
 set -euo pipefail
 source "$(dirname "$0")/00-config.sh"
 
-DB_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=')"
+DB_PASSWORD="$(openssl rand -hex 24)"  # 48 hex chars: fixed length, URL-safe (it lands inside DATABASE_URL)
 gcloud sql users create "${DB_USER}" --instance="${SQL_INSTANCE}" --password="${DB_PASSWORD}"
 
 CONNECTION_NAME="$(gcloud sql instances describe "${SQL_INSTANCE}" --format='value(connectionName)')"

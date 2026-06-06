@@ -11,7 +11,10 @@ set -euo pipefail
 source "$(dirname "$0")/00-config.sh"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-gcloud storage cp "${REPO_ROOT}/data/backups/${DUMP_FILE}" "${BUCKET}/"
+DUMP_PATH="${REPO_ROOT}/data/backups/${DUMP_FILE}"
+[[ -f "${DUMP_PATH}" ]] || { echo "ERROR: ${DUMP_PATH} not found — data/backups/ is gitignored; run from the clone that holds the dump (the WSL dev clone)."; exit 1; }
+
+gcloud storage cp "${DUMP_PATH}" "${BUCKET}/"
 
 # Cloud SQL imports run as the instance's own service agent — it needs to read the bucket.
 SQL_SA="$(gcloud sql instances describe "${SQL_INSTANCE}" --format='value(serviceAccountEmailAddress)')"

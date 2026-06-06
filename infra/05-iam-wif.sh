@@ -10,6 +10,16 @@ PROJECT_NUMBER="$(gcloud projects describe "${PROJECT_ID}" --format='value(proje
 gcloud iam service-accounts create "${RUNTIME_SA_NAME}" --display-name="librarian-api runtime"
 gcloud iam service-accounts create "${DEPLOYER_SA_NAME}" --display-name="GitHub Actions deployer"
 
+# New SAs propagate asynchronously; binding too fast intermittently 400s with
+# "does not exist". Poll until both are describable before binding anything.
+for sa in "${RUNTIME_SA}" "${DEPLOYER_SA}"; do
+  for i in $(seq 1 12); do
+    if gcloud iam service-accounts describe "${sa}" >/dev/null 2>&1; then break; fi
+    echo "Waiting for ${sa} to propagate (${i}/12)..."
+    sleep 5
+  done
+done
+
 # Runtime: read the one secret + connect to Cloud SQL.
 gcloud secrets add-iam-policy-binding "${SECRET_NAME}" \
   --member="serviceAccount:${RUNTIME_SA}" --role="roles/secretmanager.secretAccessor"
