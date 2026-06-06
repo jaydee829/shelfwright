@@ -9,6 +9,7 @@ import sys
 
 from sqlalchemy import create_engine, text
 
+# Snapshot counts from the 2026-06-05 production build; update after each new build + backup.
 EXPECTED_ROW_COUNTS = {
     "works": 326,
     "editions": 335,
@@ -33,37 +34,43 @@ def main() -> int:
         return 2
 
     engine = create_engine(url)
-    with engine.connect() as conn:
-        # 1. Known row counts from the completed production build (2026-06-05).
-        for table, expected in EXPECTED_ROW_COUNTS.items():
-            actual = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608 - fixed table names
-            check(f"{table} row count", actual == expected, f"expected {expected}, got {actual}")
+    try:
+        with engine.connect() as conn:
+            # 1. Known row counts from the completed production build (2026-06-05).
+            for table, expected in EXPECTED_ROW_COUNTS.items():
+                actual = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608 - fixed table names
+                check(f"{table} row count", actual == expected, f"expected {expected}, got {actual}")
 
-        # 2. pgvector extension present.
-        ext = conn.execute(text("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")).scalar()
-        check("pgvector extension installed", ext == 1)
+            # 2. pgvector extension present.
+            ext = conn.execute(text("SELECT count(*) FROM pg_extension WHERE extname = 'vector'")).scalar()
+            check("pgvector extension installed", ext == 1)
 
-        # 3. Embeddings fully populated (the build's quality gate embedded every trope/style).
-        for table in ("tropes", "styles"):
-            total = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
-            nulls = conn.execute(text(f"SELECT count(*) FROM {table} WHERE embedding IS NULL")).scalar()  # noqa: S608
-            check(f"{table} embeddings populated", total > 0 and nulls == 0, f"{total} rows, {nulls} NULL embeddings")
+            # 3. Embeddings fully populated (the build's quality gate embedded every trope/style).
+            for table in ("tropes", "styles"):
+                total = conn.execute(text(f"SELECT count(*) FROM {table}")).scalar()  # noqa: S608
+                nulls = conn.execute(text(f"SELECT count(*) FROM {table} WHERE embedding IS NULL")).scalar()  # noqa: S608
+                check(f"{table} embeddings populated", total > 0 and nulls == 0, f"{total} rows, {nulls} NULL embeddings")
 
-        # 4. Similarity search actually works (operator + data, not just bytes).
-        rows = conn.execute(
-            text(
-                "SELECT t2.name, t1.embedding <=> t2.embedding AS dist "
-                "FROM tropes t1, tropes t2 WHERE t1.id != t2.id "
-                "AND t1.id = (SELECT id FROM tropes WHERE embedding IS NOT NULL LIMIT 1) "
-                "ORDER BY dist ASC LIMIT 3"
+            # 4. Similarity search actually works (operator + data, not just bytes).
+            rows = conn.execute(
+                text(
+                    "SELECT t2.name, t1.embedding <=> t2.embedding AS dist "
+                    "FROM tropes t1, tropes t2 WHERE t1.id != t2.id "
+                    "AND t1.id = (SELECT id FROM tropes WHERE embedding IS NOT NULL LIMIT 1) "
+                    "ORDER BY dist ASC LIMIT 3"
+                )
+            ).fetchall()
+            # NULL dists should be impossible (check 3 asserts zero NULL embeddings) — filter
+            # defensively so a future edit can't crash the comparison on None.
+            dists = [r.dist for r in rows if r.dist is not None]
+            check(
+                "similarity query returns ordered results",
+                len(dists) == 3 and dists == sorted(dists) and all(0 <= d <= 2 for d in dists),
+                f"top-3 distances: {dists}",
             )
-        ).fetchall()
-        dists = [r.dist for r in rows]
-        check(
-            "similarity query returns ordered results",
-            len(dists) == 3 and dists == sorted(dists) and all(0 <= d <= 2 for d in dists),
-            f"top-3 distances: {dists}",
-        )
+    except Exception as exc:  # noqa: BLE001 - ops script: report, don't traceback
+        print(f"[FAIL] database error — {exc}")
+        failures.append("database error")
 
     if failures:
         print(f"\n{len(failures)} check(s) FAILED: {failures}")
