@@ -112,7 +112,7 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
           service: librarian-api
           region: us-central1
-          image: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/librarian/librarian-api:${{ github.sha }}
+          image: ${{ env.IMAGE }}
           flags: >-
             --no-allow-unauthenticated
             --service-account=librarian-api-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com

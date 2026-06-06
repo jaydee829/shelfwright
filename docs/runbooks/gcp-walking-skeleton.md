@@ -399,6 +399,16 @@ gcloud run services proxy librarian-api --region us-central1
 This opens a local port (default 8080) and injects the auth token for you. Open
 `http://localhost:8080/works` in any browser. Press Ctrl-C to stop the proxy.
 
+One-time post-restore count check (matches the dump):
+
+```bash
+TOKEN=$(gcloud auth print-identity-token)
+URL=<SERVICE_URL>
+curl -s -H "Authorization: Bearer ${TOKEN}" "${URL}/history" | python3 -c "import json,sys; print('history rows:', len(json.load(sys.stdin)))"   # expect 331
+curl -s -H "Authorization: Bearer ${TOKEN}" "${URL}/works?limit=200" | python3 -c "import json,sys; print('works page 1:', len(json.load(sys.stdin)))"   # expect 200
+curl -s -H "Authorization: Bearer ${TOKEN}" "${URL}/works?limit=200&offset=200" | python3 -c "import json,sys; print('works page 2:', len(json.load(sys.stdin)))"   # expect 126 (total 326)
+```
+
 ---
 
 ## 10. Budget — `infra/07-budget.sh`

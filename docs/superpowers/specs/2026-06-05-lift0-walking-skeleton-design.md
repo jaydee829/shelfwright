@@ -34,7 +34,7 @@ GitHub (merge to main)
 │  Artifact Registry ──► Cloud Run service "librarian-api"         │
 │  (docker images)        FastAPI: /health /health/db              │
 │                         /history /works                          │
-│                         ingress: IAM-auth only (no public)       │
+│                         ingress: all, IAM-gated (no anon access) │
 │                         min 0 / max 1 instances, 512Mi           │
 │                            │ unix socket (built-in connector)    │
 │                            ▼                                     │
@@ -152,8 +152,10 @@ Asserts, in order:
 - `vector` extension present; embedding column non-null count matches expected
 - A live similarity query (`ORDER BY embedding <=> …`) returns sensibly ordered results
   — the operator works in Cloud SQL, not just that bytes arrived
-- End-to-end through the deployed service with an identity token: `/works` → 326,
-  `/history` → 331
+- One-time end-to-end check through the deployed service with an identity token
+  (runbook §9): `/history` returns 331 rows; `/works` paged twice (limit=200 +
+  offset=200) totals 326. A count assertion deliberately does NOT live in the CD
+  smoke — the catalog grows, and `/works` caps at 200 per page.
 
 ## Provisioning artifacts
 
