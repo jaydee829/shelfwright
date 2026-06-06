@@ -37,7 +37,7 @@ def two_user_client(db_url, monkeypatch):
         return TestClient(api_main.app)
 
     yield _as
-    api_main.app.dependency_overrides.clear()
+    api_main.app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_history_is_scoped_to_the_caller(two_user_client):

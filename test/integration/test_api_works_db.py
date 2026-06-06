@@ -19,7 +19,7 @@ def _authed():
         id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL
     )
     yield
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.db_integration
