@@ -1,10 +1,24 @@
+import pytest
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
+from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.main import app
+from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authed():
+    """Endpoints are auth-gated (Lift 1) — these tests exercise the data layer, so
+    inject a verified identity via FastAPI's dependency-override seam."""
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL
+    )
+    yield
+    app.dependency_overrides.clear()
 
 
 def _mock_chain(mock_session, results):

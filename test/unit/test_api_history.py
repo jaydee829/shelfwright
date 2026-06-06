@@ -1,10 +1,24 @@
+import pytest
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.main import app
+from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _authed():
+    """Endpoints are auth-gated (Lift 1) — these tests exercise the data layer, so
+    inject a verified identity via FastAPI's dependency-override seam."""
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
+        id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL
+    )
+    yield
+    app.dependency_overrides.clear()
 
 
 def test_get_history_empty():
@@ -15,6 +29,7 @@ def test_get_history_empty():
         # Mock empty query result with the actual chain
         mock_query = mock_session.query.return_value
         mock_query.join.return_value = mock_query
+        mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = []
@@ -44,6 +59,7 @@ def test_get_history_with_data():
         # Mock the actual chain
         mock_query = mock_session.query.return_value
         mock_query.join.return_value = mock_query
+        mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = [mock_history]
@@ -78,6 +94,7 @@ def test_get_history_no_date():
 
         mock_query = mock_session.query.return_value
         mock_query.join.return_value = mock_query
+        mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = [mock_history]
