@@ -77,7 +77,7 @@ def get_works(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)
                 selectinload(Work.tropes).joinedload(WorkTrope.trope),
                 selectinload(Work.styles).joinedload(WorkStyle.style),
             )
-            .order_by(Work.title)
+            .order_by(Work.title, Work.id)  # id tiebreaker: stable pages when titles collide
             .offset(offset)
             .limit(limit)
             .all()

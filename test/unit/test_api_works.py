@@ -88,6 +88,7 @@ def test_get_works_null_arrays_become_empty_lists():
 
 
 def test_get_works_pagination_params_forwarded():
+    # Structural test: the db_integration test verifies actual paging against the real schema.
     with patch("agentic_librarian.api.main.db_manager") as mock_db:
         mock_session = MagicMock()
         mock_db.get_session.return_value.__enter__.return_value = mock_session
