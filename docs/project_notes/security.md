@@ -60,3 +60,35 @@ Run this pass during each spec's review and record any findings below.
 - **Residual risk (accepted)**: enforcement of the confirm step is prompt-level; the tool
   itself cannot distinguish confirmed from unconfirmed calls (no UX channel at the MCP
   layer). Blast radius bounded by validation + single-user DB + pg_dump snapshots.
+
+## Multi-user trust boundary (Lift 1, ADR-048)
+
+- **Identity channel:** the current user is a `contextvars.ContextVar` set ONLY by
+  trusted code (the FastAPI auth dependency after `verify_id_token`; the CLI/dev
+  entrypoints; the Dagster ingest knob). MCP tool signatures expose NO user parameter —
+  a prompt injection cannot name another user (SEC-001 extension; regression-tested,
+  including mutation-tested isolation).
+- **Fail closed:** scoped tools raise when no identity is in context. Never a
+  fall-through to all rows. (Metering is the one deliberate fail-SOFT consumer: a
+  missing identity skips the usage row with a warning — it must never kill a
+  conversation, and it never writes a row under a default/wrong user.)
+- **Signup policy:** `SIGNUP_MODE=invite` (default; unknown verified identities → 403)
+  or `open` (auto-create). Any other value behaves as `invite`. Claim-by-email REQUIRES
+  the token's `email_verified` claim and only matches rows with `firebase_uid` NULL —
+  claiming is one-shot (uid rotation cannot re-claim a linked account; recovery of a
+  genuinely lost account is a manual operator action, see the rollout runbook).
+- **Residual risk — the invite email is a bearer credential:** any identity provider
+  that yields a VERIFIED token for an invited email can claim that invite. With Google
+  sign-in only (Lift 1), `email_verified: true` means control of the mailbox. Revisit
+  before enabling non-Google OIDC/SAML providers with looser email_verified semantics
+  (Lift 3 security re-review).
+- **Auth failure semantics:** 401 = missing/invalid/expired token; 403 = verified
+  identity, not invited; 503 = OUR cert-fetch outage (never disguised as a credential
+  problem).
+- **user_credentials handling contract (BYOK, feature in Lift 3):** keys are encrypted
+  with Cloud KMS BEFORE they exist anywhere; never plaintext at rest; never logged;
+  decrypted only at point of use. In Lift 1 NO code path reads or writes this table.
+- **Expiring single-user assumptions:** transport-level "single user" reasoning
+  (SEC-001/SEC-002 residual-risk arguments, absence of rate limiting) is now on a
+  path to expiry: Lift 2 opens the Cloud Run IAM gate; Lift 3 performs the full
+  security posture re-review.
