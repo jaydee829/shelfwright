@@ -27,11 +27,14 @@ def _wire_db(db_url):
 def fake_claims(monkeypatch):
     def _install(claims):
         if isinstance(claims, Exception):
+
             def _raise(token):
                 raise claims
+
             monkeypatch.setattr(auth_module, "_verify_token", _raise)
         else:
             monkeypatch.setattr(auth_module, "_verify_token", lambda token: claims)
+
     return _install
 
 

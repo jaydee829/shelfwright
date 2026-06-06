@@ -6,9 +6,10 @@ import os
 
 import pytest
 from agentic_librarian.db.models import Base
+from sqlalchemy import create_engine, inspect, text
+
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, text
 
 pytestmark = pytest.mark.db_integration
 

@@ -26,7 +26,7 @@ def health_check():
 
 
 @app.get("/health/db")
-def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):
+def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
     try:
         with db_manager.get_session() as session:
             session.execute(text("SELECT 1"))
@@ -38,7 +38,7 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):
 
 
 @app.get("/history")
-def get_history(user: AuthenticatedUser = Depends(get_current_user)):
+def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
     with db_manager.get_session() as session:
         # Query reading history with eager loading for efficiency
         history_entries = (
@@ -77,7 +77,7 @@ def get_history(user: AuthenticatedUser = Depends(get_current_user)):
 def get_works(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
 ):
     """Enriched catalog listing — the walking skeleton's payload (Lift 0)."""
     with db_manager.get_session() as session:

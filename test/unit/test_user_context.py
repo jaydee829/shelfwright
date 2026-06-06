@@ -21,7 +21,7 @@ def _clear_context():
 
 
 def test_default_user_id_is_the_pinned_constant():
-    assert DEFAULT_USER_ID == UUID("00000000-0000-4000-8000-000000000001")
+    assert UUID("00000000-0000-4000-8000-000000000001") == DEFAULT_USER_ID
 
 
 def test_get_required_user_id_fails_closed_when_unset():
@@ -57,7 +57,6 @@ def test_as_user_none_unsets_inside_outer():
     it must fail closed inside and restore the outer identity after."""
     outer = uuid4()
     with as_user(outer):
-        with as_user(None):
-            with pytest.raises(RuntimeError):
-                get_required_user_id()
+        with as_user(None), pytest.raises(RuntimeError):
+            get_required_user_id()
         assert get_required_user_id() == outer

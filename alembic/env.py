@@ -5,9 +5,10 @@ from logging.config import fileConfig
 
 from agentic_librarian.db.models import Base
 from agentic_librarian.db.session import resolve_database_url
-from alembic import context
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
+
+from alembic import context
 
 config = context.config
 if config.config_file_name is not None:

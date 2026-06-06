@@ -7,8 +7,8 @@ import pytest
 from agentic_librarian.api import main as api_main
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
-from agentic_librarian.db.models import Edition, ReadingHistory, User, Work, WorkContributor
 from agentic_librarian.db.models import Author as AuthorModel
+from agentic_librarian.db.models import Edition, ReadingHistory, User, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from fastapi.testclient import TestClient
 

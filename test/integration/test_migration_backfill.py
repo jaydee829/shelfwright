@@ -6,9 +6,10 @@ from uuid import UUID
 
 import pytest
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
+from sqlalchemy import create_engine, text
+
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, text
 
 pytestmark = pytest.mark.db_integration
 
@@ -63,8 +64,6 @@ def test_migration_0002_backfills_existing_rows_onto_default_user(scratch_db_url
     with engine.connect() as conn:
         user_id = conn.execute(text("SELECT user_id FROM reading_history")).scalar()
         assert UUID(str(user_id)) == DEFAULT_USER_ID
-        email = conn.execute(
-            text("SELECT email FROM users WHERE id = :i"), {"i": str(DEFAULT_USER_ID)}
-        ).scalar()
+        email = conn.execute(text("SELECT email FROM users WHERE id = :i"), {"i": str(DEFAULT_USER_ID)}).scalar()
         assert email == "jaydee829@gmail.com"
     engine.dispose()

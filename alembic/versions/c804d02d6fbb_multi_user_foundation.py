@@ -5,17 +5,19 @@ Revises: 6c2cdc370222
 Create Date: 2026-06-06 20:43:17.759624
 
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
+
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
-revision: str = 'c804d02d6fbb'
-down_revision: Union[str, None] = '6c2cdc370222'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "c804d02d6fbb"
+down_revision: str | None = "6c2cdc370222"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 # Must match core/user_context.DEFAULT_USER_ID — pinned here as a literal because
 # migrations are frozen and must not import application code.

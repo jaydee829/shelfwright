@@ -55,7 +55,9 @@ def _work(
     if read_on is not None:
         session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=read_on))
     if suggested:
-        session.add(Suggestions(work=work, user_id=DEFAULT_USER_ID, status="Suggested", justification="prior suggestion"))
+        session.add(
+            Suggestions(work=work, user_id=DEFAULT_USER_ID, status="Suggested", justification="prior suggestion")
+        )
     return work
 
 

@@ -8,8 +8,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user, current_user_id
-from agentic_librarian.db.models import Edition, ReadingHistory, Suggestions, Trope, User, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.models import Author as AuthorModel
+from agentic_librarian.db.models import (
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Trope,
+    User,
+    Work,
+    WorkContributor,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server as mcp_server
 
@@ -37,9 +46,7 @@ def scoped_db(db_url):
             )
         )
         session.add(
-            ReadingHistory(
-                edition_id=edition.id, user_id=FRIEND_ID, date_completed=date(2024, 6, 1), user_rating=3
-            )
+            ReadingHistory(edition_id=edition.id, user_id=FRIEND_ID, date_completed=date(2024, 6, 1), user_rating=3)
         )
         session.add(
             Suggestions(

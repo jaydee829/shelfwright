@@ -44,9 +44,7 @@ def test_adk_conversation_records_usage(monkeypatch):
 
 def test_claude_conversation_records_usage(monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        "agentic_librarian.agents.backends.claude.record_llm_call", lambda **kw: calls.append(kw)
-    )
+    monkeypatch.setattr("agentic_librarian.agents.backends.claude.record_llm_call", lambda **kw: calls.append(kw))
 
     class FakeResult:
         result = "hi"
