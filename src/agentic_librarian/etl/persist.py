@@ -233,22 +233,17 @@ def persist_enriched_work(
     date_completed = pd.to_datetime(_raw_date).date() if _raw_date is not None and not pd.isna(_raw_date) else None
 
     if date_completed:
-        # Duplicate Check: Work + Edition + Date Completed + User (ADR-048: per-user dedup;
-        # a friend re-reading on the same date as the operator is not a duplicate).
+        user_id = get_required_user_id()  # per-user: a friend re-reading my book is not a duplicate (ADR-048)
         existing_history = (
             session.query(ReadingHistory)
-            .filter_by(
-                edition_id=edition.id,
-                date_completed=date_completed,
-                user_id=get_required_user_id(),  # per-user: a friend re-reading my book is not a duplicate (ADR-048)
-            )
+            .filter_by(edition_id=edition.id, date_completed=date_completed, user_id=user_id)
             .first()
         )
 
         if not existing_history:
             history_entry = ReadingHistory(
                 edition=edition,
-                user_id=get_required_user_id(),
+                user_id=user_id,
                 date_completed=date_completed,
                 user_rating=user_rating,
                 user_notes=user_notes,

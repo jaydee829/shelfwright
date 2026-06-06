@@ -3,12 +3,12 @@ must see only A's rows; with no context every scoped tool fails CLOSED; and no t
 schema may expose a user_id parameter for the LLM to inject."""
 
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 import pytest
 from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user, current_user_id
-from agentic_librarian.db.models import Edition, ReadingHistory, Suggestions, User, Work, WorkContributor
+from agentic_librarian.db.models import Edition, ReadingHistory, Suggestions, Trope, User, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.models import Author as AuthorModel
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server as mcp_server
@@ -41,8 +41,33 @@ def scoped_db(db_url):
                 edition_id=edition.id, user_id=FRIEND_ID, date_completed=date(2024, 6, 1), user_rating=3
             )
         )
-        session.add(Suggestions(work_id=work.id, user_id=DEFAULT_USER_ID, justification="for me"))
-        session.add(Suggestions(work_id=work.id, user_id=FRIEND_ID, justification="for friend"))
+        session.add(
+            Suggestions(
+                work_id=work.id,
+                user_id=DEFAULT_USER_ID,
+                justification="for me",
+                suggested_at=datetime(2026, 6, 2, tzinfo=UTC),  # NEWEST — an unscoped .first() would pick THIS
+            )
+        )
+        session.add(
+            Suggestions(
+                work_id=work.id,
+                user_id=FRIEND_ID,
+                justification="for friend",
+                suggested_at=datetime(2026, 6, 1, tzinfo=UTC),
+            )
+        )
+        # A second work read ONLY by the default user, carrying a trope — proves
+        # trope preferences aggregate over MY history, not everyone's.
+        solo_work = Work(title="Solo Book", contributors=[WorkContributor(author=author, role="Author")])
+        solo_edition = Edition(work=solo_work, format="ebook")
+        trope = Trope(name="Found Family")
+        session.add_all([solo_work, solo_edition, trope])
+        session.flush()
+        session.add(WorkTrope(work_id=solo_work.id, trope_id=trope.id))
+        session.add(
+            ReadingHistory(edition_id=solo_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2021, 3, 3))
+        )
         session.flush()
         work_id = str(work.id)
     yield work_id
@@ -66,18 +91,21 @@ def test_get_unacted_suggestions_isolated(scoped_db):
 
 def test_update_suggestion_status_cannot_touch_other_users(scoped_db):
     with as_user(FRIEND_ID):
-        mcp_server.update_suggestion_status(scoped_db, "Dismissed")
-    # the DEFAULT user's suggestion must still be active
+        result = mcp_server.update_suggestion_status(scoped_db, "Dismissed")
+    assert result.startswith("Updated suggestion"), result  # positive: found THEIR OWN row
+    # the DEFAULT user's (newer) suggestion must still be active — an unscoped query
+    # would have dismissed it instead (mutation-proven test design)
     with as_user(DEFAULT_USER_ID):
         result = mcp_server.get_unacted_suggestions([], [])
     assert [s["justification"] for s in result] == ["for me"]
 
 
 def test_get_user_trope_preferences_scoped(scoped_db):
-    # No tropes seeded — both users get [] but the query must not raise and must
-    # filter by user (regression net: the join chain gained a user filter).
+    # 'Found Family' is attached to a work read ONLY by the default user.
+    with as_user(DEFAULT_USER_ID):
+        assert "Found Family" in mcp_server.get_user_trope_preferences()
     with as_user(FRIEND_ID):
-        assert mcp_server.get_user_trope_preferences() == []
+        assert "Found Family" not in mcp_server.get_user_trope_preferences()
 
 
 def test_add_book_duplicate_guard_is_per_user(scoped_db):
@@ -85,7 +113,8 @@ def test_add_book_duplicate_guard_is_per_user(scoped_db):
     (review finding: reads that gate writes must be user-scoped too)."""
     with as_user(FRIEND_ID):
         result = mcp_server.add_book_to_history("Dune", "Frank Herbert", date_completed="2020-01-01")
-    assert "already logged" not in result
+    assert result.startswith("Added"), result
+    assert "read #2" in result  # friend already has the 2024 read — count is per-user
 
 
 def test_scoped_tools_fail_closed_without_context(scoped_db):
@@ -101,6 +130,10 @@ def test_scoped_tools_fail_closed_without_context(scoped_db):
             mcp_server.update_suggestion_status(str(uuid4()), "Dismissed")
         with pytest.raises(RuntimeError, match="No user identity"):
             mcp_server.log_suggestion(str(uuid4()), "c", "j")
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.update_reading_status("Dune", "Frank Herbert", "read")
+        with pytest.raises(RuntimeError, match="No user identity"):
+            mcp_server.add_book_to_history("Dune", "Frank Herbert", date_completed="2019-01-01")
     finally:
         current_user_id.reset(token)
 
@@ -112,3 +145,10 @@ def test_no_tool_schema_exposes_user_id():
     for tool in tools:
         properties = (tool.inputSchema or {}).get("properties", {})
         assert "user_id" not in properties, f"{tool.name} exposes user_id to the LLM"
+
+
+def test_check_reading_history_unread_when_only_friend_read_it(scoped_db):
+    """Presence must not leak: if only the friend read it, I see Unread."""
+    with as_user(FRIEND_ID):
+        result = mcp_server.check_reading_history("Solo Book", "Frank Herbert")
+    assert result["status"] == "Unread"
