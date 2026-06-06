@@ -306,6 +306,24 @@ def test_add_book_unresolvable_title_errors(db_url, monkeypatch):
 
 
 @pytest.mark.db_integration
+def test_duplicate_noop_does_not_create_a_dangling_edition(db_url, seeded_work_id, monkeypatch):
+    # Gemini (PR #37): the duplicate guard must run BEFORE edition get-or-create, otherwise
+    # a duplicate add with a NEW format commits an empty Edition despite writing no history.
+    _stub_enrich(monkeypatch, seeded_work_id)
+    mcp_server.add_book_to_history(
+        title="Seeded Book", author="Seeded Author", date_completed="2024-01-01", format="ebook"
+    )
+    with mcp_server.db_manager.get_session() as session:
+        editions_before = session.query(Edition).filter_by(work_id=UUID(seeded_work_id)).count()
+    out = mcp_server.add_book_to_history(
+        title="Seeded Book", author="Seeded Author", date_completed="2024-01-01", format="hardcover"
+    )
+    assert "already logged" in out
+    with mcp_server.db_manager.get_session() as session:
+        assert session.query(Edition).filter_by(work_id=UUID(seeded_work_id)).count() == editions_before
+
+
+@pytest.mark.db_integration
 def test_check_reading_history_uses_latest_read(db_url, seeded_work_id, monkeypatch):
     # Pins the read-event model's guarantee: an old read + a recent re-read means
     # the work is NOT a re-read candidate (server.py already orders by date desc —

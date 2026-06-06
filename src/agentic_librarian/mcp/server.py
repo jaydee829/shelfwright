@@ -395,14 +395,16 @@ def add_book_to_history(
     try:
         with db_manager.get_session() as session:
             uuid_obj = _parse_uuid(work_id)
+            # Duplicate guard FIRST (PR #37 review): on the no-op path nothing may be
+            # created — not even an Edition (the session commits on clean exit).
+            prior_reads = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == uuid_obj).all()
+            if any(r.date_completed == completed for r in prior_reads):
+                return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
             edition = session.query(Edition).filter_by(work_id=uuid_obj, format=format).first()
             if not edition:
                 edition = Edition(work_id=uuid_obj, format=format)
                 session.add(edition)
                 session.flush()
-            prior_reads = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == uuid_obj).all()
-            if any(r.date_completed == completed for r in prior_reads):
-                return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
             session.add(
                 ReadingHistory(
                     edition_id=edition.id,
