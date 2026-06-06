@@ -617,3 +617,43 @@ This file documents key architectural decisions, their context, and trade-offs.
 - The conversational piece becomes testable on both quota pools, and ADK-vs-Claude conversations are
   comparable in the MLflow UI. The Claude one-shot pipeline is untouched. The new protocol method is
   additive (existing callers unaffected).
+
+### ADR-046: Product Roadmap — Walking Skeleton First, Gemini-First Prod, BYOK-Ready Schema (2026-06-05)
+**Context:**
+- Three heavy lifts loomed unordered: web front end (Phase 4), GCP deployment, multi-user
+  support. Target: friends/family soon, then open signup with a cost-recovery subscription.
+  Couplings: the Claude backend's Max OAuth doesn't deploy; auth-provider choice is
+  GCP-informed; multi-user expires security.md's single-user assumptions.
+  Spec: docs/superpowers/specs/2026-06-05-product-roadmap-design.md.
+
+**Decision:**
+- Sequence: (0) GCP walking skeleton (Cloud Run + Cloud SQL/pgvector + CD, existing FastAPI
+  scaffold, catalog restored, access-gated) → (1) multi-user foundation (users + user_id +
+  default-user migration, Firebase Auth, usage metering keyed by user and key-source,
+  KMS-encrypted user_credentials placeholder) → (2) front end → friends/family beta →
+  (3) productization (Stripe, quotas, BYOK feature, Claude prod enablement, security
+  re-review) → open signup.
+- Prod LLM: Gemini-first; AGENT_BACKEND stays env-configurable in prod so Claude-via-API
+  (viable per the cited mid-June 2026 Anthropic billing change) is config + container +
+  metering, not architecture. BYOK: schema-ready in Lift 1, feature in Lift 3.
+- Shared catalog / per-user history. MLflow+Dagster stay dev-only. DEBT-001: bulk
+  enrichment remains operator-run local Dagster until demand justifies a Cloud Run Job.
+
+**Alternatives Considered:**
+- FE-first, GCP last (big-bang deploy) -> Rejected: saves the unfamiliar infra for the end
+  where it is hardest to debug, and friends need auth before anything is shareable — so
+  multi-user had to precede the beta regardless; skeleton-first converts deployment into
+  continuous delivery from week one.
+- FE before the multi-user foundation -> Rejected: would build the FE twice (once
+  single-user, once against the auth'd contract).
+- Claude API in prod now -> Deferred: ~5-15x flash-tier Gemini per conversation plus a
+  second vendor to meter before any revenue; kept one config-change away via the
+  AGENT_BACKEND seam.
+- Both-LLM user-selectable tier at launch -> Rejected: dual metering and parity
+  maintenance before product-market fit.
+
+**Consequences:**
+- Deployment becomes continuous from week one instead of a big-bang finale; the FE is
+  built once against the auth'd contract; the most invasive work (schema) happens while
+  the surface is smallest. Each lift gets its own spec/plan cycle; security.md must be
+  formally re-reviewed before open signup.
