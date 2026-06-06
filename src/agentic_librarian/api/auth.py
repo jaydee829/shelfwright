@@ -9,6 +9,7 @@ the same channel the MCP tools read (core/user_context.py).
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import NamedTuple
 from uuid import UUID
@@ -19,6 +20,8 @@ from agentic_librarian.db.models import User
 from agentic_librarian.db.session import DatabaseManager
 from fastapi import Header, HTTPException
 from firebase_admin import auth as firebase_auth
+
+logger = logging.getLogger(__name__)
 
 db_manager = DatabaseManager()
 
@@ -68,9 +71,24 @@ async def get_current_user(authorization: str | None = Header(None)) -> Authenti
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="Missing bearer token.")
     token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
     try:
         decoded = _verify_token(token)
-    except Exception as e:  # firebase-admin raises a family of InvalidIdTokenError subclasses
+    except (ValueError, firebase_auth.InvalidIdTokenError) as e:
+        # ExpiredIdTokenError/RevokedIdTokenError subclass InvalidIdTokenError;
+        # ValueError covers malformed token strings. Log the cause — FastAPI does
+        # not surface HTTPException.__cause__ anywhere.
+        logger.info("token verification rejected: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=401, detail="Invalid or expired credentials.") from e
+    except firebase_auth.CertificateFetchError as e:
+        # Google's public-cert fetch failed — an OUR-SIDE outage, not the user's
+        # credentials. 503 keeps the 2am pager signal honest (T5 review).
+        logger.warning("certificate fetch failed during token verification: %s", e)
+        raise HTTPException(status_code=503, detail="Authentication service unavailable.") from e
+    except Exception as e:
+        # Unknown failure (ADC misconfig, SDK surprise): fail CLOSED but loudly.
+        logger.exception("unexpected token verification failure")
         raise HTTPException(status_code=401, detail="Invalid or expired credentials.") from e
 
     uid = decoded["uid"]
@@ -94,6 +112,9 @@ async def get_current_user(authorization: str | None = Header(None)) -> Authenti
                 raise HTTPException(status_code=403, detail="This account has not been invited.")
             if not email or not email_verified:
                 raise HTTPException(status_code=403, detail="A verified email address is required to sign up.")
+            # Known accepted race (friends-scale): two concurrent first requests can
+            # both reach this insert; unique(email) 500s one and the retry resolves
+            # via the uid lookup. Revisit if open signup ever sees real concurrency.
             user = User(email=email, firebase_uid=uid, display_name=decoded.get("name"))
             session.add(user)
             session.flush()
