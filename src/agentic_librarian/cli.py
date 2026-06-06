@@ -21,6 +21,14 @@ def _parse_args(argv=None):
     parser.add_argument("--user-id", default="local", help="user id for sessions and history (default: local)")
     parser.add_argument("--quiet", action="store_true", help="suppress the key-event trace")
     parser.add_argument("--no-mlflow", action="store_true", help="disable MLflow conversation capture")
+    subparsers = parser.add_subparsers(dest="command")
+    add_parser = subparsers.add_parser("add", help="add one book to your reading history (no LLM involved)")
+    add_parser.add_argument("title", help="book title")
+    add_parser.add_argument("--author", required=True, help="author name")
+    add_parser.add_argument("--date", default=None, help="completion date YYYY-MM-DD (default: today)")
+    add_parser.add_argument("--rating", type=int, default=None, help="rating 1-5")
+    add_parser.add_argument("--format", default="ebook", help="edition format (default: ebook)")
+    add_parser.add_argument("--notes", default=None, help="free-text notes")
     return parser.parse_args(argv)
 
 
@@ -32,6 +40,8 @@ def _model_label(backend_name: str) -> str:
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+    if getattr(args, "command", None) == "add":
+        return _run_add(args)
     if args.backend:
         os.environ["AGENT_BACKEND"] = args.backend
     try:
@@ -50,6 +60,25 @@ def main(argv=None) -> int:
     if args.once:
         return _run_once(backend, args, recorder)
     return _run_repl(backend, args, recorder)
+
+
+def _run_add(args) -> int:
+    """Deterministic single-title import — calls the validated MCP tool directly (no LLM,
+    no recorder; the tool itself runs enrichment, which can take a minute or two)."""
+    # Lazy import: the MCP server module pulls in the DB/scout stack, which the REPL
+    # path loads via the backends instead.
+    from agentic_librarian.mcp.server import add_book_to_history
+
+    result = add_book_to_history(
+        title=args.title,
+        author=args.author,
+        date_completed=args.date,
+        rating=args.rating,
+        format=args.format,
+        notes=args.notes,
+    )
+    print(result)
+    return 1 if result.startswith("Error") else 0
 
 
 def _run_once(backend, args, recorder) -> int:

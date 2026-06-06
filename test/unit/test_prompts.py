@@ -79,3 +79,19 @@ def test_librarian_confirms_history_writes():
     text = prompts.LIBRARIAN_INSTRUCTION
     assert "CONFIRM HISTORY WRITES" in text
     assert "confirmation question" in text
+
+
+def test_librarian_has_the_import_flow():
+    text = prompts.LIBRARIAN_INSTRUCTION
+    assert "IMPORT" in text
+    assert "add_book_to_history" in text
+    assert "defaults to today" in text
+    assert "minute or two" in text  # sets latency expectations before enrichment runs
+
+
+def test_confirm_clause_covers_the_import_tool():
+    # The CONFIRM HISTORY WRITES clause must gate BOTH history-writing tools.
+    text = prompts.LIBRARIAN_INSTRUCTION
+    confirm = text[text.index("CONFIRM HISTORY WRITES") :]
+    assert "update_reading_status" in confirm
+    assert "add_book_to_history" in confirm

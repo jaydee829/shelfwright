@@ -51,6 +51,11 @@ This file tracks important project configuration, constants, and environment det
 - **Chronological Density**: The system assumes that raw CSV rows are chronologically clustered.
 - **Year Inference**: Dates missing a year (e.g., `4-Jan`) are contextually inferred from the nearest unambiguous date (e.g., `1/7/2020`) using forward and backward fills.
 - **Reference Date**: If no contextual year is found, the system defaults to the current year.
+- **History source of truth (2026-06-05)**: the DATABASE. Single-title adds happen via
+  `add_book_to_history` (conversationally or `librarian add`) and do NOT update the
+  DVC-tracked CSVs — accepted drift; `pg_dump` snapshots are the backup. Bulk imports
+  still go through the CSV/Dagster path. Reading history is a log of READ EVENTS: a
+  re-read inserts a new row (re-read count = rows per work).
 
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.

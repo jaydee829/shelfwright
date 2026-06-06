@@ -3,7 +3,16 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
-from agentic_librarian.db.models import Author, ReadingHistory, Suggestions, Trope, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import (
+    Author,
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Trope,
+    Work,
+    WorkContributor,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server as mcp_server
 from agentic_librarian.mcp.server import (
@@ -210,3 +219,121 @@ def test_update_reading_status_validates_title_author_shape(db_url):
     assert "Error" in mcp_server.update_reading_status(title="  ", author="A", status="read")
     assert "Error" in mcp_server.update_reading_status(title="T", author="", status="read")
     assert "Error" in mcp_server.update_reading_status(title="x" * 501, author="A", status="read")
+
+
+# ---------------------------------------------------------------------------
+# add_book_to_history tests
+# ---------------------------------------------------------------------------
+
+
+def _stub_enrich(monkeypatch, work_id):
+    """add_book_to_history delegates get-or-create+enrichment to enrich_and_persist_work
+    (same module global) — stub it so tests are offline-deterministic."""
+    monkeypatch.setattr(mcp_server, "enrich_and_persist_work", lambda **kw: work_id)
+
+
+@pytest.mark.db_integration
+def test_add_book_logs_a_read_event(db_url, seeded_work_id, monkeypatch):
+    _stub_enrich(monkeypatch, seeded_work_id)
+    out = mcp_server.add_book_to_history(
+        title="Seeded Book", author="Seeded Author", date_completed="2026-06-01", rating=5, notes="great"
+    )
+    assert "Added 'Seeded Book'" in out and "read #1" in out
+    with mcp_server.db_manager.get_session() as session:
+        rows = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == UUID(seeded_work_id)).all()
+        assert len(rows) == 1
+        assert rows[0].date_completed.isoformat() == "2026-06-01"
+        assert rows[0].user_rating == 5
+        assert rows[0].user_notes == "great"
+
+
+@pytest.mark.db_integration
+def test_add_book_same_date_duplicate_noops_but_new_date_is_a_reread(db_url, seeded_work_id, monkeypatch):
+    _stub_enrich(monkeypatch, seeded_work_id)
+    mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author", date_completed="2024-01-01")
+    # Same work + same date -> duplicate guard, no second row.
+    out = mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author", date_completed="2024-01-01")
+    assert "already logged" in out
+    # Different date -> a RE-READ: new row, original untouched, message counts reads.
+    out = mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author", date_completed="2026-05-01")
+    assert "read #2" in out
+    with mcp_server.db_manager.get_session() as session:
+        dates = sorted(
+            r.date_completed.isoformat()
+            for r in session.query(ReadingHistory).join(Edition).filter(Edition.work_id == UUID(seeded_work_id))
+        )
+        assert dates == ["2024-01-01", "2026-05-01"]
+
+
+@pytest.mark.db_integration
+def test_add_book_defaults_date_to_today(db_url, seeded_work_id, monkeypatch):
+    from datetime import date as _date
+
+    _stub_enrich(monkeypatch, seeded_work_id)
+    out = mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author")
+    assert "Added" in out
+    with mcp_server.db_manager.get_session() as session:
+        row = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == UUID(seeded_work_id)).one()
+        assert row.date_completed == _date.today()
+
+
+@pytest.mark.db_integration
+def test_add_book_rejections_write_nothing(db_url, monkeypatch):
+    # Validation precedes enrichment: a call that reaches enrich here is a failure.
+    monkeypatch.setattr(
+        mcp_server, "enrich_and_persist_work", lambda **kw: pytest.fail("enrich must not run on invalid input")
+    )
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    assert "Error" in mcp_server.add_book_to_history(title="  ", author="A")
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", date_completed="June 1st")
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", date_completed="2999-01-01")
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", rating=0)
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", rating=6)
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", rating=3.5)  # type: ignore[arg-type]
+    assert "Error" in mcp_server.add_book_to_history(title="T", author="A", rating=True)  # type: ignore[arg-type]
+    with mcp_server.db_manager.get_session() as session:
+        assert session.query(ReadingHistory).count() == 0  # nothing written
+
+
+@pytest.mark.db_integration
+def test_add_book_unresolvable_title_errors(db_url, monkeypatch):
+    monkeypatch.setattr(mcp_server, "enrich_and_persist_work", lambda **kw: None)
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+    out = mcp_server.add_book_to_history(title="Definitely Fake", author="Nobody")
+    assert "Error" in out and "could not resolve" in out
+
+
+@pytest.mark.db_integration
+def test_duplicate_noop_does_not_create_a_dangling_edition(db_url, seeded_work_id, monkeypatch):
+    # Gemini (PR #37): the duplicate guard must run BEFORE edition get-or-create, otherwise
+    # a duplicate add with a NEW format commits an empty Edition despite writing no history.
+    _stub_enrich(monkeypatch, seeded_work_id)
+    mcp_server.add_book_to_history(
+        title="Seeded Book", author="Seeded Author", date_completed="2024-01-01", format="ebook"
+    )
+    with mcp_server.db_manager.get_session() as session:
+        editions_before = session.query(Edition).filter_by(work_id=UUID(seeded_work_id)).count()
+    out = mcp_server.add_book_to_history(
+        title="Seeded Book", author="Seeded Author", date_completed="2024-01-01", format="hardcover"
+    )
+    assert "already logged" in out
+    with mcp_server.db_manager.get_session() as session:
+        assert session.query(Edition).filter_by(work_id=UUID(seeded_work_id)).count() == editions_before
+
+
+@pytest.mark.db_integration
+def test_check_reading_history_uses_latest_read(db_url, seeded_work_id, monkeypatch):
+    # Pins the read-event model's guarantee: an old read + a recent re-read means
+    # the work is NOT a re-read candidate (server.py already orders by date desc —
+    # this test freezes that property).
+    _stub_enrich(monkeypatch, seeded_work_id)
+    mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author", date_completed="2020-01-01")
+    mcp_server.add_book_to_history(title="Seeded Book", author="Seeded Author", date_completed="2026-06-01")
+    with mcp_server.db_manager.get_session() as session:
+        work = session.get(Work, UUID(seeded_work_id))
+        title, author = work.title, work.contributors[0].author.name
+    result = mcp_server.check_reading_history(title=title, author=author)
+    assert result["date_completed"] == "2026-06-01"
+    assert result["is_re_read_candidate"] is False

@@ -88,6 +88,22 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
         _schema({"title": _STR, "author": _STR, "format": _STR}, required=["title", "author"]),
         mcp_server.enrich_and_persist_work,
     ),
+    (
+        "add_book_to_history",
+        "Add ONE book to the reading history (enrich first if needed); a re-read with a new date adds a new read event.",
+        _schema(
+            {
+                "title": _STR,
+                "author": _STR,
+                "date_completed": _STR,
+                "rating": _INT,
+                "format": _STR,
+                "notes": _STR,
+            },
+            required=["title", "author"],
+        ),
+        mcp_server.add_book_to_history,
+    ),
 ]
 
 LIBRARIAN_TOOL_NAMES = [f"mcp__{_SERVER_NAME}__{short}" for short, _, _, _ in _TOOL_SCHEMAS]

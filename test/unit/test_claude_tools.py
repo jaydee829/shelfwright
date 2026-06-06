@@ -26,3 +26,9 @@ def test_enrich_tool_is_exposed():
     from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES
 
     assert "mcp__librarian__enrich_and_persist_work" in LIBRARIAN_TOOL_NAMES
+
+
+def test_add_book_tool_is_exposed():
+    from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES
+
+    assert "mcp__librarian__add_book_to_history" in LIBRARIAN_TOOL_NAMES

@@ -9,6 +9,7 @@ WRITE_TOOLS = {
     "update_reading_status",
     "update_suggestion_status",
     "enrich_and_persist_work",
+    "add_book_to_history",
 }
 
 

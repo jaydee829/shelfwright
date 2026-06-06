@@ -182,6 +182,20 @@ This file tracks work history and ticket references.
     - Invocation in the app container: `python -m agentic_librarian.cli` always works; the `librarian` script is installed at `/home/appuser/.local/bin/librarian` (not on default exec PATH — add to PATH in Dockerfile/compose as a follow-up, or rebuild the image so the build-time editable install picks up [project.scripts]).
     - Known minor follow-ups from final review: no banner on `--once`; consider MLFLOW_HTTP_REQUEST_TIMEOUT in compose.
 
+### 2026-06-05 - IMP-028: Single-title import (spec/single-title-import)
+- **Status**: Merged pending live verification
+- **Description**: `add_book_to_history` MCP tool (new-row-per-read model: re-reads
+  insert read events; same-date duplicate guard; read count derived from row count) +
+  conversational IMPORT flow on both Librarians + `librarian add` CLI subcommand.
+  date_completed defaults to today. Spec: docs/superpowers/specs/2026-06-05-single-title-import-design.md.
+- **URL**: N/A (PR pending)
+- **Notes**:
+    - **Phase-4 front end (logged per user decision)**: the web UI's add form must
+      AUTO-FILL the completion-date field with today (visible + editable) rather than
+      hiding the default — the default stays explicit to the user.
+    - CSV drift accepted: DB is the history source of truth as of 2026-06-05 (see
+      key_facts.md); bulk imports remain CSV/Dagster.
+
 ### 2026-06-05 - TUNE-027: Conversation tuning round (spec/conversation-tuning)
 - **Status**: In Progress (live verification pending)
 - **Description**: Explorer search budget (prompt) + maxTurns=25 guard; verification-by-enrichment (enrich_and_persist_work exposed to BOTH conversational Librarians; null = drop candidate, continue); internal-first routing with novelty triggers; series rule in critic+librarians; analyst on haiku; elapsed-seconds event trace. Spec: docs/superpowers/specs/2026-06-05-conversation-tuning-design.md.

@@ -53,3 +53,12 @@ def test_adk_librarian_carries_trust_boundary_and_confirm():
     text = mesh["librarian"].instruction
     assert "TRUST BOUNDARY" in text
     assert "CONFIRM HISTORY WRITES" in text
+
+
+def test_adk_librarian_has_the_import_tool_and_flow():
+    mesh = create_agent_mesh()
+    assert "add_book_to_history" in [t.name for t in mesh["librarian"].tools]
+    text = mesh["librarian"].instruction
+    assert "add_book_to_history" in text
+    confirm = text[text.index("CONFIRM HISTORY WRITES") :]
+    assert "add_book_to_history" in confirm
