@@ -57,6 +57,25 @@ This file tracks important project configuration, constants, and environment det
   still go through the CSV/Dagster path. Reading history is a log of READ EVENTS: a
   re-read inserts a new row (re-read count = rows per work).
 
+## Production (GCP — Lift 0, live 2026-06-06)
+- **Project**: `agentic-librarian-prod` (us-central1); ADR-047; runbook
+  `docs/runbooks/gcp-walking-skeleton.md`; provisioning scripts in `infra/`.
+- **Service URL**: <https://librarian-api-hnucndzntq-uc.a.run.app> — Cloud Run
+  `librarian-api`, IAM-gated (`--no-allow-unauthenticated`); call with
+  `Authorization: Bearer $(gcloud auth print-identity-token)` or
+  `gcloud run services proxy librarian-api --region us-central1`.
+- **Endpoints**: `/health`, `/health/db`, `/history` (unpaginated, INF-029), `/works`
+  (paginated, limit 1–200).
+- **Database**: Cloud SQL Postgres 16 `librarian-sql` (db-f1-micro, 10GB SSD) +
+  pgvector; restored 2026-06-06 from `agentic_librarian_FINAL_20260605_014912.sql.gz`
+  and verified (326 works / 335 editions / 331 reading_history / 230 authors; 556
+  tropes + 508 styles fully embedded). App connects via the `librarian-db-url` secret
+  (full `DATABASE_URL`, Cloud SQL unix socket).
+- **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
+  `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
+  the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.
+- **Cost guardrail**: $25/mo budget, email alerts at 50/90/100% (~$12–16/mo expected).
+
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.
 - **DO NOT** store PII.
