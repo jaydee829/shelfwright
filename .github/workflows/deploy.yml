@@ -1,0 +1,121 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "Dockerfile.api"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # WIF: exchange the GitHub OIDC token for GCP credentials
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: librarian
+          POSTGRES_PASSWORD: librarian_secret_password
+          POSTGRES_DB: agentic_librarian
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/librarian/librarian-api:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev,claude]"
+
+      - name: Run tests (same gate PRs face)
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_USER: librarian
+          POSTGRES_PASSWORD: librarian_secret_password
+          POSTGRES_DB: agentic_librarian
+          GOOGLE_SEARCH_API_KEY: dummy-key-for-construction
+        run: |
+          pytest -m "not api_dependent and not slow"
+
+      - name: Build production image
+        run: docker build -f Dockerfile.api -t "$IMAGE" .
+
+      - name: Smoke-test image in runner (broken images never reach the registry)
+        run: |
+          docker run --rm -d -p 8080:8080 -e DATABASE_URL=postgresql://x:x@nohost:5432/x --name api-smoke "$IMAGE"
+          sleep 5
+          curl -fsS http://localhost:8080/health
+          docker rm -f api-smoke
+
+      - id: auth
+        name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Push image
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          docker push "$IMAGE"
+
+      - id: deploy
+        name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: librarian-api
+          region: us-central1
+          image: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/librarian/librarian-api:${{ github.sha }}
+          flags: >-
+            --no-allow-unauthenticated
+            --service-account=librarian-api-runtime@${{ vars.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+            --add-cloudsql-instances=${{ vars.GCP_CLOUDSQL_CONNECTION }}
+            --set-secrets=DATABASE_URL=librarian-db-url:latest
+            --max-instances=1
+            --memory=512Mi
+
+      - id: smoke-token
+        name: Mint identity token for the service
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+          token_format: id_token
+          id_token_audience: ${{ steps.deploy.outputs.url }}
+          id_token_include_email: true
+
+      - name: Live smoke test (/health and /health/db)
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          TOKEN="${{ steps.smoke-token.outputs.id_token }}"
+          curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health"
+          BODY="$(curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health/db")"
+          echo "${BODY}"
+          echo "${BODY}" | grep -q '"status":"connected"' || { echo "DB health check failed"; exit 1; }
