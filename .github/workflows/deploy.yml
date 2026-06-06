@@ -8,6 +8,7 @@ on:
       - "pyproject.toml"
       - "Dockerfile.api"
       - ".github/workflows/deploy.yml"
+      - ".dockerignore"
   workflow_dispatch:
 
 concurrency:
@@ -17,6 +18,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.ref == 'refs/heads/main'   # dispatch-from-branch must not deploy prod
     permissions:
       contents: read
       id-token: write   # WIF: exchange the GitHub OIDC token for GCP credentials
@@ -37,6 +40,18 @@ jobs:
     env:
       IMAGE: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/librarian/librarian-api:${{ github.sha }}
     steps:
+      - name: Verify required repo Variables are set
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA }}
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          GCP_CLOUDSQL_CONNECTION: ${{ vars.GCP_CLOUDSQL_CONNECTION }}
+        run: |
+          : "${GCP_WIF_PROVIDER:?set repo Variable GCP_WIF_PROVIDER (infra/05-iam-wif.sh prints it)}"
+          : "${GCP_DEPLOYER_SA:?set repo Variable GCP_DEPLOYER_SA}"
+          : "${GCP_PROJECT_ID:?set repo Variable GCP_PROJECT_ID}"
+          : "${GCP_CLOUDSQL_CONNECTION:?set repo Variable GCP_CLOUDSQL_CONNECTION}"
+
       - uses: actions/checkout@v4
 
       - name: Set up Python
@@ -50,7 +65,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install ".[dev,claude]"
 
-      - name: Run tests (same gate PRs face)
+      - name: Run tests (fast suite; lint.yml covers pre-commit)
         env:
           POSTGRES_HOST: localhost
           POSTGRES_PORT: 5432
@@ -67,8 +82,12 @@ jobs:
       - name: Smoke-test image in runner (broken images never reach the registry)
         run: |
           docker run --rm -d -p 8080:8080 -e DATABASE_URL=postgresql://x:x@nohost:5432/x --name api-smoke "$IMAGE"
-          sleep 5
-          curl -fsS http://localhost:8080/health
+          ok=""
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/health; then ok=1; break; fi
+            sleep 1
+          done
+          if [ -z "$ok" ]; then echo "::error::/health never came up"; docker logs api-smoke; docker rm -f api-smoke; exit 1; fi
           docker rm -f api-smoke
 
       - id: auth
@@ -90,6 +109,7 @@ jobs:
         name: Deploy to Cloud Run
         uses: google-github-actions/deploy-cloudrun@v2
         with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
           service: librarian-api
           region: us-central1
           image: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/librarian/librarian-api:${{ github.sha }}
@@ -116,6 +136,6 @@ jobs:
           URL="${{ steps.deploy.outputs.url }}"
           TOKEN="${{ steps.smoke-token.outputs.id_token }}"
           curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health"
-          BODY="$(curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health/db")"
-          echo "${BODY}"
-          echo "${BODY}" | grep -q '"status":"connected"' || { echo "DB health check failed"; exit 1; }
+          curl -fsS -H "Authorization: Bearer ${TOKEN}" "${URL}/health/db" -o /dev/null \
+            || { echo "::error::/health/db failed (503 = DB unreachable; body withheld from logs)"; exit 1; }
+          echo "Live smoke passed: /health and /health/db green."
