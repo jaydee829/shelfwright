@@ -39,7 +39,7 @@ def main() -> int:
     # SDK needs a service account to sign AS via the IAM Credentials API (live-run
     # lesson 2026-06-07): set FIREBASE_SERVICE_ACCOUNT_ID to the firebase-adminsdk SA
     # email and grant yourself roles/iam.serviceAccountTokenCreator on it.
-    sa_id = os.environ.get("FIREBASE_SERVICE_ACCOUNT_ID")
+    sa_id = os.environ.get("FIREBASE_SERVICE_ACCOUNT_ID", "").strip()
     firebase_admin.initialize_app(options={"serviceAccountId": sa_id} if sa_id else None)
     try:
         user = auth.get_user_by_email(email)
