@@ -1,3 +1,4 @@
+from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import (
     Edition,
     ReadingHistory,
@@ -7,13 +8,16 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
 app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()
+# NOTE: api/auth.py owns a second lazy DatabaseManager (two pools). Acceptable at
+# Lift 1 scale; consolidate into one shared manager when Lift 2 wires the chat
+# endpoint (T5 review).
 
 
 @app.get("/health")
@@ -22,7 +26,7 @@ def health_check():
 
 
 @app.get("/health/db")
-def db_health_check():
+def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
     try:
         with db_manager.get_session() as session:
             session.execute(text("SELECT 1"))
@@ -34,13 +38,14 @@ def db_health_check():
 
 
 @app.get("/history")
-def get_history():
+def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
     with db_manager.get_session() as session:
         # Query reading history with eager loading for efficiency
         history_entries = (
             session.query(ReadingHistory)
             .join(Edition)
             .join(Work)
+            .filter(ReadingHistory.user_id == user.id)  # my history, not the commons (ADR-048)
             .options(
                 joinedload(ReadingHistory.edition)
                 .joinedload(Edition.work)
@@ -69,7 +74,11 @@ def get_history():
 
 
 @app.get("/works")
-def get_works(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+def get_works(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+):
     """Enriched catalog listing — the walking skeleton's payload (Lift 0)."""
     with db_manager.get_session() as session:
         # selectinload for the collections: joinedload + LIMIT mis-paginates

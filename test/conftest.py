@@ -66,14 +66,21 @@ def _create_test_database():
             conn.execute(text(f'CREATE DATABASE "{db_name}"'))
     server_engine.dispose()
 
-    # 2. Ensure the pgvector extension and ORM schema exist in the test database.
-    from agentic_librarian.db.models import Base
+    # 2. Build the schema via Alembic (Lift 1, ADR-048): every CI run proves the
+    #    migrations construct a correct schema from scratch. (CREATE EXTENSION also
+    #    lives in the baseline migration; doing it here too is harmless and keeps
+    #    this fixture self-sufficient.)
+    from alembic import command
+    from alembic.config import Config
 
     engine = create_engine(_test_db_url())
     with engine.begin() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.create_all(engine)
     engine.dispose()
+
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", _test_db_url())
+    command.upgrade(cfg, "head")
     yield
 
 
@@ -95,12 +102,33 @@ def _clean_db_tables(request):
     tables = ", ".join(f'"{t.name}"' for t in sorted_tables)
     with engine.begin() as conn:
         conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        # Reseed the default user (Migration 0002 inserts it; TRUNCATE removed it).
+        from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
+
+        conn.execute(
+            text(
+                "INSERT INTO users (id, email, display_name, created_at) "
+                "VALUES (:id, :email, 'Justin', timezone('utc', now()))"
+            ),
+            {"id": str(DEFAULT_USER_ID), "email": DEFAULT_USER_EMAIL},
+        )
     engine.dispose()
     yield
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "db_integration: mark test as requiring a live database (e.g. Docker)")
+
+
+@pytest.fixture(autouse=True)
+def _default_user_context():
+    """Every test runs as the default user (Lift 1, ADR-048) — mirroring the CLI/dev
+    entrypoints. Isolation tests use as_user(other); fail-closed tests set None."""
+    from agentic_librarian.core.user_context import DEFAULT_USER_ID, current_user_id
+
+    token = current_user_id.set(DEFAULT_USER_ID)
+    yield
+    current_user_id.reset(token)
 
 
 def pytest_collection_modifyitems(config, items):

@@ -7,10 +7,13 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from uuid import UUID, uuid4
 
 from agentic_librarian.agents import prompts
 from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES, build_librarian_mcp_server
 from agentic_librarian.agents.candidates import coerce_schema_value, extract_candidate_ids, extract_discovery_pairs
+from agentic_librarian.core.usage import record_llm_call
+from agentic_librarian.core.user_context import current_user_id
 from agentic_librarian.mcp.server import enrich_and_persist_work, log_suggestion
 from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, query
 
@@ -19,7 +22,15 @@ def _model() -> str:
     return os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 
-async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_json: bool, mcp_server) -> object:
+async def _ask(
+    prompt: str,
+    *,
+    system: str,
+    allowed_tools: list[str],
+    expect_json: bool,
+    mcp_server,
+    conversation_id: UUID | None = None,
+) -> object:
     """Run one query() turn. Returns parsed dict (expect_json=True) or raw result text (expect_json=False).
     `mcp_server` is the prebuilt in-process librarian server (built once per run and reused)."""
     options = ClaudeAgentOptions(
@@ -37,6 +48,15 @@ async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_jso
         result_val = getattr(message, "result", None)
         if result_val and isinstance(result_val, str):
             text = result_val
+            usage = getattr(message, "usage", None)
+            if isinstance(usage, dict):
+                record_llm_call(
+                    vendor="anthropic",
+                    model=_model(),
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
+                    conversation_id=conversation_id,
+                )
     if expect_json:
         # Normalize to a dict regardless of how the result arrived (dict / pydantic model / JSON text).
         return coerce_schema_value(structured if structured is not None else text)
@@ -44,6 +64,7 @@ async def _ask(prompt: str, *, system: str, allowed_tools: list[str], expect_jso
 
 
 async def _arun(prompt: str) -> str:
+    conversation_id = uuid4()
     state: dict = {}
     librarian = build_librarian_mcp_server()  # in-process; built once, reused across the steps
     state["targets"] = await _ask(
@@ -53,6 +74,7 @@ async def _arun(prompt: str) -> str:
         allowed_tools=["mcp__librarian__get_user_trope_preferences"],
         expect_json=True,
         mcp_server=librarian,
+        conversation_id=conversation_id,
     )
     candidate_ids = extract_candidate_ids(state)
     state["discoveries"] = await _ask(
@@ -65,6 +87,7 @@ async def _arun(prompt: str) -> str:
         allowed_tools=["WebSearch"],
         expect_json=True,
         mcp_server=librarian,
+        conversation_id=conversation_id,
     )
     for title, author in extract_discovery_pairs(state):
         wid = await asyncio.to_thread(enrich_and_persist_work, title, author)
@@ -85,6 +108,7 @@ async def _arun(prompt: str) -> str:
         ],
         expect_json=False,
         mcp_server=librarian,
+        conversation_id=conversation_id,
     )
     recommendation = recommendation or "(no recommendation)"
     if recommendation != "(no recommendation)" and candidate_ids:
@@ -152,6 +176,13 @@ class ClaudeConversation:
     def __init__(self, user_id: str = "local", on_event=None, client_factory=None):
         self.user_id = user_id
         self.on_event = on_event
+        self.conversation_id = uuid4()
+        # Identity for the background loop thread (ADR-048): the trusted entrypoint set
+        # the user context on THIS thread; capture it now and re-apply per turn via
+        # _with_user. Explicit capture (not implicit context propagation through
+        # run_coroutine_threadsafe) so the guarantee is visible and testable; None
+        # stays None, preserving fail-closed on the loop thread.
+        self._data_user_id = current_user_id.get()
         self._client_factory = client_factory or self._default_client
         self._client = None
         self._closed = False
@@ -174,7 +205,16 @@ class ClaudeConversation:
     def _run(self, coro):
         # Blocks the calling (REPL) thread until the turn completes; Ctrl-C in the main
         # thread interrupts the wait (the CLI maps it to "turn aborted").
-        return asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+        return asyncio.run_coroutine_threadsafe(self._with_user(coro), self._loop).result()
+
+    async def _with_user(self, coro):
+        """Re-apply the captured identity on the loop thread for this coroutine — tools
+        and the usage recorder read it from context there (ADR-048)."""
+        token = current_user_id.set(self._data_user_id)
+        try:
+            return await coro
+        finally:
+            current_user_id.reset(token)
 
     async def _connect(self):
         self._client = self._client_factory()
@@ -205,6 +245,19 @@ class ClaudeConversation:
             result_val = getattr(msg, "result", None)
             if result_val and isinstance(result_val, str):
                 result_text = result_val
+                usage = getattr(msg, "usage", None)
+                # ResultMessage.usage is the TURN AGGREGATE attributed to _model();
+                # subagent (haiku) tokens land under the librarian's model label, and
+                # cache_read/cache_creation tokens are excluded. Fine for Lift 1
+                # observability; Lift 3 billing should iterate model_usage instead.
+                if isinstance(usage, dict):
+                    record_llm_call(
+                        vendor="anthropic",
+                        model=_model(),
+                        input_tokens=usage.get("input_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
+                        conversation_id=self.conversation_id,
+                    )
             for block in getattr(msg, "content", None) or []:
                 block_text = getattr(block, "text", None)
                 if isinstance(block_text, str):

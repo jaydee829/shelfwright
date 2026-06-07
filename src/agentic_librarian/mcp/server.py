@@ -4,6 +4,7 @@ from datetime import date
 from uuid import UUID
 
 import numpy as np
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -181,11 +182,12 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     Pulls previous recommendations that were never read or ignored,
     ranked by similarity to current target vibes.
     """
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
         query = (
             session.query(Suggestions)
-            .filter(Suggestions.status == "Suggested")
+            .filter(Suggestions.status == "Suggested", Suggestions.user_id == user_id)
             .options(
                 joinedload(Suggestions.work).options(
                     selectinload(Work.tropes).joinedload(WorkTrope.trope),
@@ -270,6 +272,7 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
 @mcp.tool()
 def check_reading_history(title: str, author: str) -> dict:
     """Checks if a book has been read and determines re-read eligibility."""
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         entry = (
             session.query(ReadingHistory)
@@ -277,6 +280,7 @@ def check_reading_history(title: str, author: str) -> dict:
             .join(Work)
             .join(WorkContributor)
             .join(Author)
+            .filter(ReadingHistory.user_id == user_id)
             .filter(Work.title == title)
             .filter(Author.name == author)
             .order_by(ReadingHistory.date_completed.desc())
@@ -320,6 +324,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
         # false-success). Reject honestly instead (SEC-002).
         return f"Error: status must be one of {', '.join(_READING_STATUSES)}; got {status!r}."
     notes = notes[:2000] if isinstance(notes, str) else None
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             # Find the work/edition first
@@ -344,6 +349,7 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
             if canonical == "read":
                 history = ReadingHistory(
                     edition=edition,
+                    user_id=user_id,
                     date_completed=date.today(),  # Placeholder for manual addition
                     user_notes=notes,
                 )
@@ -387,6 +393,7 @@ def add_book_to_history(
         return f"Error: rating must be an integer from 1 to 5; got {rating!r}."
     format = (format or "ebook")[:50]
     notes = notes[:2000] if isinstance(notes, str) else None
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
 
     work_id = enrich_and_persist_work(title=title, author=author, format=format)
     if work_id is None:
@@ -397,7 +404,12 @@ def add_book_to_history(
             uuid_obj = _parse_uuid(work_id)
             # Duplicate guard FIRST (PR #37 review): on the no-op path nothing may be
             # created — not even an Edition (the session commits on clean exit).
-            prior_reads = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == uuid_obj).all()
+            prior_reads = (
+                session.query(ReadingHistory)
+                .join(Edition)
+                .filter(Edition.work_id == uuid_obj, ReadingHistory.user_id == user_id)
+                .all()
+            )
             if any(r.date_completed == completed for r in prior_reads):
                 return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
             edition = session.query(Edition).filter_by(work_id=uuid_obj, format=format).first()
@@ -408,6 +420,7 @@ def add_book_to_history(
             session.add(
                 ReadingHistory(
                     edition_id=edition.id,
+                    user_id=user_id,
                     date_completed=completed,
                     user_rating=rating,
                     user_notes=notes,
@@ -425,6 +438,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
     uuid_obj = _parse_uuid(work_id)
     if uuid_obj is None:
         return f"Error: work_id must be a valid UUID, got {work_id!r}."
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             # SEC-002 referent check: a suggestion must point at a real catalog work.
@@ -432,6 +446,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
                 return f"Error: no work exists with id {work_id}."
             suggestion = Suggestions(
                 work_id=uuid_obj,
+                user_id=user_id,
                 context=(context or "")[:200],
                 justification=(justification or "")[:2000],
                 conversation_id=_parse_uuid(conversation_id),
@@ -459,11 +474,12 @@ def update_suggestion_status(work_id: str, status: str) -> str:
     canonical = _normalize_status(status, _SUGGESTION_STATUSES)
     if canonical is None:
         return f"Error: status must be one of {', '.join(_SUGGESTION_STATUSES)}; got {status!r}."
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
             suggestion = (
                 session.query(Suggestions)
-                .filter_by(work_id=uuid_obj, status="Suggested")
+                .filter_by(work_id=uuid_obj, status="Suggested", user_id=user_id)
                 .order_by(Suggestions.suggested_at.desc())
                 .first()
             )
@@ -480,6 +496,7 @@ def update_suggestion_status(work_id: str, status: str) -> str:
 @mcp.tool()
 def get_user_trope_preferences(limit: int = 20) -> list[str]:
     """Aggregates frequent tropes from user's history."""
+    user_id = get_required_user_id()
     with db_manager.get_session() as session:
         # Find tropes present in books read by user
         results = (
@@ -488,6 +505,7 @@ def get_user_trope_preferences(limit: int = 20) -> list[str]:
             .join(Work)
             .join(Edition)
             .join(ReadingHistory)
+            .filter(ReadingHistory.user_id == user_id)
             .group_by(Trope.name)
             .order_by(func.count(WorkTrope.work_id).desc())
             .limit(limit)

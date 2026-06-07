@@ -58,4 +58,4 @@ jobs:
           # (embeddings are patched in tests, so no network call is made).
           GOOGLE_SEARCH_API_KEY: dummy-key-for-construction
         run: |
-          pytest -m "not api_dependent and not slow"
+          pytest -m "not api_dependent and not slow and not live"

@@ -64,13 +64,15 @@ This file tracks important project configuration, constants, and environment det
   `librarian-api`, IAM-gated (`--no-allow-unauthenticated`); call with
   `Authorization: Bearer $(gcloud auth print-identity-token)` or
   `gcloud run services proxy librarian-api --region us-central1`.
-- **Endpoints**: `/health`, `/health/db`, `/history` (unpaginated, INF-029), `/works`
-  (paginated, limit 1–200).
+- **Endpoints**: `/health` (open); `/health/db`, `/history` (caller-scoped), `/works`
+  (shared catalog) — all Firebase-gated (Lift 1, ADR-048). `SIGNUP_MODE=invite` on the
+  service; invites via `librarian user invite <email>` (runbook
+  `docs/runbooks/lift1-multi-user-rollout.md`).
 - **Database**: Cloud SQL Postgres 16 `librarian-sql` (db-f1-micro, 10GB SSD) +
   pgvector; restored 2026-06-06 from `agentic_librarian_FINAL_20260605_014912.sql.gz`
   and verified (326 works / 335 editions / 331 reading_history / 230 authors; 556
   tropes + 508 styles fully embedded). App connects via the `librarian-db-url` secret
-  (full `DATABASE_URL`, Cloud SQL unix socket).
+  (full `DATABASE_URL`, Cloud SQL unix socket); schema managed by Alembic (Lift 1+).
 - **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
   `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.

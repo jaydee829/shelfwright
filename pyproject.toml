@@ -36,7 +36,11 @@ dependencies = [
     "psycopg2-binary>=2.9.11",
     # API surface (Lift 0 walking skeleton — served by uvicorn in the prod image)
     "fastapi>=0.115",
-    "uvicorn>=0.34"
+    "uvicorn>=0.34",
+    # Schema migrations (Lift 1, ADR-048) — env.py reuses the app's URL resolution
+    "alembic>=1.13",
+    # Firebase Auth verification (Lift 1, ADR-048) — ADC on Cloud Run, offline JWT checks
+    "firebase-admin>=6.5"
 ]
 
 [project.scripts]
@@ -135,4 +139,5 @@ markers = [
     "api_dependent: tests that require an external API key and should be skipped in pre-commit",
     "slow: tests that are slow to run and should be skipped for fast feedback loops",
     "integration: tests that verify components of the system integrated",
+    "live: tests against real external services (operator-run, never CI)",
 ]

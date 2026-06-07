@@ -3,10 +3,21 @@
 from unittest.mock import patch
 
 import pytest
+from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.main import app
+from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Style, Trope, Work, WorkContributor, WorkStyle, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _authed():
+    """Endpoints are auth-gated (Lift 1) — these tests exercise the data layer, so
+    inject a verified identity via FastAPI's dependency-override seam."""
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL)
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.mark.db_integration

@@ -2,11 +2,13 @@
 and expose a multi-turn conversation API (ADR-035 Spec 1, ADR-036)."""
 
 import asyncio
+import logging
 import os
 import uuid
 
 from agentic_librarian.agents.backends import get_backend
 from agentic_librarian.agents.services import create_agent_mesh
+from agentic_librarian.core.usage import record_llm_call
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -19,6 +21,8 @@ except ImportError:
     pass
 
 APP_NAME = "agentic_librarian"
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_adk_credentials() -> None:
@@ -42,6 +46,23 @@ def build_runner() -> Runner:
     )
 
 
+def _record_event_usage(event, conversation_id: uuid.UUID | None) -> None:
+    """Meter one ADK event if it carries usage (duck-typed: unit-test fakes and
+    non-LLM events simply lack usage_metadata)."""
+    # NOTE: with StreamingMode.SSE each partial event would carry usage; run_async is
+    # used in default (non-streaming) mode here — one usage-bearing event per LLM call.
+    um = getattr(event, "usage_metadata", None)
+    if um is None:
+        return
+    record_llm_call(
+        vendor="gemini",
+        model=getattr(event, "model_version", None) or os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+        input_tokens=getattr(um, "prompt_token_count", 0) or 0,
+        output_tokens=getattr(um, "candidates_token_count", 0) or 0,
+        conversation_id=conversation_id,
+    )
+
+
 class LibrarianConversation:
     """A multi-turn conversation with the Librarian. Reusing one session across
     sends is what gives the agent conversational memory (ADR-036)."""
@@ -50,6 +71,14 @@ class LibrarianConversation:
         self._runner = runner
         self.user_id = user_id
         self.session_id = session_id
+        try:
+            self.conversation_id = uuid.UUID(session_id)  # session ids are uuid4().hex
+        except (ValueError, AttributeError):
+            # A manufactured id would look joinable but join to nothing — NULL is the
+            # honest encoding for "unknown" (T8 review). Production always passes hex
+            # ids (astart_conversation); this is reachable only by hand-built callers.
+            logger.warning("session_id %r is not a UUID; usage rows will have NULL conversation_id", session_id)
+            self.conversation_id = None
         # Optional visibility hook (ADR-045): on_event(kind, detail) for ("tool", name) /
         # ("agent", author). Duck-typed event introspection so unit-test fakes keep working.
         self.on_event = on_event
@@ -61,6 +90,7 @@ class LibrarianConversation:
         async for event in self._runner.run_async(
             user_id=self.user_id, session_id=self.session_id, new_message=content
         ):
+            _record_event_usage(event, self.conversation_id)
             if self.on_event:
                 author = getattr(event, "author", None)
                 if author and author != last_author:

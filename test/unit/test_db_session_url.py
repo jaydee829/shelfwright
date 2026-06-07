@@ -62,3 +62,23 @@ def test_empty_database_url_falls_through_to_component_vars(monkeypatch):
 
     manager = DatabaseManager()
     assert manager.engine.url.host == "componenthost"
+
+
+def test_resolve_database_url_is_importable_and_resolves(monkeypatch):
+    """Alembic's env.py reuses the app's URL resolution (ADR-048) — it must be a
+    module-level function, DATABASE_URL-first, with the empty-string guard."""
+    from agentic_librarian.db.session import resolve_database_url
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@h:5/d")
+    assert resolve_database_url() == "postgresql://u:p@h:5/d"
+
+    monkeypatch.setenv("DATABASE_URL", "")  # blanked secret falls through to components
+    monkeypatch.setenv("POSTGRES_USER", "alice")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "pw")
+    monkeypatch.setenv("POSTGRES_HOST", "dbhost")
+    monkeypatch.setenv("POSTGRES_PORT", "5433")
+    monkeypatch.setenv("POSTGRES_DB", "mydb")
+    assert resolve_database_url() == "postgresql://alice:pw@dbhost:5433/mydb"
+
+    # explicit argument wins over everything
+    assert resolve_database_url("postgresql://x:y@z:1/q") == "postgresql://x:y@z:1/q"

@@ -2,7 +2,7 @@ from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer, String, Table, Text
+from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -161,6 +161,7 @@ class ReadingHistory(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     edition_id: Mapped[UUID] = mapped_column(ForeignKey("editions.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     date_started: Mapped[date | None] = mapped_column(Date, nullable=True)
     date_completed: Mapped[date] = mapped_column(Date, nullable=False)
     user_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -174,6 +175,7 @@ class Suggestions(Base):
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     suggested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -181,3 +183,51 @@ class Suggestions(Base):
     conversation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     work: Mapped["Work"] = relationship(back_populates="suggestions")
+
+
+class User(Base):
+    """An account holder (Lift 1, ADR-048). The catalog is communal; reading_history,
+    suggestions, and usage are per-user. firebase_uid is NULL for invited users who
+    have never signed in (claim-by-email links it on first verified sign-in)."""
+
+    __tablename__ = "users"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # lowercased; the invite key
+    firebase_uid: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+
+class Usage(Base):
+    """One row per LLM call (Lift 1, ADR-048) — raw material for Lift 3 quotas/billing.
+    key_source is 'app' until Lift 3's BYOK routing exists."""
+
+    __tablename__ = "usage"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    key_source: Mapped[str] = mapped_column(String, default="app", nullable=False)  # 'app' | 'byok' (Lift 3)
+    vendor: Mapped[str] = mapped_column(String, nullable=False)  # 'gemini' | 'anthropic'
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    conversation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+
+class UserCredential(Base):
+    """BYOK placeholder (Lift 1 schema; the FEATURE lands in Lift 3). encrypted_key is
+    KMS ciphertext ONLY — never plaintext, never logged (security.md). NO code reads or
+    writes this table in Lift 1; it exists so BYOK needs no schema migration."""
+
+    __tablename__ = "user_credentials"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    vendor: Mapped[str] = mapped_column(String, primary_key=True)
+    encrypted_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    kms_key_name: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+    )

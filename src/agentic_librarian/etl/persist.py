@@ -5,6 +5,7 @@ so both paths build the catalog identically (DRY)."""
 from __future__ import annotations
 
 import pandas as pd
+from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -232,14 +233,17 @@ def persist_enriched_work(
     date_completed = pd.to_datetime(_raw_date).date() if _raw_date is not None and not pd.isna(_raw_date) else None
 
     if date_completed:
-        # Duplicate Check: Work + Edition + Date Completed
+        user_id = get_required_user_id()  # per-user: a friend re-reading my book is not a duplicate (ADR-048)
         existing_history = (
-            session.query(ReadingHistory).filter_by(edition_id=edition.id, date_completed=date_completed).first()
+            session.query(ReadingHistory)
+            .filter_by(edition_id=edition.id, date_completed=date_completed, user_id=user_id)
+            .first()
         )
 
         if not existing_history:
             history_entry = ReadingHistory(
                 edition=edition,
+                user_id=user_id,
                 date_completed=date_completed,
                 user_rating=user_rating,
                 user_notes=user_notes,

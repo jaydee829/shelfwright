@@ -147,7 +147,7 @@ def test_update_reading_status_mock(mock_db_manager):
 def test_get_user_trope_preferences_mock(mock_db_manager):
     session = mock_db_manager.get_session.return_value.__enter__.return_value
 
-    session.query.return_value.join.return_value.join.return_value.join.return_value.join.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+    session.query.return_value.join.return_value.join.return_value.join.return_value.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
         ("Fantasy", 5),
         ("Sci-Fi", 3),
     ]

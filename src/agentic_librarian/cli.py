@@ -10,6 +10,7 @@ import time
 
 from agentic_librarian.agents.backends import get_backend
 from agentic_librarian.chat_recorder import ConversationRecorder
+from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user
 
 _LOG_DIR = ".chat_logs"
 
@@ -29,6 +30,11 @@ def _parse_args(argv=None):
     add_parser.add_argument("--rating", type=int, default=None, help="rating 1-5")
     add_parser.add_argument("--format", default="ebook", help="edition format (default: ebook)")
     add_parser.add_argument("--notes", default=None, help="free-text notes")
+    user_parser = subparsers.add_parser("user", help="account management (operator, Lift 1)")
+    user_sub = user_parser.add_subparsers(dest="user_command")
+    invite_parser = user_sub.add_parser("invite", help="invite an email — creates the user row; they sign in later")
+    invite_parser.add_argument("email", help="the invitee's email (the invite key; lowercased)")
+    invite_parser.add_argument("--name", default=None, help="display name (optional)")
     return parser.parse_args(argv)
 
 
@@ -40,6 +46,16 @@ def _model_label(backend_name: str) -> str:
 
 def main(argv=None) -> int:
     args = _parse_args(argv)
+    # Data identity (Lift 1, ADR-048): the CLI is the operator's machine — everything
+    # runs as the default user. NOTE: --user-id remains the ADK *session* label only;
+    # it is NOT data identity and must never be parsed into the user context.
+    with as_user(DEFAULT_USER_ID):
+        return _dispatch(args)
+
+
+def _dispatch(args) -> int:
+    if getattr(args, "command", None) == "user":
+        return _run_user(args)
     if getattr(args, "command", None) == "add":
         return _run_add(args)
     if args.backend:
@@ -79,6 +95,37 @@ def _run_add(args) -> int:
     )
     print(result)
     return 1 if result.startswith("Error") else 0
+
+
+def _invite_db_manager():
+    """Seam for tests; in production this points wherever DATABASE_URL points (the
+    rollout runbook routes it through the Cloud SQL Auth Proxy for prod invites)."""
+    from agentic_librarian.db.session import DatabaseManager
+
+    return DatabaseManager()
+
+
+def _run_user(args) -> int:
+    if getattr(args, "user_command", None) != "invite":
+        print("usage: librarian user invite <email> [--name NAME]", file=sys.stderr)
+        return 2
+    from agentic_librarian.db.models import User
+
+    email = args.email.strip().lower()
+    if "@" not in email or email.startswith("@") or email.endswith("@"):
+        print(f"error: {email!r} does not look like an email address", file=sys.stderr)
+        return 2
+    db = _invite_db_manager()
+    with db.get_session() as session:
+        existing = session.query(User).filter(User.email == email).first()
+        if existing:
+            status = "active" if existing.firebase_uid else "invited (never signed in)"
+            print(f"{email} already exists — {status}.")
+            return 0
+        session.add(User(email=email, display_name=args.name))
+        session.flush()
+    print(f"Invited {email}. They can now sign in (claim-by-email links their account on first sign-in).")
+    return 0
 
 
 def _run_once(backend, args, recorder) -> int:
