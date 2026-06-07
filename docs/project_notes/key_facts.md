@@ -57,7 +57,7 @@ This file tracks important project configuration, constants, and environment det
   still go through the CSV/Dagster path. Reading history is a log of READ EVENTS: a
   re-read inserts a new row (re-read count = rows per work).
 
-## Production (GCP — Lift 0, live 2026-06-06)
+## Production (GCP — Lift 0 live 2026-06-06; Lift 1 multi-user live 2026-06-07)
 - **Project**: `agentic-librarian-prod` (us-central1); ADR-047; runbook
   `docs/runbooks/gcp-walking-skeleton.md`; provisioning scripts in `infra/`.
 - **Service URL**: <https://librarian-api-hnucndzntq-uc.a.run.app> — Cloud Run
@@ -67,7 +67,9 @@ This file tracks important project configuration, constants, and environment det
 - **Endpoints**: `/health` (open); `/health/db`, `/history` (caller-scoped), `/works`
   (shared catalog) — all Firebase-gated (Lift 1, ADR-048). `SIGNUP_MODE=invite` on the
   service; invites via `librarian user invite <email>` (runbook
-  `docs/runbooks/lift1-multi-user-rollout.md`).
+  `docs/runbooks/lift1-multi-user-rollout.md`). Operator account (user #1,
+  `jaydee829@gmail.com`) claimed via Google sign-in 2026-06-07; token-minting for
+  live tests needs `FIREBASE_WEB_API_KEY` + `FIREBASE_SERVICE_ACCOUNT_ID` (runbook §1).
 - **Database**: Cloud SQL Postgres 16 `librarian-sql` (db-f1-micro, 10GB SSD) +
   pgvector; restored 2026-06-06 from `agentic_librarian_FINAL_20260605_014912.sql.gz`
   and verified (326 works / 335 editions / 331 reading_history / 230 authors; 556

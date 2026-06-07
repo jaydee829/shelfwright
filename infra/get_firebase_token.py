@@ -35,7 +35,12 @@ def main() -> int:
     if not api_key:
         print("error: set FIREBASE_WEB_API_KEY (Firebase console → Project settings → General)", file=sys.stderr)
         return 2
-    firebase_admin.initialize_app()
+    # Custom-token minting must SIGN. User-credential ADC has no private key, so the
+    # SDK needs a service account to sign AS via the IAM Credentials API (live-run
+    # lesson 2026-06-07): set FIREBASE_SERVICE_ACCOUNT_ID to the firebase-adminsdk SA
+    # email and grant yourself roles/iam.serviceAccountTokenCreator on it.
+    sa_id = os.environ.get("FIREBASE_SERVICE_ACCOUNT_ID", "").strip()
+    firebase_admin.initialize_app(options={"serviceAccountId": sa_id} if sa_id else None)
     try:
         user = auth.get_user_by_email(email)
     except auth.UserNotFoundError:
