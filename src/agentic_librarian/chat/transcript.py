@@ -10,6 +10,7 @@ from uuid import UUID
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import Conversation, Message
 from agentic_librarian.db.session import DatabaseManager
+from sqlalchemy.orm import Session
 
 db_manager = DatabaseManager()
 
@@ -29,11 +30,13 @@ class TurnContext:
     history: list[dict]
 
 
-def _history(session, conversation_id: UUID) -> list[dict]:
+def _history(session: Session, conversation_id: UUID) -> list[dict]:
     rows = (
         session.query(Message)
+        # created_at orders the turns; id is a STABLE (not chronological — UUID v4)
+        # tiebreak, only relevant for the negligible same-microsecond-insert case.
         .filter(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at, Message.id)  # id tiebreaks same-timestamp inserts
+        .order_by(Message.created_at, Message.id)
         .all()
     )
     return [{"role": m.role, "content": m.content} for m in rows]
@@ -45,6 +48,8 @@ def get_or_create_active_conversation() -> TurnContext:
         conv = (
             session.query(Conversation)
             .filter(Conversation.user_id == user_id)  # scoping: my threads only
+            # most-recent first; id.desc() is a stable (UUID v4, non-chronological)
+            # tiebreak — exact created_at ties are negligible at this scale.
             .order_by(Conversation.created_at.desc(), Conversation.id.desc())
             .first()
         )
