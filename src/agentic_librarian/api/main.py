@@ -18,9 +18,9 @@ from sqlalchemy.orm import joinedload, selectinload
 
 app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()
-# NOTE: api/auth.py owns a second lazy DatabaseManager (two pools). Acceptable at
-# Lift 1 scale; consolidate into one shared manager when Lift 2 wires the chat
-# endpoint (T5 review).
+# NOTE: several modules each own a lazy DatabaseManager (this module, api/auth.py,
+# chat/transcript.py, core/usage.py) — ~4 pools. Acceptable at friends-scale; consolidating
+# into one shared manager is deferred to Lift 2 Stage 4 (cleanups), per the Stage 1 final review.
 
 
 @app.get("/health")

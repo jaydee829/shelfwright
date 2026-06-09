@@ -71,7 +71,7 @@ def test_stream_emits_error_and_no_done_on_failure():
     body = "".join(_collect("hi", recorded, conversation=_FailingConversation))
     assert "event: activity" in body  # the activity that fired before the failure still streamed
     assert "event: error" in body
-    assert "backend down" in body
+    assert "backend down" not in body  # internal detail is logged server-side, not streamed
     assert "event: done" not in body  # NO false success signal
     assert "event: text" not in body
     assert recorded == []  # asend raised before any persistence

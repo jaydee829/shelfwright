@@ -8,6 +8,7 @@ Token-level streaming is future work (the mesh runs in ADK's default non-streami
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import AsyncGenerator, Callable
@@ -61,20 +62,27 @@ async def sse_turn(
             queue.put_nowait(_DONE)
 
     task = asyncio.create_task(drive())
-
-    # Stream live activity until the driver signals it has finished.
-    while True:
-        item = await queue.get()
-        if item is _DONE:
-            break
-        yield item
-
-    # The turn is finished: surface the reply, or a single error event — never a false done.
     try:
-        reply = await task
-    except Exception as exc:  # noqa: BLE001 - one bad turn must end the stream cleanly, not crash it
-        logger.warning("chat turn failed", exc_info=True)
-        yield _sse("error", {"detail": str(exc)})
-        return
-    yield _sse("text", {"text": reply})
-    yield _sse("done", {})
+        # Stream live activity until the driver signals it has finished.
+        while True:
+            item = await queue.get()
+            if item is _DONE:
+                break
+            yield item
+        # The turn is finished: surface the reply, or a single error event — never a false done.
+        try:
+            reply = await task
+        except Exception:  # noqa: BLE001 - one bad turn ends the stream cleanly, not crash it
+            logger.warning("chat turn failed", exc_info=True)
+            yield _sse("error", {"detail": "The Librarian hit a problem. Please try again."})
+            return
+        yield _sse("text", {"text": reply})
+        yield _sse("done", {})
+    finally:
+        # If the consumer went away (client disconnect -> GeneratorExit) while the turn
+        # was still in flight, cancel the mesh instead of leaking a running task that
+        # keeps burning tokens. No-op on the normal/error paths (task already done).
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
