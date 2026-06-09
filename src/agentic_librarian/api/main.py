@@ -1,4 +1,7 @@
+from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
+from agentic_librarian.chat import stream, transcript
+from agentic_librarian.core.user_context import as_user
 from agentic_librarian.db.models import (
     Edition,
     ReadingHistory,
@@ -8,16 +11,16 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import Depends, FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi import Body, Depends, FastAPI, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
 app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()
-# NOTE: api/auth.py owns a second lazy DatabaseManager (two pools). Acceptable at
-# Lift 1 scale; consolidate into one shared manager when Lift 2 wires the chat
-# endpoint (T5 review).
+# NOTE: several modules each own a lazy DatabaseManager (this module, api/auth.py,
+# chat/transcript.py, core/usage.py) — ~4 pools. Acceptable at friends-scale; consolidating
+# into one shared manager is deferred to Lift 2 Stage 4 (cleanups), per the Stage 1 final review.
 
 
 @app.get("/health")
@@ -111,3 +114,70 @@ def get_works(
             }
             for w in works
         ]
+
+
+# ---------------------------------------------------------------------------
+# Chat endpoints (Lift 2)
+# ---------------------------------------------------------------------------
+
+
+async def _open_conversation(*, user_id: str, session_id: str, history: list[dict], on_event) -> LibrarianConversation:
+    """Open the mesh conversation for one turn (seam: tests replace this)."""
+    return await astart_conversation(user_id=user_id, session_id=session_id, history=history, on_event=on_event)
+
+
+class _SyncOpener:
+    """The conversation object returned by the factory passed to sse_turn. Lazily opens
+    the async mesh conversation on first asend — deferred so the open runs inside the
+    event loop, not the sync endpoint frame. session_id = conversation_id.hex so usage
+    rows (keyed off the ADK session uuid) FK to the transcript row."""
+
+    def __init__(self, user_id, ctx, on_event):
+        self._user_id = user_id
+        self._ctx = ctx
+        self._on_event = on_event
+        self._conv = None  # opened lazily on first asend
+
+    async def asend(self, message: str) -> str:
+        if self._conv is None:
+            self._conv = await _open_conversation(
+                user_id=self._user_id,
+                session_id=self._ctx.conversation_id.hex,
+                history=self._ctx.history,
+                on_event=self._on_event,
+            )
+        return await self._conv.asend(message)
+
+    def close(self):
+        if self._conv is not None:
+            self._conv.close()
+
+
+@app.get("/conversations/current")
+def get_current_conversation(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+    with as_user(user.id):
+        ctx = transcript.get_or_create_active_conversation()
+    return {"id": str(ctx.conversation_id), "messages": ctx.history}
+
+
+@app.post("/conversations")
+def new_conversation(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+    with as_user(user.id):
+        ctx = transcript.start_new_conversation()
+    return {"id": str(ctx.conversation_id), "messages": ctx.history}
+
+
+@app.post("/chat")
+def chat(user: AuthenticatedUser = Depends(get_current_user), message: str = Body(..., embed=True)):  # noqa: B008
+    with as_user(user.id):
+        ctx = transcript.get_or_create_active_conversation()
+    adk_user_id = str(user.id)
+    return StreamingResponse(
+        stream.sse_turn(
+            message=message,
+            conversation=lambda on_event: _SyncOpener(adk_user_id, ctx, on_event),
+            on_persist=lambda role, content: transcript.append_message(ctx.conversation_id, role, content),
+            user_id=user.id,
+        ),
+        media_type="text/event-stream",
+    )

@@ -208,3 +208,9 @@ This file tracks work history and ticket references.
 - **URL**: N/A (PR pending)
 - **Notes**:
     - **Tracked follow-up (schema, ask-first)**: add `series_name`/`series_position` to `works`, populated from Hardcover `featured_series` + a backfill pass over the existing catalog — makes the series rule deterministic instead of model-knowledge-based.
+
+### 2026-06-09 - INF-030: Move per-turn chat DB writes off the event loop (Lift 2 Stage 4)
+- **Status**: Open (deferred from Lift 2 Stage 1, PR #43)
+- **Description**: The SSE chat turn (`chat/stream.py` `sse_turn`) issues synchronous INSERTs on the asyncio event loop — both `transcript.append_message` calls (`on_persist`) AND the `usage.record_llm_call` write in `runtime._record_event_usage`. Under concurrent `/chat` load this blocks the loop. Gemini flagged the transcript write HIGH on PR #43; the fix must cover BOTH writes coherently via `asyncio.to_thread(...)`.
+- **URL**: PR #43 (review reply discussion_r3383988870); see also the `core/usage.py` latency note.
+- **Notes**: Do alongside the Stage 4 DatabaseManager pool consolidation. `asyncio.to_thread` copies the current context, so verify `as_user`/`current_user_id` still resolves inside the worker thread. No live impact until the service deploys against Cloud SQL (Stage 4 opens the IAM gate).

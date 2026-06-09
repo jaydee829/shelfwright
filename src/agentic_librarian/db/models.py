@@ -185,6 +185,38 @@ class Suggestions(Base):
     work: Mapped["Work"] = relationship(back_populates="suggestions")
 
 
+class Conversation(Base):
+    """One chat thread (Lift 2). The active thread is the user's most-recent row;
+    New chat inserts a new one. title is nullable now so the future switchable-list
+    needs no migration. id doubles as the ADK session id so usage rows line up."""
+
+    __tablename__ = "conversations"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    title: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+    )
+
+    messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    """One turn in a conversation (Lift 2). role is 'user' or 'assistant'."""
+
+    __tablename__ = "messages"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id"), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
+
+
 class User(Base):
     """An account holder (Lift 1, ADR-048). The catalog is communal; reading_history,
     suggestions, and usage are per-user. firebase_uid is NULL for invited users who
@@ -212,7 +244,9 @@ class Usage(Base):
     model: Mapped[str] = mapped_column(String, nullable=False)
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    conversation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
 
 

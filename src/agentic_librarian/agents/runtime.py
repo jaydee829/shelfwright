@@ -9,6 +9,7 @@ import uuid
 from agentic_librarian.agents.backends import get_backend
 from agentic_librarian.agents.services import create_agent_mesh
 from agentic_librarian.core.usage import record_llm_call
+from google.adk.events import Event
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
@@ -116,16 +117,37 @@ class LibrarianConversation:
 
 
 async def astart_conversation(
-    user_id: str = "local", runner: Runner | None = None, on_event=None
+    user_id: str = "local",
+    runner: Runner | None = None,
+    on_event=None,
+    session_id: str | None = None,
+    history: list[dict] | None = None,
 ) -> LibrarianConversation:
+    """Open a conversation. `session_id` lets the caller pin the ADK session id to a
+    stored conversation id (so usage rows line up). `history` (oldest first, each
+    {'role': 'user'|'assistant', 'content': str}) is seeded into the session as events
+    so the mesh has prior context WITHOUT re-running earlier turns (Lift 2)."""
     runner = runner or build_runner()
-    session_id = uuid.uuid4().hex
-    await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    session_id = session_id or uuid.uuid4().hex
+    session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
+    for turn in history or []:
+        role = "user" if turn["role"] == "user" else "model"
+        author = "user" if turn["role"] == "user" else "librarian"
+        content = types.Content(role=role, parts=[types.Part(text=turn["content"])])
+        await runner.session_service.append_event(session, Event(author=author, content=content))
     return LibrarianConversation(runner, user_id, session_id, on_event=on_event)
 
 
-def start_conversation(user_id: str = "local", runner: Runner | None = None, on_event=None) -> LibrarianConversation:
-    return asyncio.run(astart_conversation(user_id=user_id, runner=runner, on_event=on_event))
+def start_conversation(
+    user_id: str = "local",
+    runner: Runner | None = None,
+    on_event=None,
+    session_id: str | None = None,
+    history: list[dict] | None = None,
+) -> LibrarianConversation:
+    return asyncio.run(
+        astart_conversation(user_id=user_id, runner=runner, on_event=on_event, session_id=session_id, history=history)
+    )
 
 
 def run_recommendation(prompt: str, user_id: str = "local") -> str:
