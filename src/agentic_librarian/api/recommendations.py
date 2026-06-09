@@ -5,7 +5,9 @@ Identity comes from the auth context; rows are filtered by user.id (ADR-048)."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from uuid import UUID
+
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import joinedload
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
@@ -50,3 +52,24 @@ def get_recommendations(user: AuthenticatedUser = Depends(get_current_user)):  #
             }
             for s in rows
         ]
+
+
+@router.post("/recommendations/{suggestion_id}/status")
+def set_recommendation_status(
+    suggestion_id: UUID,
+    status: str = Body(..., embed=True),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+):
+    if status not in ALLOWED_STATUS_UPDATES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {sorted(ALLOWED_STATUS_UPDATES)}")
+    with db_manager.get_session() as session:
+        sug = (
+            session.query(Suggestions)
+            .filter(Suggestions.id == suggestion_id, Suggestions.user_id == user.id)  # scoping: only mine
+            .first()
+        )
+        if sug is None:
+            raise HTTPException(status_code=404, detail="suggestion not found")
+        sug.status = status
+        session.flush()
+    return {"id": str(suggestion_id), "status": status}

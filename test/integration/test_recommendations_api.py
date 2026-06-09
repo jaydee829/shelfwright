@@ -67,3 +67,34 @@ def test_does_not_leak_another_users_suggestions(client, db_url):
     body = client.get("/recommendations").json()
 
     assert body == []  # the default user sees none of the other user's suggestions
+
+
+def test_dismiss_marks_status_and_removes_from_list(client, db_url):
+    manager = DatabaseManager(db_url)
+    sid, _ = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Meh", author="Z")
+
+    resp = client.post(f"/recommendations/{sid}/status", json={"status": "Dismissed"})
+    assert resp.status_code == 200
+    assert resp.json() == {"id": str(sid), "status": "Dismissed"}
+
+    assert client.get("/recommendations").json() == []  # no longer active
+
+
+def test_rejects_unknown_status(client, db_url):
+    manager = DatabaseManager(db_url)
+    sid, _ = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Meh", author="Z")
+
+    resp = client.post(f"/recommendations/{sid}/status", json={"status": "Banished"})
+    assert resp.status_code == 422
+
+
+def test_cannot_dismiss_another_users_suggestion(client, db_url):
+    manager = DatabaseManager(db_url)
+    other_id = uuid4()
+    with manager.get_session() as s:
+        s.add(User(id=other_id, email="other2@example.com"))
+        s.flush()
+    sid, _ = _seed_suggestion(manager, user_id=other_id, title="Secret", author="Nobody")
+
+    resp = client.post(f"/recommendations/{sid}/status", json={"status": "Dismissed"})
+    assert resp.status_code == 404  # scoping: not the caller's suggestion
