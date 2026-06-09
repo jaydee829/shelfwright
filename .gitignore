@@ -1,3 +1,6 @@
+# Brainstorming visual companion (mockups, session state)
+.superpowers/
+
 # Python
 __pycache__/
 *.py[cod]
