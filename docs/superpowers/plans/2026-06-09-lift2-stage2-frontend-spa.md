@@ -53,7 +53,7 @@
   ```
   Backend tests use `pytestmark = pytest.mark.db_integration` and the `DatabaseManager(db_url)` + `monkeypatch.setattr(<module>, "db_manager", manager)` pattern (see `test/integration/test_chat_api.py`). The conftest builds the schema via `alembic upgrade head`, truncates between tests, and reseeds the default user.
 - **Authoritative backend lint** is CI `lint.yml` (pinned ruff in an isolated env treats `agentic_librarian` as third-party; the image's newer ruff false-flags `I001`). Reproduce locally with a clean `python:3.11-slim` + `pip install ruff==0.4.4` if CI lint fails.
-- **Frontend** commands run from `frontend/`: `npm run dev`, `npm run test`, `npm run lint`, `npm run build`. The implementer needs Node 20+ locally. Frontend code is **not** linted by ruff/pre-commit (it lives outside `src/`).
+- **Frontend** commands run from `frontend/` **on the Windows host** (decided 2026-06-09): `npm run dev`, `npm run test`, `npm run lint`, `npm run build`. Node **24.14.0** is already installed on Windows (≥ Vite 7's 20.19/22 floor); the WSL devcontainer stays backend-only and is **not** touched this stage. The frontend edit/test loop is native to `C:\dev` (no dual-checkout git-pull needed, unlike the backend). Frontend code is **not** linted by ruff/pre-commit (it lives outside `src/`).
 - **Identity** comes from `get_current_user` context, never a parameter (ADR-048). The new read endpoints filter by `user.id` directly, exactly like the existing `GET /history`.
 - **Secrets:** never commit `frontend/.env.local` or any Firebase web config values. `.env.example` documents variable *names* only.
 
