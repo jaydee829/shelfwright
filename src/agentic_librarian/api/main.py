@@ -1,5 +1,6 @@
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
+from agentic_librarian.api.recommendations import router as recommendations_router
 from agentic_librarian.chat import stream, transcript
 from agentic_librarian.core.user_context import as_user
 from agentic_librarian.db.models import (
@@ -21,6 +22,7 @@ db_manager = DatabaseManager()
 # NOTE: several modules each own a lazy DatabaseManager (this module, api/auth.py,
 # chat/transcript.py, core/usage.py) — ~4 pools. Acceptable at friends-scale; consolidating
 # into one shared manager is deferred to Lift 2 Stage 4 (cleanups), per the Stage 1 final review.
+app.include_router(recommendations_router)
 
 
 @app.get("/health")
