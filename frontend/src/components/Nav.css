@@ -1,0 +1,20 @@
+.nav { display: flex; background: #f3f4f6; }
+.nav-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; padding: 10px; text-decoration: none; color: #4b5563; flex: 1;
+}
+.nav-item.active { color: #111827; font-weight: 600; background: #e5e7eb; }
+.nav-icon { font-size: 20px; }
+.nav-label { font-size: 12px; }
+
+/* Mobile-first: fixed bottom bar. */
+.nav { position: fixed; bottom: 0; left: 0; right: 0; border-top: 1px solid #d1d5db; }
+
+/* Desktop: left icon rail. */
+@media (min-width: 768px) {
+  .nav {
+    position: fixed; top: 56px; bottom: 0; left: 0; right: auto;
+    flex-direction: column; width: 88px; border-top: none; border-right: 1px solid #d1d5db;
+  }
+  .nav-item { flex: 0; }
+}

@@ -1,10 +1,45 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
+import { describe, expect, it, vi } from 'vitest'
+import type { AuthStatus } from './auth/AuthContext'
+
+const state = vi.hoisted(() => ({ status: 'loading' as AuthStatus }))
+
+vi.mock('./auth/AuthContext', () => ({
+  AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
+  useAuth: () => ({
+    status: state.status,
+    user: { email: 'friend@example.com', displayName: 'Friend' },
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+  }),
+}))
+
+// Views render nothing meaningful here; we only assert the gate + shell.
+vi.mock('./views/ChatView', () => ({ default: () => <div>chat-view</div> }))
+vi.mock('./views/HistoryView', () => ({ default: () => <div>history-view</div> }))
+vi.mock('./views/RecommendationsView', () => ({ default: () => <div>recs-view</div> }))
+vi.mock('./views/AnalysisView', () => ({ default: () => <div>analysis-view</div> }))
+
 import App from './App'
 
-describe('App', () => {
-  it('renders', () => {
+describe('App gate', () => {
+  it('shows the sign-in screen when signed out', () => {
+    state.status = 'signedOut'
     render(<App />)
-    expect(screen.getByText('Librarian')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /sign in with google/i })).toBeInTheDocument()
+  })
+
+  it('shows the not-invited screen for a verified stranger', () => {
+    state.status = 'notInvited'
+    render(<App />)
+    expect(screen.getByText(/invite/i)).toBeInTheDocument()
+  })
+
+  it('renders the shell with the chat view when ready', () => {
+    state.status = 'ready'
+    render(<App />)
+    expect(screen.getByText('chat-view')).toBeInTheDocument()
+    expect(screen.getByRole('navigation')).toBeInTheDocument()
   })
 })
