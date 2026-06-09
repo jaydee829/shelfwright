@@ -5,17 +5,19 @@ Revises: c804d02d6fbb
 Create Date: 2026-06-09 19:14:35.030845
 
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
-revision: str = '30f1e46533e9'
-down_revision: Union[str, None] = 'c804d02d6fbb'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "30f1e46533e9"
+down_revision: str | None = "c804d02d6fbb"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -24,8 +26,8 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("title", sa.String(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("timezone('utc', now())")),
-        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("timezone('utc', now())")),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_conversations_user_id", "conversations", ["user_id"])
     op.create_table(
@@ -34,9 +36,18 @@ def upgrade() -> None:
         sa.Column("conversation_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("conversations.id"), nullable=False),
         sa.Column("role", sa.String(), nullable=False),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.text("timezone('utc', now())")),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
     )
     op.create_index("ix_messages_conversation_id", "messages", ["conversation_id"])
+    # usage.conversation_id existed since Lift 1 with no FK; pre-Stage-1 rows may hold
+    # ADK session uuids that match no conversations row. NULL those orphans so the FK can
+    # be added on databases that already have usage data (conversations is empty at this
+    # migration, so every non-null value is an orphan).
+    op.execute(
+        "UPDATE usage SET conversation_id = NULL "
+        "WHERE conversation_id IS NOT NULL "
+        "AND conversation_id NOT IN (SELECT id FROM conversations)"
+    )
     op.create_foreign_key("fk_usage_conversation_id", "usage", "conversations", ["conversation_id"], ["id"])
 
 
