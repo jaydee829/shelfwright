@@ -123,9 +123,7 @@ def get_works(
 
 async def _open_conversation(*, user_id: str, session_id: str, history: list[dict], on_event) -> LibrarianConversation:
     """Open the mesh conversation for one turn (seam: tests replace this)."""
-    return await astart_conversation(
-        user_id=user_id, session_id=session_id, history=history, on_event=on_event
-    )
+    return await astart_conversation(user_id=user_id, session_id=session_id, history=history, on_event=on_event)
 
 
 class _SyncOpener:
@@ -143,8 +141,10 @@ class _SyncOpener:
     async def asend(self, message: str) -> str:
         if self._conv is None:
             self._conv = await _open_conversation(
-                user_id=self._user_id, session_id=self._ctx.conversation_id.hex,
-                history=self._ctx.history, on_event=self._on_event,
+                user_id=self._user_id,
+                session_id=self._ctx.conversation_id.hex,
+                history=self._ctx.history,
+                on_event=self._on_event,
             )
         return await self._conv.asend(message)
 

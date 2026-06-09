@@ -1,12 +1,11 @@
 import pytest
-from fastapi.testclient import TestClient
-
 from agentic_librarian.api import auth
 from agentic_librarian.api import main as api_main
 from agentic_librarian.chat import transcript
 from agentic_librarian.core import usage as usage_mod
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.session import DatabaseManager
+from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.db_integration
 
@@ -28,8 +27,7 @@ def client(db_url, monkeypatch):
         async def asend(self, message):
             return f"echo:{message}"
 
-        def close(self):
-            ...
+        def close(self): ...
 
     async def _fake_open(**kwargs):
         return _FakeConv()
@@ -76,13 +74,10 @@ def test_usage_rows_reference_the_conversation(client, db_url, monkeypatch):
     class _UsingConv:
         async def asend(self, message):
             # mirrors runtime._record_event_usage: meter against the conversation id
-            usage.record_llm_call(
-                vendor="gemini", model="test", input_tokens=1, output_tokens=1, conversation_id=cid
-            )
+            usage.record_llm_call(vendor="gemini", model="test", input_tokens=1, output_tokens=1, conversation_id=cid)
             return "ok"
 
-        def close(self):
-            ...
+        def close(self): ...
 
     async def _using_open(**kwargs):
         return _UsingConv()

@@ -1,12 +1,11 @@
 from uuid import UUID
 
 import pytest
-from sqlalchemy import inspect
-
 from agentic_librarian.chat import transcript
 from agentic_librarian.core.user_context import as_user
 from agentic_librarian.db.models import User
 from agentic_librarian.db.session import DatabaseManager
+from sqlalchemy import inspect
 
 pytestmark = pytest.mark.db_integration
 

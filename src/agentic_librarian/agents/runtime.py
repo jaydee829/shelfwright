@@ -129,9 +129,7 @@ async def astart_conversation(
     so the mesh has prior context WITHOUT re-running earlier turns (Lift 2)."""
     runner = runner or build_runner()
     session_id = session_id or uuid.uuid4().hex
-    session = await runner.session_service.create_session(
-        app_name=APP_NAME, user_id=user_id, session_id=session_id
-    )
+    session = await runner.session_service.create_session(app_name=APP_NAME, user_id=user_id, session_id=session_id)
     for turn in history or []:
         role = "user" if turn["role"] == "user" else "model"
         author = "user" if turn["role"] == "user" else "librarian"
@@ -141,13 +139,14 @@ async def astart_conversation(
 
 
 def start_conversation(
-    user_id: str = "local", runner: Runner | None = None, on_event=None,
-    session_id: str | None = None, history: list[dict] | None = None,
+    user_id: str = "local",
+    runner: Runner | None = None,
+    on_event=None,
+    session_id: str | None = None,
+    history: list[dict] | None = None,
 ) -> LibrarianConversation:
     return asyncio.run(
-        astart_conversation(
-            user_id=user_id, runner=runner, on_event=on_event, session_id=session_id, history=history
-        )
+        astart_conversation(user_id=user_id, runner=runner, on_event=on_event, session_id=session_id, history=history)
     )
 
 
