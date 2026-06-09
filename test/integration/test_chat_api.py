@@ -16,8 +16,10 @@ def client(db_url, monkeypatch):
     monkeypatch.setattr(api_main, "db_manager", manager)
     monkeypatch.setattr(transcript, "db_manager", manager)  # chat endpoints use the store's manager
     # Endpoints wrap store calls in as_user(user.id), so a plain user object suffices.
-    api_main.app.dependency_overrides[auth.get_current_user] = lambda: auth.AuthenticatedUser(
-        id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL
+    monkeypatch.setitem(
+        api_main.app.dependency_overrides,
+        auth.get_current_user,
+        lambda: auth.AuthenticatedUser(id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL),
     )
 
     class _FakeConv:
@@ -32,7 +34,6 @@ def client(db_url, monkeypatch):
 
     monkeypatch.setattr(api_main, "_open_conversation", _fake_open)
     yield TestClient(api_main.app)
-    api_main.app.dependency_overrides.clear()
 
 
 def test_current_conversation_then_chat_then_resume(client):
@@ -54,6 +55,7 @@ def test_current_conversation_then_chat_then_resume(client):
 
 
 def test_new_conversation_starts_empty(client):
-    client.get("/conversations/current")
+    current = client.get("/conversations/current").json()
     fresh = client.post("/conversations").json()
     assert fresh["messages"] == []
+    assert fresh["id"] != current["id"]  # New chat is a distinct conversation

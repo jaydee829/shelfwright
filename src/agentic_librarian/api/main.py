@@ -1,4 +1,4 @@
-from agentic_librarian.agents.runtime import astart_conversation
+from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.chat import stream, transcript
 from agentic_librarian.core.user_context import as_user
@@ -121,7 +121,7 @@ def get_works(
 # ---------------------------------------------------------------------------
 
 
-async def _open_conversation(*, user_id, session_id, history, on_event):
+async def _open_conversation(*, user_id: str, session_id: str, history: list[dict], on_event) -> LibrarianConversation:
     """Open the mesh conversation for one turn (seam: tests replace this)."""
     return await astart_conversation(
         user_id=user_id, session_id=session_id, history=history, on_event=on_event
@@ -129,11 +129,16 @@ async def _open_conversation(*, user_id, session_id, history, on_event):
 
 
 class _SyncOpener:
-    """Lazily opens the async mesh conversation on first asend, inside the running loop.
-    session_id = the conversation id so usage rows (keyed off the ADK session uuid) FK to it."""
+    """The conversation object returned by the factory passed to sse_turn. Lazily opens
+    the async mesh conversation on first asend — deferred so the open runs inside the
+    event loop, not the sync endpoint frame. session_id = conversation_id.hex so usage
+    rows (keyed off the ADK session uuid) FK to the transcript row."""
 
     def __init__(self, user_id, ctx, on_event):
-        self._user_id, self._ctx, self._on_event, self._conv = user_id, ctx, on_event, None
+        self._user_id = user_id
+        self._ctx = ctx
+        self._on_event = on_event
+        self._conv = None  # opened lazily on first asend
 
     async def asend(self, message: str) -> str:
         if self._conv is None:
