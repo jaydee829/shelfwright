@@ -12,9 +12,6 @@ class _FakeSessionService:
         self.created.append(session_id)
         return object()
 
-    async def get_session(self, app_name, user_id, session_id):
-        return object()
-
     async def append_event(self, session, event):
         self.appended.append(event)
         return event
