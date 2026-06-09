@@ -131,7 +131,9 @@ def test_analysis_empty_for_user_with_no_reading(client):
         "formats": [],
     }
     assert body["genres"] == []
+    assert body["moods"] == []
     assert body["top_tropes"] == []
+    assert body["authors"] == []
     assert body["narrators"] == []
 
 
