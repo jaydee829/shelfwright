@@ -41,6 +41,8 @@ def test_history_is_seeded_as_events_in_order():
     assert roles == ["user", "model"]
     texts = [e.content.parts[0].text for e in runner.session_service.appended]
     assert texts == ["hello", "hi there"]
+    authors = [e.author for e in runner.session_service.appended]
+    assert authors == ["user", "librarian"]
 
 
 def test_no_history_seeds_no_events():
