@@ -28,12 +28,13 @@ from agentic_librarian.scouts.trope_manager import TropeManager
 logger = logging.getLogger(__name__)
 
 
-def _safe_standardize(fn, label: str):
+def _safe_standardize(fn, *args, label: str, **kwargs):
     """Run a standardize_* embedding call, returning its Trope/Style, or None on failure.
     An embedding API error (bad/transient key, 429/5xx) must skip that one vectorization,
-    not abort the whole persist (REC-021/REC-023 degrade-gracefully pattern)."""
+    not abort the whole persist (REC-021/REC-023 degrade-gracefully pattern). Takes the
+    callable + its args directly (not a lambda) so loop variables bind by value (avoids B023)."""
     try:
-        return fn()
+        return fn(*args, **kwargs)
     except Exception:  # noqa: BLE001 - any embedding/standardize failure degrades to skip-this-item
         logger.warning("skipping vectorization for %s (embedding/standardize failed)", label, exc_info=True)
         return None
@@ -116,7 +117,7 @@ def persist_enriched_work(
         if role == "Author" and author_style_data:
             for attr_type, style_name in _iter_style_items(author_style_data, f"Author '{name}'"):
                 standard_style = _safe_standardize(
-                    lambda: style_manager.standardize_style(style_name, category="Author"), f"style {style_name!r}"
+                    style_manager.standardize_style, style_name, category="Author", label=f"style {style_name!r}"
                 )
                 if standard_style is None:
                     continue
@@ -180,7 +181,7 @@ def persist_enriched_work(
     if work_style_data:
         for attr_type, style_name in _iter_style_items(work_style_data, f"Work '{row.get('Title')}'"):
             standard_style = _safe_standardize(
-                lambda: style_manager.standardize_style(style_name, category="Work"), f"style {style_name!r}"
+                style_manager.standardize_style, style_name, category="Work", label=f"style {style_name!r}"
             )
             if standard_style is None:
                 continue
@@ -218,7 +219,7 @@ def persist_enriched_work(
         if n_style_data:
             for attr_type, style_name in _iter_style_items(n_style_data, f"Narrator '{n_name}'"):
                 standard_style = _safe_standardize(
-                    lambda: style_manager.standardize_style(style_name, category="Narrator"), f"style {style_name!r}"
+                    style_manager.standardize_style, style_name, category="Narrator", label=f"style {style_name!r}"
                 )
                 if standard_style is None:
                     continue
@@ -292,7 +293,7 @@ def persist_enriched_work(
                 just = t_data.get("justification")
 
                 standardized_trope = _safe_standardize(
-                    lambda: trope_manager.standardize_trope(name, description=desc), f"trope {name!r}"
+                    trope_manager.standardize_trope, name, description=desc, label=f"trope {name!r}"
                 )
                 if standardized_trope is None:
                     continue
@@ -311,7 +312,7 @@ def persist_enriched_work(
             # Fallback to simple tags if no enriched tropes found
             for tag in all_fallback_tags:
                 standardized_trope = _safe_standardize(
-                    lambda: trope_manager.standardize_trope(tag), f"trope {tag!r}"
+                    trope_manager.standardize_trope, tag, label=f"trope {tag!r}"
                 )
                 if standardized_trope is None:
                     continue
