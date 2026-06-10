@@ -47,11 +47,22 @@ jobs:
           GCP_DEPLOYER_SA: ${{ vars.GCP_DEPLOYER_SA }}
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
           GCP_CLOUDSQL_CONNECTION: ${{ vars.GCP_CLOUDSQL_CONNECTION }}
+          # Stage 4 (async enrichment) — the operator sets these during the rollout
+          # (infra/08-cloud-tasks.sh prints the queue/SA values). Required so a deploy
+          # never opens the gate with empty ENRICH_* env (which silently breaks enrichment).
+          GCP_CLOUD_TASKS_QUEUE: ${{ vars.GCP_CLOUD_TASKS_QUEUE }}
+          GCP_RUN_BASE_URL: ${{ vars.GCP_RUN_BASE_URL }}
+          GCP_ENRICH_INVOKER_SA: ${{ vars.GCP_ENRICH_INVOKER_SA }}
+          GCP_SEARCH_ENGINE_ID: ${{ vars.GCP_SEARCH_ENGINE_ID }}
         run: |
           : "${GCP_WIF_PROVIDER:?set repo Variable GCP_WIF_PROVIDER (infra/05-iam-wif.sh prints it)}"
           : "${GCP_DEPLOYER_SA:?set repo Variable GCP_DEPLOYER_SA}"
           : "${GCP_PROJECT_ID:?set repo Variable GCP_PROJECT_ID}"
           : "${GCP_CLOUDSQL_CONNECTION:?set repo Variable GCP_CLOUDSQL_CONNECTION}"
+          : "${GCP_CLOUD_TASKS_QUEUE:?set repo Variable GCP_CLOUD_TASKS_QUEUE (infra/08-cloud-tasks.sh prints it)}"
+          : "${GCP_RUN_BASE_URL:?set repo Variable GCP_RUN_BASE_URL (the Cloud Run service base URL)}"
+          : "${GCP_ENRICH_INVOKER_SA:?set repo Variable GCP_ENRICH_INVOKER_SA (infra/08-cloud-tasks.sh prints it)}"
+          : "${GCP_SEARCH_ENGINE_ID:?set repo Variable GCP_SEARCH_ENGINE_ID (the Programmable Search Engine id)}"
 
       - uses: actions/checkout@v4
 
