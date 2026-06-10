@@ -81,7 +81,7 @@ export function getRecommendations(): Promise<Recommendation[]> {
   return getJson<Recommendation[]>('/recommendations')
 }
 
-export async function setRecommendationStatus(id: string, status: 'Dismissed'): Promise<void> {
+export async function setRecommendationStatus(id: string, status: 'Dismissed' | 'Read'): Promise<void> {
   const res = await authedFetchRaw(`/recommendations/${id}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

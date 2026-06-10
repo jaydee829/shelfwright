@@ -20,6 +20,7 @@ vi.mock('./views/ChatView', () => ({ default: () => <div>chat-view</div> }))
 vi.mock('./views/HistoryView', () => ({ default: () => <div>history-view</div> }))
 vi.mock('./views/RecommendationsView', () => ({ default: () => <div>recs-view</div> }))
 vi.mock('./views/AnalysisView', () => ({ default: () => <div>analysis-view</div> }))
+vi.mock('./views/AddBookView', () => ({ default: () => <div>add-view</div> }))
 
 import App from './App'
 

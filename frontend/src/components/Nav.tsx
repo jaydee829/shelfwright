@@ -6,6 +6,7 @@ const ITEMS = [
   { to: '/history', label: 'History', icon: '📚', end: false },
   { to: '/recommendations', label: 'Picks', icon: '✨', end: false },
   { to: '/analysis', label: 'Analysis', icon: '📊', end: false },
+  { to: '/add', label: 'Add', icon: '➕', end: false },
 ]
 
 export default function Nav() {
