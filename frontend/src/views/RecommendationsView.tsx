@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { getRecommendations, setRecommendationStatus, type Recommendation } from '../api/client'
 import './RecommendationsView.css'
 
 export default function RecommendationsView() {
+  const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -20,6 +22,11 @@ export default function RecommendationsView() {
     }
   }
 
+  function readThis(r: Recommendation) {
+    // Open the add-book form prefilled; on a successful add it marks this suggestion Read.
+    navigate('/add', { state: { title: r.title, author: r.authors.join(', '), suggestionId: r.id } })
+  }
+
   if (recs === null) return <p>Loading…</p>
   if (recs.length === 0) return <p>No recommendations right now — ask the Librarian in Chat for ideas.</p>
 
@@ -35,8 +42,7 @@ export default function RecommendationsView() {
             </div>
             {r.justification && <p className="rec-why">{r.justification}</p>}
             <div className="rec-actions">
-              {/* "I read this" routes through the add-book form — wired in Stage 3. */}
-              <button disabled title="Coming soon — adds the book to your history">✓ I read this</button>
+              <button onClick={() => readThis(r)}>✓ I read this</button>
               <button onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
             </div>
           </article>
