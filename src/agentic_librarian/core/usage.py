@@ -4,9 +4,9 @@ the raw material for Lift 3 quotas/billing/BYOK attribution.
 Best-effort BY DESIGN in Lift 1: a metering failure logs a warning and the
 conversation continues; hardening to billing-grade is a Lift 3 decision.
 
-Latency note (Lift 2 follow-up): this is a synchronous INSERT issued from inside the
-backends' async event loops. Local Postgres absorbs it; when the mesh deploys against
-Cloud SQL, move the write off-loop (asyncio.to_thread at call sites or batch-per-turn)."""
+Latency note (INF-030, Lift 2 Stage 4): this INSERT is synchronous, so its call sites run
+it off the event loop via asyncio.to_thread (runtime._record_event_usage) — to_thread copies
+the context, so the user identity still resolves in the worker thread."""
 
 from __future__ import annotations
 
