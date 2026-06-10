@@ -1,24 +1,36 @@
-# Production API image (Lift 0). The dev image is ./Dockerfile — this one is slim:
-# no build tools, no Node/Claude CLI, no sudo, non-editable install, uvicorn entrypoint.
+# Production API image (Lift 0 → Lift 2 Stage 4: now multi-stage, also serving the SPA).
+# Stage 1 builds the Vite SPA with Node; the slim Python runtime copies the static output
+# and has no Node/build tools, no editable install, uvicorn entrypoint.
+
+# --- Stage 1: build the SPA ---
+FROM node:22-slim AS spa-build
+WORKDIR /spa
+# Install deps from the lockfile first (cached unless deps change), then build.
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build   # → /spa/dist
+
+# --- Stage 2: Python runtime ---
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    SPA_DIST_DIR=/app/static
 
 RUN useradd --create-home appuser
 WORKDIR /app
 
 # Non-editable install of the package + prod deps only (no [dev] or [claude] extras).
-# NOTE: copying src before install means dependency layers rebuild on code changes;
-# accepted for the skeleton (CI builds, ~minutes) — revisit if it starts to hurt.
 COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
+# The built SPA, served same-origin by FastAPI (see api/main.py spa_catch_all).
+COPY --from=spa-build /spa/dist /app/static
+
 USER appuser
 EXPOSE 8080
 
-# Cloud Run injects PORT (default 8080). Shell form for the env expansion; exec for
-# signals (uvicorn becomes PID 1, receives SIGTERM). One process, no --workers: Cloud
-# Run scales via instances, and N workers would multiply the SQLAlchemy pool per instance.
+# Cloud Run injects PORT (default 8080). Shell form for env expansion; exec for signals.
 CMD exec uvicorn agentic_librarian.api.main:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-graceful-shutdown 25
