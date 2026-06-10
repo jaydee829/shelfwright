@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import AppShell from './components/AppShell'
 import NotInvited from './components/NotInvited'
 import SignIn from './components/SignIn'
+import AddBookView from './views/AddBookView'
 import AnalysisView from './views/AnalysisView'
 import ChatView from './views/ChatView'
 import HistoryView from './views/HistoryView'
@@ -21,6 +22,7 @@ function Gate() {
           <Route path="history" element={<HistoryView />} />
           <Route path="recommendations" element={<RecommendationsView />} />
           <Route path="analysis" element={<AnalysisView />} />
+          <Route path="add" element={<AddBookView />} />
         </Route>
       </Routes>
     </BrowserRouter>

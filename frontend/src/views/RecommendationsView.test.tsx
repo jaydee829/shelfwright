@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../api/client', () => ({
@@ -11,14 +12,25 @@ import { getRecommendations, setRecommendationStatus } from '../api/client'
 import RecommendationsView from './RecommendationsView'
 
 const rec = {
-  id: 'r1',
-  work_id: 'w1',
-  title: 'Project Hail Mary',
-  authors: ['Weir'],
-  justification: 'You loved The Martian',
-  context: null,
-  suggested_at: '2026-06-01T00:00:00',
-  status: 'Suggested',
+  id: 'r1', work_id: 'w1', title: 'Project Hail Mary', authors: ['Weir'],
+  justification: 'You loved The Martian', context: null,
+  suggested_at: '2026-06-01T00:00:00', status: 'Suggested',
+}
+
+function LocationProbe() {
+  const loc = useLocation()
+  return <div data-testid="loc">{loc.pathname}|{JSON.stringify(loc.state)}</div>
+}
+
+function renderWithRouter() {
+  return render(
+    <MemoryRouter initialEntries={['/recommendations']}>
+      <Routes>
+        <Route path="/recommendations" element={<RecommendationsView />} />
+        <Route path="/add" element={<LocationProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  )
 }
 
 describe('RecommendationsView', () => {
@@ -29,28 +41,33 @@ describe('RecommendationsView', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('renders recommendation cards with the justification', async () => {
-    render(<RecommendationsView />)
+    renderWithRouter()
     expect(await screen.findByText('Project Hail Mary')).toBeInTheDocument()
     expect(screen.getByText(/You loved The Martian/)).toBeInTheDocument()
   })
 
   it('dismisses a recommendation and removes the card', async () => {
-    render(<RecommendationsView />)
+    renderWithRouter()
     await screen.findByText('Project Hail Mary')
     await userEvent.click(screen.getByRole('button', { name: /not for me/i }))
     expect(vi.mocked(setRecommendationStatus)).toHaveBeenCalledWith('r1', 'Dismissed')
     await waitFor(() => expect(screen.queryByText('Project Hail Mary')).not.toBeInTheDocument())
   })
 
-  it('shows "I read this" as disabled (Stage 3)', async () => {
-    render(<RecommendationsView />)
+  it('"I read this" navigates to /add prefilled with the title, author, and suggestion id', async () => {
+    renderWithRouter()
     await screen.findByText('Project Hail Mary')
-    expect(screen.getByRole('button', { name: /i read this/i })).toBeDisabled()
+    await userEvent.click(screen.getByRole('button', { name: /i read this/i }))
+    const probe = await screen.findByTestId('loc')
+    expect(probe.textContent).toContain('/add')
+    expect(probe.textContent).toContain('"title":"Project Hail Mary"')
+    expect(probe.textContent).toContain('"author":"Weir"')
+    expect(probe.textContent).toContain('"suggestionId":"r1"')
   })
 
   it('shows an empty state when there are no picks', async () => {
     vi.mocked(getRecommendations).mockResolvedValue([])
-    render(<RecommendationsView />)
+    renderWithRouter()
     expect(await screen.findByText(/no recommendations/i)).toBeInTheDocument()
   })
 })

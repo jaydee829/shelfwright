@@ -17,8 +17,8 @@ from agentic_librarian.db.session import DatabaseManager
 router = APIRouter()
 db_manager = DatabaseManager()
 
-# Stage 2 allows only Dismissed; Stage 3 wires 'Read' via the add-book flow.
-ALLOWED_STATUS_UPDATES = {"Dismissed"}
+# Stage 3 wires the '✓ I read this' flow (add-book → status Read); 'Dismissed' = 'Not for me'.
+ALLOWED_STATUS_UPDATES = {"Dismissed", "Read"}
 
 
 def set_db_manager(new_manager: DatabaseManager) -> None:

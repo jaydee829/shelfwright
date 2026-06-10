@@ -4,7 +4,7 @@ import { defineConfig } from 'vite'
 
 // Dev only: proxy API paths to the running FastAPI backend so the SPA is same-origin
 // in development. Production same-origin serving is Stage 4 (multi-stage Docker build).
-const API_PATHS = ['/chat', '/conversations', '/history', '/works', '/recommendations', '/analysis', '/health']
+const API_PATHS = ['/chat', '/conversations', '/history', '/works', '/recommendations', '/analysis', '/books', '/health']
 
 export default defineConfig({
   plugins: [react()],

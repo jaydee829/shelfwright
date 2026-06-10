@@ -40,7 +40,10 @@ dependencies = [
     # Schema migrations (Lift 1, ADR-048) — env.py reuses the app's URL resolution
     "alembic>=1.13",
     # Firebase Auth verification (Lift 1, ADR-048) — ADC on Cloud Run, offline JWT checks
-    "firebase-admin>=6.5"
+    "firebase-admin>=6.5",
+    # Cloud Tasks enqueue for deep enrichment (Lift 2 Stage 3) — queues a fresh request
+    # so the slow LLM pass runs with full Cloud Run CPU + long timeout.
+    "google-cloud-tasks>=2.16"
 ]
 
 [project.scripts]

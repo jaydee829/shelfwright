@@ -81,7 +81,7 @@ export function getRecommendations(): Promise<Recommendation[]> {
   return getJson<Recommendation[]>('/recommendations')
 }
 
-export async function setRecommendationStatus(id: string, status: 'Dismissed'): Promise<void> {
+export async function setRecommendationStatus(id: string, status: 'Dismissed' | 'Read'): Promise<void> {
   const res = await authedFetchRaw(`/recommendations/${id}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -102,6 +102,33 @@ export async function newConversation(): Promise<Conversation> {
   const res = await authedFetchRaw('/conversations', { method: 'POST' })
   if (!res.ok) throw new Error(`new conversation → ${res.status}`)
   return res.json() as Promise<Conversation>
+}
+
+export interface AddBookInput {
+  title: string
+  author: string
+  format?: string
+  rating?: number | null
+  notes?: string | null
+  date_completed?: string | null
+}
+
+export interface AddBookResult {
+  work_id: string
+  title: string
+  read_number: number
+  already_logged: boolean
+  enrichment_enqueued: boolean
+}
+
+export async function addBook(input: AddBookInput): Promise<AddBookResult> {
+  const res = await authedFetchRaw('/books', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(`addBook → ${res.status}`)
+  return res.json() as Promise<AddBookResult>
 }
 
 export interface ChatHandlers {

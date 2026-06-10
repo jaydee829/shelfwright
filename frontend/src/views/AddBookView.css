@@ -1,0 +1,16 @@
+.addbook-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 28rem;
+}
+.addbook-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+.addbook-done {
+  color: var(--ok, #2e7d32);
+}
+.addbook-error {
+  color: var(--danger, #c62828);
+}
