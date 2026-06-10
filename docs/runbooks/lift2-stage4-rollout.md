@@ -48,13 +48,45 @@ on the host.
 - This rollout is the first prod write (chat). From here: **back up before every migration.**
 
 ## 3. Apply the migration (gate still CLOSED)
-- **First confirm the starting point:** with cloud-sql-proxy up, `alembic current` MUST show
-  `c804d02d6fbb` (the Lift 1 head). If it shows `30f1e46533e9` already, the migration is done —
-  skip the upgrade. If it shows anything else, STOP and investigate before proceeding.
-- Start cloud-sql-proxy to the prod instance; run `alembic upgrade head` via the docker wrapper
-  (Lift 1 runbook pattern). This moves prod from the Lift 1 head `c804d02d6fbb` to the Stage 1
-  head `30f1e46533e9` (`conversations`, `messages`, `usage.conversation_id` FK).
-- Verify: `alembic current` shows `30f1e46533e9`; the `conversations`/`messages` tables exist.
+Mirrors the Lift 1 runbook §3 (proxy on the WSL host; alembic docker-wrapped). The proxy must
+be **running for the whole step** — it's a foreground binary, so start it in its own WSL shell.
+
+1. **Start the cloud-sql-proxy** (Lift 0 binary on the WSL host) in a dedicated shell — it sits
+   on a blank line while serving. `CONNECTION_NAME` = the `GCP_CLOUDSQL_CONNECTION` repo Variable,
+   or `gcloud sql instances describe librarian-sql --format='value(connectionName)'`:
+   ```bash
+   ./cloud-sql-proxy --port 5433 <CONNECTION_NAME>
+   ```
+   Confirm it's listening (a "connection refused" from the container means it isn't):
+   ```bash
+   ss -tln | grep 5433     # no output = not running. If the container still can't reach it,
+                           # restart with --address 0.0.0.0 (Ctrl-C when done; IAM still gates it).
+   ```
+2. **Build the proxy-routed DATABASE_URL** from the secret (container-routed to host.docker.internal):
+   ```bash
+   export PROD_DB_URL="$(gcloud secrets versions access latest --secret=librarian-db-url \
+     | sed -E 's#@/agentic_librarian\?host=.*#@host.docker.internal:5433/agentic_librarian#')"
+   ```
+3. **Confirm the starting point** (docker-wrapped — WSL python has no deps). It MUST print
+   `c804d02d6fbb` (the Lift 1 head). If it prints `30f1e46533e9`, the migration is already done —
+   skip to step 4. Anything else → STOP and investigate:
+   ```bash
+   docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gateway \
+     -e DATABASE_URL="$PROD_DB_URL" agentic_librarian-app:latest alembic current
+   ```
+4. **Upgrade** (moves prod `c804d02d6fbb` → `30f1e46533e9`: `conversations`, `messages`,
+   `usage.conversation_id` FK):
+   ```bash
+   docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gateway \
+     -e DATABASE_URL="$PROD_DB_URL" agentic_librarian-app:latest alembic upgrade head
+   ```
+5. **Verify** `alembic current` now prints `30f1e46533e9` and the tables exist:
+   ```bash
+   docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gateway \
+     -e DATABASE_URL="$PROD_DB_URL" agentic_librarian-app:latest \
+     python -c 'from sqlalchemy import create_engine, inspect; from agentic_librarian.db.session import resolve_database_url; i = inspect(create_engine(resolve_database_url())); print("chat tables:", [t for t in ("conversations","messages") if t in i.get_table_names()])'
+   ```
+   Ctrl-C the proxy when the step is done.
 
 ## 4. Sanity (gate still CLOSED)
 - The current (old) image is still healthy: minted-IAM-token `GET /health` returns ok.
