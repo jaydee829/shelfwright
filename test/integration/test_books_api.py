@@ -19,7 +19,6 @@ pytestmark = pytest.mark.db_integration
 def client(db_url, monkeypatch):
     manager = DatabaseManager(db_url)
     monkeypatch.setattr(api_main, "db_manager", manager)
-    monkeypatch.setattr(books_mod, "db_manager", manager)
     monkeypatch.setattr(two_phase, "db_manager", manager)
     monkeypatch.setitem(
         api_main.app.dependency_overrides,

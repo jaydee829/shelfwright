@@ -14,19 +14,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.core.user_context import as_user
-from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.enrichment import two_phase
 from agentic_librarian.enrichment.tasks import enqueue_enrichment
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-db_manager = DatabaseManager()  # reserved for future direct reads; two_phase owns the writes
-
-
-def set_db_manager(new_manager: DatabaseManager) -> None:
-    """Override the module db_manager (for tests) — the mcp/server.py pattern."""
-    global db_manager
-    db_manager = new_manager
 
 
 class AddBookRequest(BaseModel):

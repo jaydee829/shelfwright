@@ -9,7 +9,9 @@ Config (wired in prod in Stage 4; absent in local dev → enqueue is a logged no
   CLOUD_TASKS_QUEUE     full queue path projects/<p>/locations/<loc>/queues/<q>
   ENRICH_TARGET_BASE_URL  the Cloud Run base URL (no trailing slash)
   ENRICH_INVOKER_SA     service-account email the queue signs the OIDC token as
-  ENRICH_OIDC_AUDIENCE  optional explicit audience (defaults to the full task URL)"""
+  ENRICH_OIDC_AUDIENCE  the OIDC audience. The enqueue side defaults it to the full task
+                        URL, but the receiver (api/internal.py) hard-requires it and 403s
+                        when unset — so in prod it must be set to match on both sides."""
 
 from __future__ import annotations
 
