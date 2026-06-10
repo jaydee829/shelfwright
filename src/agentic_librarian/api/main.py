@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
-from agentic_librarian.api import auth
+from agentic_librarian.api import analysis, auth, recommendations
 from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.books import router as books_router
@@ -36,16 +36,20 @@ def set_db_manager(new_manager: DatabaseManager) -> None:
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Build ONE DatabaseManager at startup and inject it into every module that used to
-    own a lazy pool (Lift 2 Stage 4 — closes the Stage 1 ~4-pools note). Lazy construction
-    means no DB connection happens here. Tests that use TestClient WITHOUT a `with` block
-    skip lifespan and keep their own monkeypatched managers."""
+    """Build ONE DatabaseManager at startup and inject it into the API-request-path
+    modules that each owned a lazy pool (main, auth, transcript, usage, recommendations,
+    analysis) — Lift 2 Stage 4 consolidation. enrichment/two_phase keeps its own pool
+    (separate path/test seam). Lazy construction means no DB connection happens here.
+    Tests that use TestClient WITHOUT a `with` block skip lifespan and keep their own
+    monkeypatched managers."""
     shared = DatabaseManager()
     app.state.db_manager = shared
     set_db_manager(shared)
     auth.set_db_manager(shared)
     transcript.set_db_manager(shared)
     usage.set_db_manager(shared)
+    recommendations.set_db_manager(shared)
+    analysis.set_db_manager(shared)
     yield
 
 
