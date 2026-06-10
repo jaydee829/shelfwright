@@ -214,3 +214,15 @@ This file tracks work history and ticket references.
 - **Description**: The SSE chat turn (`chat/stream.py` `sse_turn`) issues synchronous INSERTs on the asyncio event loop — both `transcript.append_message` calls (`on_persist`) AND the `usage.record_llm_call` write in `runtime._record_event_usage`. Under concurrent `/chat` load this blocks the loop. Gemini flagged the transcript write HIGH on PR #43; the fix must cover BOTH writes coherently via `asyncio.to_thread(...)`.
 - **URL**: PR #43 (review reply discussion_r3383988870); see also the `core/usage.py` latency note.
 - **Notes**: Do alongside the Stage 4 DatabaseManager pool consolidation. `asyncio.to_thread` copies the current context, so verify `as_user`/`current_user_id` still resolves inside the worker thread. No live impact until the service deploys against Cloud SQL (Stage 4 opens the IAM gate).
+
+### 2026-06-09 - DOC-031: Consolidated developer setup documentation
+- **Status**: Open
+- **Description**: Write one dev-setup doc covering the dual-checkout (C:\dev Windows clone vs the WSL clone mounted into the app container), the throwaway-`docker run` test command, Node-on-the-Windows-host for the frontend, `frontend/.env.local` Firebase config, and "pre-commit is the authoritative linter." `frontend/README.md` already covers frontend basics; this is the consolidated guide.
+- **URL**: PR #44
+- **Notes**: Target Lift 2 wrap-up (alongside the Stage 4 runbook); expand as we go.
+
+### 2026-06-09 - DEBT-032: Modernize ruff (version bump + known-first-party)
+- **Status**: Open
+- **Description**: Two drift axes between the dev image and CI: (1) `.pre-commit-config.yaml` pins ruff **v0.4.4** but `[dev]` installs **ruff>=0.14.14** (version drift); (2) `agentic_librarian` is classified first-party by ruff in the editable-install image (separate import group) but third-party in CI's isolated pre-commit env (one group) — the recurring I001 mismatch. Fix together in ONE chore PR: bump the pre-commit ruff pin to current + add `[tool.ruff.lint.isort] known-first-party = ["agentic_librarian"]`, then a one-time repo-wide `ruff --fix`/`format`. Deferred from PR #44 to keep the feature diff clean; evaluate the bump's reformat before deciding it's the right move.
+- **URL**: N/A
+- **Notes**: PR #44 worked around it by reordering the two new files to the current one-group convention (pinned ruff 0.4.4). See memory `ruff-firstparty-precommit`.

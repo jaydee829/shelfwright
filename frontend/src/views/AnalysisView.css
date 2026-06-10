@@ -1,0 +1,16 @@
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+.tab { border: 1px solid #d1d5db; background: #fff; border-radius: 999px; padding: 6px 14px; }
+.tab.active { background: #111827; color: #fff; border-color: #111827; }
+.snapshot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.stat { display: flex; flex-direction: column; padding: 16px; border: 1px solid #e5e7eb; border-radius: 12px; }
+.stat-num { font-size: 28px; font-weight: 700; }
+.two-col { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.ranked ul { list-style: none; padding: 0; margin: 0; }
+.ranked li { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+.ranked .count { color: #6b7280; }
+.muted { color: #9ca3af; }
+
+@media (min-width: 768px) {
+  .snapshot-grid { grid-template-columns: repeat(4, 1fr); }
+  .two-col { grid-template-columns: 1fr 1fr; }
+}
