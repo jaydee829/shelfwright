@@ -28,6 +28,9 @@ then merge PR-B as the deliberate gate-opening act.
 - This rollout is the first prod write (chat). From here: **back up before every migration.**
 
 ## 3. Apply the migration (gate still CLOSED)
+- **First confirm the starting point:** with cloud-sql-proxy up, `alembic current` MUST show
+  `c804d02d6fbb` (the Lift 1 head). If it shows `30f1e46533e9` already, the migration is done —
+  skip the upgrade. If it shows anything else, STOP and investigate before proceeding.
 - Start cloud-sql-proxy to the prod instance; run `alembic upgrade head` via the docker wrapper
   (Lift 1 runbook pattern). This moves prod from the Lift 1 head `c804d02d6fbb` to the Stage 1
   head `30f1e46533e9` (`conversations`, `messages`, `usage.conversation_id` FK).
