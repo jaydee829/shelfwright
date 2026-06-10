@@ -137,16 +137,23 @@ export async function streamChat(message: string, handlers: ChatHandlers): Promi
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let sep: number
-    while ((sep = buffer.indexOf('\n\n')) !== -1) {
-      const frame = buffer.slice(0, sep)
-      buffer = buffer.slice(sep + 2)
-      dispatchFrame(frame, handlers)
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let sep: number
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, sep)
+        buffer = buffer.slice(sep + 2)
+        dispatchFrame(frame, handlers)
+      }
     }
+  } catch {
+    // A mid-stream read failure (e.g. the connection dropped) ends the turn as one error.
+    handlers.onError(GENERIC_CHAT_ERROR)
+  } finally {
+    reader.releaseLock()
   }
 }
 
@@ -154,8 +161,13 @@ function dispatchFrame(frame: string, handlers: ChatHandlers): void {
   let event = 'message'
   let data = ''
   for (const line of frame.split('\n')) {
-    if (line.startsWith('event:')) event = line.slice(6).trim()
-    else if (line.startsWith('data:')) data += line.slice(5).trim()
+    if (line.startsWith('event:')) {
+      event = line.slice(6).trim()
+    } else if (line.startsWith('data:')) {
+      // SSE joins multiple data: lines within one event with a newline.
+      const content = line.slice(5).trim()
+      data = data ? `${data}\n${content}` : content
+    }
   }
   let payload: Record<string, string> = {}
   if (data) {

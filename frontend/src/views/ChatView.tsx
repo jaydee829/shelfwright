@@ -23,19 +23,21 @@ export default function ChatView() {
     setInput('')
     setSending(true)
     setActivity(null)
-    setMessages((m) => [...m, { role: 'user', content: text }])
+    // Append the user turn plus an empty assistant bubble we fill in as text streams in.
+    setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }])
     let reply = ''
     await streamChat(text, {
       onActivity: (_kind, detail) => setActivity(detail),
       onText: (chunk) => {
         reply += chunk
+        setMessages((m) => [...m.slice(0, -1), { role: 'assistant', content: reply }])
       },
       onError: (detail) => {
         reply = reply || detail
+        setMessages((m) => [...m.slice(0, -1), { role: 'assistant', content: reply }])
       },
     })
     setActivity(null)
-    setMessages((m) => [...m, { role: 'assistant', content: reply }])
     setSending(false)
   }
 

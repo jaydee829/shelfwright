@@ -10,12 +10,11 @@ from __future__ import annotations
 from collections import Counter
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import joinedload, selectinload
-
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import joinedload
 
 router = APIRouter()
 db_manager = DatabaseManager()
@@ -40,13 +39,18 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
             session.query(ReadingHistory)
             .filter(ReadingHistory.user_id == user.id)  # my reading, not the commons (ADR-048)
             .options(
-                joinedload(ReadingHistory.edition).options(
-                    joinedload(Edition.work).options(
-                        selectinload(Work.contributors).joinedload(WorkContributor.author),
-                        selectinload(Work.tropes).joinedload(WorkTrope.trope),
-                    ),
-                    selectinload(Edition.narrators),
-                )
+                # Flat chained loaders (repo convention — see recommendations.py / main.py).
+                # The shared edition->work spine is merged by SQLAlchemy; collections use
+                # selectinload to avoid joined-collection row inflation.
+                joinedload(ReadingHistory.edition)
+                .joinedload(Edition.work)
+                .selectinload(Work.contributors)
+                .joinedload(WorkContributor.author),
+                joinedload(ReadingHistory.edition)
+                .joinedload(Edition.work)
+                .selectinload(Work.tropes)
+                .joinedload(WorkTrope.trope),
+                joinedload(ReadingHistory.edition).selectinload(Edition.narrators),
             )
             .all()
         )

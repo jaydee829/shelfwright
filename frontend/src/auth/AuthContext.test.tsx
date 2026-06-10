@@ -63,4 +63,13 @@ describe('AuthContext', () => {
     h.authCb!({ email: 'stranger@example.com' })
     await waitFor(() => expect(screen.getByText(/status:notInvited/)).toBeInTheDocument())
   })
+
+  it('stays on loading when the backend probe errors (transient), not notInvited', async () => {
+    vi.mocked(probeAccess).mockResolvedValue('error')
+    renderProvider()
+    h.authCb!({ email: 'friend@example.com' })
+    await waitFor(() => expect(vi.mocked(probeAccess)).toHaveBeenCalled())
+    expect(screen.queryByText(/status:notInvited/)).not.toBeInTheDocument()
+    expect(screen.getByText(/status:loading/)).toBeInTheDocument()
+  })
 })

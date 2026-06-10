@@ -33,7 +33,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus('loading')
       // Firebase verified the identity; the backend decides invited-or-not (403).
       const access = await probeAccess()
-      setStatus(access === 'ready' ? 'ready' : 'notInvited')
+      // A transient backend/network error must NOT look like a rejected invite; stay on
+      // the loading screen rather than wrongly showing "not invited".
+      if (access === 'error') {
+        setStatus('loading')
+      } else {
+        setStatus(access === 'ready' ? 'ready' : 'notInvited')
+      }
     })
   }, [])
 
