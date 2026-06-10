@@ -22,6 +22,15 @@ export SERVICE="librarian-api"
 export GITHUB_REPO="jaydee829/agentic_librarian"
 export DUMP_FILE="agentic_librarian_FINAL_20260605_014912.sql.gz"
 
+# --- Lift 2 Stage 4: async enrichment (Cloud Tasks) + deep-scout key secrets ---
+export TASKS_QUEUE_NAME="librarian-enrich"
+export TASKS_QUEUE_PATH="projects/${PROJECT_ID}/locations/${REGION}/queues/${TASKS_QUEUE_NAME}"
+export ENRICH_INVOKER_SA_NAME="librarian-enrich-invoker"
+export ENRICH_INVOKER_SA="${ENRICH_INVOKER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+export SECRET_GOOGLE_SEARCH="librarian-google-search-key"
+export SECRET_GOOGLE_BOOKS="librarian-google-books-key"
+export SECRET_HARDCOVER="librarian-hardcover-key"
+
 # Re-assert the target project in every script — prevents a fresh shell from silently
 # operating on whatever project the global gcloud config last pointed at.
 # (config set does not validate existence, so this is safe before 01 creates it.)
