@@ -54,8 +54,10 @@ async def sse_turn(
         try:
             with as_user(user_id):
                 reply = await conv.asend(message)
-                on_persist("user", message)
-                on_persist("assistant", reply)
+                # INF-030: persist off the event loop (sync INSERT). to_thread copies the
+                # context, so append_message's get_required_user_id still resolves this user.
+                await asyncio.to_thread(on_persist, "user", message)
+                await asyncio.to_thread(on_persist, "assistant", reply)
             return reply
         finally:
             conv.close()

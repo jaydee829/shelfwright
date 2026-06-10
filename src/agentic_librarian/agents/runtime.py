@@ -48,7 +48,7 @@ def build_runner() -> Runner:
     )
 
 
-def _record_event_usage(event, conversation_id: uuid.UUID | None) -> None:
+async def _record_event_usage(event, conversation_id: uuid.UUID | None) -> None:
     """Meter one ADK event if it carries usage (duck-typed: unit-test fakes and
     non-LLM events simply lack usage_metadata)."""
     # NOTE: with StreamingMode.SSE each partial event would carry usage; run_async is
@@ -56,7 +56,10 @@ def _record_event_usage(event, conversation_id: uuid.UUID | None) -> None:
     um = getattr(event, "usage_metadata", None)
     if um is None:
         return
-    record_llm_call(
+    # INF-030: the metering INSERT runs off the event loop. to_thread copies the context,
+    # so record_llm_call's get_required_user_id still resolves the turn's user.
+    await asyncio.to_thread(
+        record_llm_call,
         vendor="gemini",
         model=getattr(event, "model_version", None) or os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
         input_tokens=getattr(um, "prompt_token_count", 0) or 0,
@@ -92,7 +95,7 @@ class LibrarianConversation:
         async for event in self._runner.run_async(
             user_id=self.user_id, session_id=self.session_id, new_message=content
         ):
-            _record_event_usage(event, self.conversation_id)
+            await _record_event_usage(event, self.conversation_id)
             if self.on_event:
                 author = getattr(event, "author", None)
                 if author and author != last_author:
