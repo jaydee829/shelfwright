@@ -92,3 +92,27 @@ Run this pass during each spec's review and record any findings below.
   (SEC-001/SEC-002 residual-risk arguments, absence of rate limiting) is now on a
   path to expiry: Lift 2 opens the Cloud Run IAM gate; Lift 3 performs the full
   security posture re-review.
+
+## Cloud Run IAM gate OPEN (Lift 2 Stage 4, 2026-06-10)
+
+The Cloud Run service is now deployed `--allow-unauthenticated`: the platform IAM gate no
+longer fronts the app. The boundary is therefore enforced entirely **in-app**:
+
+- **Every user-facing route is Firebase-gated** — the Lift 1 auth dependency verifies a
+  Firebase ID token (401 missing/invalid, 403 verified-but-not-invited, 503 cert-fetch
+  outage). `SIGNUP_MODE=invite` keeps the door closed to the uninvited.
+- **`/health` is intentionally open** (unauthenticated liveness); `GET /` and the SPA static
+  assets are public by design (the app shell carries no data; all data calls are Firebase-gated).
+- **The internal enrich route (`POST /internal/enrich/{work_id}`) is queue-OIDC-gated** — it
+  verifies the Cloud Tasks invoker SA's Google-signed OIDC token (email == `ENRICH_INVOKER_SA`,
+  `email_verified`, audience == `ENRICH_OIDC_AUDIENCE`) and **fails closed** if either var is
+  unset. This gate is independent of (and survives) the now-open IAM gate.
+- **FastAPI auto-docs are disabled** (`docs_url=None, redoc_url=None, openapi_url=None`) so the
+  API schema isn't served unauthenticated now that the service is public. (Those paths fall
+  through to the SPA catch-all.)
+
+**Expiring assumptions:** transport-level "single user" reasoning (the SEC-001/SEC-002
+residual-risk arguments, the absence of rate limiting) no longer holds now that the gate is
+open to invited friends. A missing/incomplete Cloud Tasks setup degrades to enrichment
+**no-ops**, not exposure. Full security re-review — rate limiting, abuse controls, non-Google
+OIDC `email_verified` semantics — is Lift 3 (open signup).
