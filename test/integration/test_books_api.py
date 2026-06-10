@@ -119,3 +119,37 @@ def test_add_book_is_user_scoped(client, db_url, monkeypatch):
         assert rows == []  # nothing logged to the other user
         mine = s.query(ReadingHistory).filter(ReadingHistory.user_id == DEFAULT_USER_ID).all()
         assert len(mine) == 1
+
+
+def test_add_book_rejects_boolean_rating(client, monkeypatch):
+    monkeypatch.setattr(books_mod, "enqueue_enrichment", lambda wid: True)
+    _stub_fast(monkeypatch, {"title": "X", "contributors": [{"name": "Y", "role": "Author"}]})
+    resp = client.post("/books", json={"title": "X", "author": "Y", "rating": True})
+    assert resp.status_code == 422
+
+
+def test_add_book_same_date_reports_already_logged(client, monkeypatch):
+    monkeypatch.setattr(books_mod, "enqueue_enrichment", lambda wid: True)
+    _stub_fast(monkeypatch, {"title": "Solaris",
+                             "contributors": [{"name": "Stanislaw Lem", "role": "Author"}], "genres": [], "moods": []})
+    payload = {"title": "Solaris", "author": "Stanislaw Lem", "format": "ebook", "date_completed": "2021-05-01"}
+
+    first = client.post("/books", json=payload).json()
+    second = client.post("/books", json=payload).json()
+
+    assert first["already_logged"] is False and first["read_number"] == 1
+    assert second["already_logged"] is True  # same work + same date = no new read-event
+    assert second["enrichment_enqueued"] is False  # de-dup hit on the 2nd → no re-enqueue
+
+
+def test_add_book_survives_enqueue_failure(client, monkeypatch):
+    def _boom(wid):
+        raise RuntimeError("cloud tasks down")
+
+    monkeypatch.setattr(books_mod, "enqueue_enrichment", _boom)
+    _stub_fast(monkeypatch, {"title": "Blindsight",
+                             "contributors": [{"name": "Peter Watts", "role": "Author"}], "genres": [], "moods": []})
+
+    resp = client.post("/books", json={"title": "Blindsight", "author": "Peter Watts"})
+    assert resp.status_code == 200  # the book is saved even though enqueue raised
+    assert resp.json()["enrichment_enqueued"] is False

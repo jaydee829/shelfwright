@@ -44,6 +44,15 @@ class AddBookRequest(BaseModel):
             raise ValueError("must be a non-empty string")
         return v.strip()
 
+    @field_validator("rating", mode="before")
+    @classmethod
+    def _no_bool_rating(cls, v: object) -> object:
+        # bool is an int subclass — reject it so rating=True can't slip in as 1 (parity with
+        # the add_book_to_history MCP tool). Must run before Pydantic coerces bool→int.
+        if isinstance(v, bool):
+            raise ValueError("rating must be an integer, not a boolean")
+        return v
+
     @field_validator("date_completed")
     @classmethod
     def _not_future(cls, v: date | None) -> date | None:
