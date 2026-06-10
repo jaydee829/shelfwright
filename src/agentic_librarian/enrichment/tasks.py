@@ -44,6 +44,9 @@ def enqueue_enrichment(work_id: str) -> bool:
     audience = os.environ.get("ENRICH_OIDC_AUDIENCE") or url
     task = {
         "http_request": {
+            # String, not tasks_v2.HttpMethod.POST, on purpose: proto-plus coerces it, and
+            # keeping tasks_v2 out of here contains the google-cloud-tasks import to _client()
+            # so enqueue_enrichment (and its unit tests) need no such dependency installed.
             "http_method": "POST",
             "url": url,
             "oidc_token": {"service_account_email": sa, "audience": audience},
