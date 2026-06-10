@@ -48,6 +48,36 @@ def test_history_is_scoped_to_the_caller(two_user_client):
     assert [h["date_completed"] for h in theirs] == ["2022-02-02"]
 
 
+def test_history_pagination_correct_with_multi_contributor_work(two_user_client, db_url):
+    # A work with 2 author-contributors multiplies the join rows; LIMIT must still count
+    # ReadingHistory rows, not multiplied rows (the joinedload-vs-selectinload question).
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        a1 = AuthorModel(name="First Author")
+        a2 = AuthorModel(name="Second Author")
+        work = Work(
+            title="Co-Authored Book",
+            contributors=[WorkContributor(author=a1, role="Author"), WorkContributor(author=a2, role="Author")],
+        )
+        edition = Edition(work=work, format="ebook")
+        session.add_all([a1, a2, work, edition])
+        session.flush()
+        for d in (date(2023, 3, 3), date(2024, 4, 4), date(2025, 5, 5)):
+            session.add(ReadingHistory(edition_id=edition.id, user_id=DEFAULT_USER_ID, date_completed=d))
+        session.flush()
+
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    page = client.get("/history?limit=3&offset=0").json()
+    # 3 newest reads (all on the co-authored work) must come back as 3 DISTINCT history rows,
+    # each listing both authors — not collapsed by row multiplication.
+    assert [h["date_completed"] for h in page] == ["2025-05-05", "2024-04-04", "2023-03-03"]
+    assert all(set(h["authors"]) == {"First Author", "Second Author"} for h in page)
+    # The boundary Gemini's review worried about: limit < read-count must return exactly `limit`
+    # distinct ReadingHistory rows (not fewer because the join multiplied by 2 contributors).
+    page2 = client.get("/history?limit=2&offset=0").json()
+    assert [h["date_completed"] for h in page2] == ["2025-05-05", "2024-04-04"]
+
+
 def test_history_paginates_newest_first(two_user_client, db_url):
     # Add three more reads for DEFAULT_USER on the shared edition, distinct dates.
     manager = DatabaseManager(db_url)
