@@ -73,8 +73,8 @@ export async function probeAccess(): Promise<'ready' | 'notInvited' | 'error'> {
   return 'error'
 }
 
-export function getHistory(): Promise<HistoryItem[]> {
-  return getJson<HistoryItem[]>('/history')
+export function getHistory(limit = 50, offset = 0): Promise<HistoryItem[]> {
+  return getJson<HistoryItem[]>(`/history?limit=${limit}&offset=${offset}`)
 }
 
 export function getRecommendations(): Promise<Recommendation[]> {
