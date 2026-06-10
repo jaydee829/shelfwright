@@ -5,6 +5,11 @@
 set -euo pipefail
 source "$(dirname "$0")/00-config.sh"
 
+# 0) Enable the Cloud Tasks API — Stage 4 is the first lift to use it, so Lift 0's
+#    01-project.sh enable-list predates it. (Enabling can take ~30s to propagate; if the
+#    queue create below 403s immediately, wait and re-run — nothing before it has run yet.)
+gcloud services enable cloudtasks.googleapis.com
+
 # 1) The queue the fast /books pass enqueues onto.
 gcloud tasks queues create "${TASKS_QUEUE_NAME}" --location="${REGION}"
 
