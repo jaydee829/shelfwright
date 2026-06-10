@@ -49,17 +49,12 @@ def test_history_is_scoped_to_the_caller(two_user_client):
 
 
 def test_history_paginates_newest_first(two_user_client, db_url):
-    from datetime import date as _date
-
-    from agentic_librarian.db.models import Edition as _Edition
-    from agentic_librarian.db.models import ReadingHistory as _RH
-
     # Add three more reads for DEFAULT_USER on the shared edition, distinct dates.
     manager = DatabaseManager(db_url)
     with manager.get_session() as session:
-        edition_id = session.query(_Edition).first().id
-        for d in (_date(2023, 3, 3), _date(2024, 4, 4), _date(2025, 5, 5)):
-            session.add(_RH(edition_id=edition_id, user_id=DEFAULT_USER_ID, date_completed=d))
+        edition_id = session.query(Edition).first().id
+        for d in (date(2023, 3, 3), date(2024, 4, 4), date(2025, 5, 5)):
+            session.add(ReadingHistory(edition_id=edition_id, user_id=DEFAULT_USER_ID, date_completed=d))
         session.flush()
 
     c = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
