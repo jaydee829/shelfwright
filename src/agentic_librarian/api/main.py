@@ -78,7 +78,12 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noq
 
 
 @app.get("/history")
-def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+def get_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+):
+    """Paginated reading log, newest first (INF-029 — mirrors /works)."""
     with db_manager.get_session() as session:
         # Query reading history with eager loading for efficiency
         history_entries = (
@@ -92,7 +97,9 @@ def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B
                 .joinedload(Work.contributors)
                 .joinedload(WorkContributor.author)
             )
-            .order_by(ReadingHistory.date_completed.desc())
+            .order_by(ReadingHistory.date_completed.desc(), ReadingHistory.id)
+            .offset(offset)
+            .limit(limit)
             .all()
         )
 

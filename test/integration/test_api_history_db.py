@@ -46,3 +46,24 @@ def test_history_is_scoped_to_the_caller(two_user_client):
     assert [h["date_completed"] for h in mine] == ["2021-01-01"]
     theirs = two_user_client(FRIEND_ID, "friend@example.com").get("/history").json()
     assert [h["date_completed"] for h in theirs] == ["2022-02-02"]
+
+
+def test_history_paginates_newest_first(two_user_client, db_url):
+    from datetime import date as _date
+
+    from agentic_librarian.db.models import Edition as _Edition
+    from agentic_librarian.db.models import ReadingHistory as _RH
+
+    # Add three more reads for DEFAULT_USER on the shared edition, distinct dates.
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        edition_id = session.query(_Edition).first().id
+        for d in (_date(2023, 3, 3), _date(2024, 4, 4), _date(2025, 5, 5)):
+            session.add(_RH(edition_id=edition_id, user_id=DEFAULT_USER_ID, date_completed=d))
+        session.flush()
+
+    c = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    page1 = c.get("/history?limit=2&offset=0").json()
+    page2 = c.get("/history?limit=2&offset=2").json()
+    assert [h["date_completed"] for h in page1] == ["2025-05-05", "2024-04-04"]  # newest first
+    assert [h["date_completed"] for h in page2] == ["2023-03-03", "2021-01-01"]  # next page, no overlap

@@ -31,6 +31,8 @@ def test_get_history_empty():
         mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
         mock_query.all.return_value = []
 
         response = client.get("/history")
@@ -61,6 +63,8 @@ def test_get_history_with_data():
         mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
         mock_query.all.return_value = [mock_history]
 
         response = client.get("/history")
@@ -96,9 +100,42 @@ def test_get_history_no_date():
         mock_query.filter.return_value = mock_query
         mock_query.options.return_value = mock_query
         mock_query.order_by.return_value = mock_query
+        mock_query.offset.return_value = mock_query
+        mock_query.limit.return_value = mock_query
         mock_query.all.return_value = [mock_history]
 
         response = client.get("/history")
         assert response.status_code == 200
         data = response.json()
         assert data[0]["date_completed"] is None
+
+
+def _history_chain(mock_session, results):
+    """Wire query().join().join().filter().options().order_by().offset().limit().all()."""
+    mock_query = mock_session.query.return_value
+    mock_query.join.return_value = mock_query
+    mock_query.filter.return_value = mock_query
+    mock_query.options.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.offset.return_value = mock_query
+    mock_query.limit.return_value = mock_query
+    mock_query.all.return_value = results
+    return mock_query
+
+
+def test_get_history_pagination_params_forwarded():
+    with patch("agentic_librarian.api.main.db_manager") as mock_db:
+        mock_session = MagicMock()
+        mock_db.get_session.return_value.__enter__.return_value = mock_session
+        mock_query = _history_chain(mock_session, [])
+
+        response = client.get("/history?limit=10&offset=20")
+        assert response.status_code == 200
+        mock_query.offset.assert_called_once_with(20)
+        mock_query.limit.assert_called_once_with(10)
+
+
+def test_get_history_limit_cap_enforced():
+    assert client.get("/history?limit=500").status_code == 422
+    assert client.get("/history?limit=0").status_code == 422
+    assert client.get("/history?offset=-1").status_code == 422
