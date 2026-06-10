@@ -99,3 +99,13 @@ def test_cannot_dismiss_another_users_suggestion(client, db_url):
 
     resp = client.post(f"/recommendations/{sid}/status", json={"status": "Dismissed"})
     assert resp.status_code == 404  # scoping: not the caller's suggestion
+
+
+def test_mark_read_removes_from_active_list(client, db_url):
+    manager = DatabaseManager(db_url)
+    sid, _ = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Read It", author="Q")
+
+    resp = client.post(f"/recommendations/{sid}/status", json={"status": "Read"})
+    assert resp.status_code == 200
+    assert resp.json() == {"id": str(sid), "status": "Read"}
+    assert client.get("/recommendations").json() == []  # no longer "Suggested"
