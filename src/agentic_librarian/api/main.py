@@ -1,15 +1,19 @@
+import contextlib
+
 from fastapi import Body, Depends, FastAPI, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
+from agentic_librarian.api import analysis, auth, recommendations
 from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.books import router as books_router
 from agentic_librarian.api.internal import router as internal_router
 from agentic_librarian.api.recommendations import router as recommendations_router
 from agentic_librarian.chat import stream, transcript
+from agentic_librarian.core import usage
 from agentic_librarian.core.user_context import as_user
 from agentic_librarian.db.models import (
     Edition,
@@ -21,11 +25,35 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.db.session import DatabaseManager
 
-app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()
-# NOTE: several modules each own a lazy DatabaseManager (this module, api/auth.py,
-# chat/transcript.py, core/usage.py) — ~4 pools. Acceptable at friends-scale; consolidating
-# into one shared manager is deferred to Lift 2 Stage 4 (cleanups), per the Stage 1 final review.
+
+
+def set_db_manager(new_manager: DatabaseManager) -> None:
+    """Override this module's db_manager (tests / the shared-pool lifespan) — mcp/server.py pattern."""
+    global db_manager
+    db_manager = new_manager
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Build ONE DatabaseManager at startup and inject it into the API-request-path
+    modules that each owned a lazy pool (main, auth, transcript, usage, recommendations,
+    analysis) — Lift 2 Stage 4 consolidation. enrichment/two_phase keeps its own pool
+    (separate path/test seam). Lazy construction means no DB connection happens here.
+    Tests that use TestClient WITHOUT a `with` block skip lifespan and keep their own
+    monkeypatched managers."""
+    shared = DatabaseManager()
+    app.state.db_manager = shared
+    set_db_manager(shared)
+    auth.set_db_manager(shared)
+    transcript.set_db_manager(shared)
+    usage.set_db_manager(shared)
+    recommendations.set_db_manager(shared)
+    analysis.set_db_manager(shared)
+    yield
+
+
+app = FastAPI(title="Agentic Librarian API", lifespan=lifespan)
 app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(books_router)

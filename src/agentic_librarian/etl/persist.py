@@ -4,6 +4,8 @@ so both paths build the catalog identically (DRY)."""
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
 from sqlalchemy.orm import Session
 
@@ -22,6 +24,20 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_standardize(fn, *args, label: str, **kwargs):
+    """Run a standardize_* embedding call, returning its Trope/Style, or None on failure.
+    An embedding API error (bad/transient key, 429/5xx) must skip that one vectorization,
+    not abort the whole persist (REC-021/REC-023 degrade-gracefully pattern). Takes the
+    callable + its args directly (not a lambda) so loop variables bind by value (avoids B023)."""
+    try:
+        return fn(*args, **kwargs)
+    except Exception:  # noqa: BLE001 - any embedding/standardize failure degrades to skip-this-item
+        logger.warning("skipping vectorization for %s (embedding/standardize failed)", label, exc_info=True)
+        return None
 
 
 def _iter_style_items(style_data: dict | None, owner_label: str):
@@ -100,7 +116,11 @@ def persist_enriched_work(
         # Process Author Styles if role is Author
         if role == "Author" and author_style_data:
             for attr_type, style_name in _iter_style_items(author_style_data, f"Author '{name}'"):
-                standard_style = style_manager.standardize_style(style_name, category="Author")
+                standard_style = _safe_standardize(
+                    style_manager.standardize_style, style_name, category="Author", label=f"style {style_name!r}"
+                )
+                if standard_style is None:
+                    continue
                 existing_link = (
                     session.query(AuthorStyle)
                     .filter_by(author_id=author.id, style_id=standard_style.id, attribute_type=attr_type)
@@ -160,7 +180,11 @@ def persist_enriched_work(
     work_style_data = row.get("work_style", {})
     if work_style_data:
         for attr_type, style_name in _iter_style_items(work_style_data, f"Work '{row.get('Title')}'"):
-            standard_style = style_manager.standardize_style(style_name, category="Work")
+            standard_style = _safe_standardize(
+                style_manager.standardize_style, style_name, category="Work", label=f"style {style_name!r}"
+            )
+            if standard_style is None:
+                continue
             existing_link = (
                 session.query(WorkStyle)
                 .filter_by(work_id=work.id, style_id=standard_style.id, attribute_type=attr_type)
@@ -194,7 +218,11 @@ def persist_enriched_work(
         n_style_data = narrator_styles.get(n_name, {})
         if n_style_data:
             for attr_type, style_name in _iter_style_items(n_style_data, f"Narrator '{n_name}'"):
-                standard_style = style_manager.standardize_style(style_name, category="Narrator")
+                standard_style = _safe_standardize(
+                    style_manager.standardize_style, style_name, category="Narrator", label=f"style {style_name!r}"
+                )
+                if standard_style is None:
+                    continue
                 existing_link = (
                     session.query(NarratorStyle)
                     .filter_by(narrator_id=narrator.id, style_id=standard_style.id, attribute_type=attr_type)
@@ -264,7 +292,11 @@ def persist_enriched_work(
                 score = t_data.get("relevance_score", 1.0)
                 just = t_data.get("justification")
 
-                standardized_trope = trope_manager.standardize_trope(name, description=desc)
+                standardized_trope = _safe_standardize(
+                    trope_manager.standardize_trope, name, description=desc, label=f"trope {name!r}"
+                )
+                if standardized_trope is None:
+                    continue
                 existing_link = (
                     session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
                 )
@@ -279,7 +311,9 @@ def persist_enriched_work(
         else:
             # Fallback to simple tags if no enriched tropes found
             for tag in all_fallback_tags:
-                standardized_trope = trope_manager.standardize_trope(tag)
+                standardized_trope = _safe_standardize(trope_manager.standardize_trope, tag, label=f"trope {tag!r}")
+                if standardized_trope is None:
+                    continue
                 existing_link = (
                     session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
                 )
