@@ -7,6 +7,7 @@ from agentic_librarian.agents.runtime import LibrarianConversation, astart_conve
 from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.books import router as books_router
+from agentic_librarian.api.internal import router as internal_router
 from agentic_librarian.api.recommendations import router as recommendations_router
 from agentic_librarian.chat import stream, transcript
 from agentic_librarian.core.user_context import as_user
@@ -28,6 +29,7 @@ db_manager = DatabaseManager()
 app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(books_router)
+app.include_router(internal_router)
 
 
 @app.get("/health")
