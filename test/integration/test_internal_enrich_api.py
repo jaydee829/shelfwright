@@ -41,11 +41,11 @@ def _seed_work(manager):
 def test_valid_queue_token_runs_deep_enrich(client, db_url, monkeypatch):
     manager = DatabaseManager(db_url)
     work_id = _seed_work(manager)
-    monkeypatch.setattr(internal_mod, "_verify_oidc",
-                        lambda token, audience: {"email": QUEUE_SA, "email_verified": True})
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
     called = {}
-    monkeypatch.setattr(internal_mod.two_phase, "enrich_deep",
-                        lambda wid: called.setdefault("wid", wid) or True)
+    monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: called.setdefault("wid", wid) or True)
 
     resp = client.post(f"/internal/enrich/{work_id}", headers={"Authorization": "Bearer good"})
     assert resp.status_code == 200
@@ -58,8 +58,9 @@ def test_missing_token_is_rejected(client):
 
 
 def test_wrong_service_account_is_forbidden(client, monkeypatch):
-    monkeypatch.setattr(internal_mod, "_verify_oidc",
-                        lambda token, audience: {"email": "attacker@evil.com", "email_verified": True})
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": "attacker@evil.com", "email_verified": True}
+    )
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
     assert resp.status_code == 403
 
@@ -74,8 +75,9 @@ def test_bad_token_signature_is_forbidden(client, monkeypatch):
 
 
 def test_unknown_work_returns_404(client, monkeypatch):
-    monkeypatch.setattr(internal_mod, "_verify_oidc",
-                        lambda token, audience: {"email": QUEUE_SA, "email_verified": True})
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
     monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: False)
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer good"})
     assert resp.status_code == 404
@@ -84,8 +86,9 @@ def test_unknown_work_returns_404(client, monkeypatch):
 def test_unverified_email_is_forbidden(client, monkeypatch):
     # Mutation guard: a token with the correct SA email but email_verified=False must still 403.
     # Deleting the `not claims.get("email_verified")` check would let this through.
-    monkeypatch.setattr(internal_mod, "_verify_oidc",
-                        lambda token, audience: {"email": QUEUE_SA, "email_verified": False})
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": False}
+    )
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
     assert resp.status_code == 403
 
@@ -96,7 +99,8 @@ def test_unconfigured_audience_is_forbidden(client, monkeypatch):
     # were removed, the call would pass verification and reach enrich_deep → 404. A 403 here proves
     # the config guard fired BEFORE verification.
     monkeypatch.delenv("ENRICH_OIDC_AUDIENCE", raising=False)
-    monkeypatch.setattr(internal_mod, "_verify_oidc",
-                        lambda token, audience: {"email": QUEUE_SA, "email_verified": True})
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
     assert resp.status_code == 403

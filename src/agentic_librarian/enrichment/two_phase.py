@@ -91,9 +91,7 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
         return work.id, True
 
 
-def add_read_event(
-    work_id: UUID, *, completed, rating: int | None, notes: str | None, fmt: str
-) -> dict:
+def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str | None, fmt: str) -> dict:
     """Log a read-event for the current user against work_id (the existing
     add_book_to_history semantics: a re-read on a new date is a new row; the same
     work+date is a no-op). Requires user context (as_user / the auth dependency)."""

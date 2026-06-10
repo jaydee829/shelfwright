@@ -43,11 +43,19 @@ def _stub_fast(monkeypatch, result):
 def test_add_book_persists_logs_and_enqueues(client, monkeypatch):
     enqueued = []
     monkeypatch.setattr(books_mod, "enqueue_enrichment", lambda wid: enqueued.append(wid) or True)
-    _stub_fast(monkeypatch, {"title": "Project Hail Mary",
-                             "contributors": [{"name": "Andy Weir", "role": "Author"}], "genres": [], "moods": []})
+    _stub_fast(
+        monkeypatch,
+        {
+            "title": "Project Hail Mary",
+            "contributors": [{"name": "Andy Weir", "role": "Author"}],
+            "genres": [],
+            "moods": [],
+        },
+    )
 
-    resp = client.post("/books", json={"title": "Project Hail Mary", "author": "Andy Weir",
-                                        "format": "ebook", "rating": 5})
+    resp = client.post(
+        "/books", json={"title": "Project Hail Mary", "author": "Andy Weir", "format": "ebook", "rating": 5}
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -82,8 +90,9 @@ def test_add_book_rereads_do_not_reenqueue(client, db_url, monkeypatch):
         s.flush()
     _stub_fast(monkeypatch, {"title": "Dune", "contributors": [{"name": "Frank Herbert", "role": "Author"}]})
 
-    resp = client.post("/books", json={"title": "Dune", "author": "Frank Herbert",
-                                       "format": "ebook", "date_completed": "2020-01-01"})
+    resp = client.post(
+        "/books", json={"title": "Dune", "author": "Frank Herbert", "format": "ebook", "date_completed": "2020-01-01"}
+    )
     assert resp.status_code == 200
     assert resp.json()["enrichment_enqueued"] is False  # de-dup hit → no re-enqueue
     assert calls == []
@@ -129,8 +138,10 @@ def test_add_book_rejects_boolean_rating(client, monkeypatch):
 
 def test_add_book_same_date_reports_already_logged(client, monkeypatch):
     monkeypatch.setattr(books_mod, "enqueue_enrichment", lambda wid: True)
-    _stub_fast(monkeypatch, {"title": "Solaris",
-                             "contributors": [{"name": "Stanislaw Lem", "role": "Author"}], "genres": [], "moods": []})
+    _stub_fast(
+        monkeypatch,
+        {"title": "Solaris", "contributors": [{"name": "Stanislaw Lem", "role": "Author"}], "genres": [], "moods": []},
+    )
     payload = {"title": "Solaris", "author": "Stanislaw Lem", "format": "ebook", "date_completed": "2021-05-01"}
 
     first = client.post("/books", json=payload).json()
@@ -146,8 +157,10 @@ def test_add_book_survives_enqueue_failure(client, monkeypatch):
         raise RuntimeError("cloud tasks down")
 
     monkeypatch.setattr(books_mod, "enqueue_enrichment", _boom)
-    _stub_fast(monkeypatch, {"title": "Blindsight",
-                             "contributors": [{"name": "Peter Watts", "role": "Author"}], "genres": [], "moods": []})
+    _stub_fast(
+        monkeypatch,
+        {"title": "Blindsight", "contributors": [{"name": "Peter Watts", "role": "Author"}], "genres": [], "moods": []},
+    )
 
     resp = client.post("/books", json={"title": "Blindsight", "author": "Peter Watts"})
     assert resp.status_code == 200  # the book is saved even though enqueue raised

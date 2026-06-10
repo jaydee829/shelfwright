@@ -45,8 +45,7 @@ def test_enrich_fast_dedups_existing_work_without_rescouting(db_url, monkeypatch
 
     manager = DatabaseManager(db_url)
     monkeypatch.setattr(two_phase, "db_manager", manager)
-    fixed = {"title": "Dune", "contributors": [{"name": "Frank Herbert", "role": "Author"}],
-             "genres": [], "moods": []}
+    fixed = {"title": "Dune", "contributors": [{"name": "Frank Herbert", "role": "Author"}], "genres": [], "moods": []}
     monkeypatch.setattr(two_phase, "create_fast_scout_manager", lambda: _FakeManager(fixed))
 
     first_id, first_created = two_phase.enrich_fast("Dune", "Frank Herbert", "ebook")
@@ -65,8 +64,12 @@ def test_enrich_fast_persists_work_when_embedding_fails(db_url, monkeypatch):
 
     manager = DatabaseManager(db_url)
     monkeypatch.setattr(two_phase, "db_manager", manager)
-    fixed = {"title": "Embeddingless", "contributors": [{"name": "E. Author", "role": "Author"}],
-             "genres": ["Sci-Fi"], "moods": []}
+    fixed = {
+        "title": "Embeddingless",
+        "contributors": [{"name": "E. Author", "role": "Author"}],
+        "genres": ["Sci-Fi"],
+        "moods": [],
+    }
     monkeypatch.setattr(two_phase, "create_fast_scout_manager", lambda: _FakeManager(fixed))
 
     # Force the trope embedding to fail the way a bad/transient API key does.

@@ -311,9 +311,7 @@ def persist_enriched_work(
         else:
             # Fallback to simple tags if no enriched tropes found
             for tag in all_fallback_tags:
-                standardized_trope = _safe_standardize(
-                    trope_manager.standardize_trope, tag, label=f"trope {tag!r}"
-                )
+                standardized_trope = _safe_standardize(trope_manager.standardize_trope, tag, label=f"trope {tag!r}")
                 if standardized_trope is None:
                     continue
                 existing_link = (
