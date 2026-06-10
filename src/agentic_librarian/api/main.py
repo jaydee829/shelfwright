@@ -91,6 +91,9 @@ def get_history(
             .join(Edition)
             .join(Work)
             .filter(ReadingHistory.user_id == user.id)  # my history, not the commons (ADR-048)
+            # joinedload on the to-many Work.contributors is safe under LIMIT *here* (unlike
+            # /works): the paginated root is ReadingHistory and the collection sits two to-one
+            # hops below it, so SQLAlchemy subquery-wraps the LIMIT against ReadingHistory rows.
             .options(
                 joinedload(ReadingHistory.edition)
                 .joinedload(Edition.work)
