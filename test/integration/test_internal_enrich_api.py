@@ -91,8 +91,12 @@ def test_unverified_email_is_forbidden(client, monkeypatch):
 
 
 def test_unconfigured_audience_is_forbidden(client, monkeypatch):
-    # Fail-closed: without ENRICH_OIDC_AUDIENCE, google-auth would skip audience verification,
-    # so the gate must refuse rather than call _verify_oidc with audience=None.
+    # Fail-closed: without ENRICH_OIDC_AUDIENCE, google-auth would skip audience verification.
+    # Mutation guard: _verify_oidc is mocked to SUCCEED, so if the `or not audience` config guard
+    # were removed, the call would pass verification and reach enrich_deep → 404. A 403 here proves
+    # the config guard fired BEFORE verification.
     monkeypatch.delenv("ENRICH_OIDC_AUDIENCE", raising=False)
+    monkeypatch.setattr(internal_mod, "_verify_oidc",
+                        lambda token, audience: {"email": QUEUE_SA, "email_verified": True})
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
     assert resp.status_code == 403
