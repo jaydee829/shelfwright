@@ -10,11 +10,12 @@ from __future__ import annotations
 from collections import Counter
 from datetime import UTC, datetime
 
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import joinedload
+
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import joinedload
 
 router = APIRouter()
 db_manager = DatabaseManager()

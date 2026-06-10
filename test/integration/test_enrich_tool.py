@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from agentic_librarian.db.models import Author, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import enrich_and_persist_work, set_db_manager

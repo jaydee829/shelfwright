@@ -3,11 +3,12 @@ from datetime import date
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import text
+
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.scouts.trope_manager import TropeManager
-from sqlalchemy import text
 
 
 @pytest.mark.db_integration

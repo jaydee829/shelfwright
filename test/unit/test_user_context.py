@@ -4,6 +4,7 @@ trusted code. Fail CLOSED: no context, no data access."""
 from uuid import UUID, uuid4
 
 import pytest
+
 from agentic_librarian.core.user_context import (
     DEFAULT_USER_ID,
     as_user,

@@ -1,7 +1,8 @@
 from unittest.mock import MagicMock, patch
 
-import agentic_librarian.scouts.metadata_scout as md_scout
 import pytest
+
+import agentic_librarian.scouts.metadata_scout as md_scout
 
 
 @pytest.fixture(autouse=True)

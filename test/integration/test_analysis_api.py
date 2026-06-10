@@ -2,6 +2,8 @@ from datetime import date
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+
 from agentic_librarian.api import analysis as analysis_mod
 from agentic_librarian.api import auth
 from agentic_librarian.api import main as api_main
@@ -18,7 +20,6 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
-from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.db_integration
 

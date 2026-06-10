@@ -9,8 +9,9 @@ import asyncio
 import os
 from typing import Protocol, runtime_checkable
 
-from agentic_librarian.llm_retry import genai_http_options
 from google import genai
+
+from agentic_librarian.llm_retry import genai_http_options
 
 
 @runtime_checkable

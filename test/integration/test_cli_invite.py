@@ -1,6 +1,7 @@
 """Operator invite tooling (Lift 1, ADR-048): adding a friend is a command, not psql."""
 
 import pytest
+
 from agentic_librarian.cli import main
 from agentic_librarian.db.models import User
 from agentic_librarian.db.session import DatabaseManager

@@ -2,6 +2,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work
 from agentic_librarian.etl.ingest import HistoryIngestor
 

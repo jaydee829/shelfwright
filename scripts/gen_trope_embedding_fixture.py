@@ -15,9 +15,10 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
-from agentic_librarian.scouts.utils import EMBEDDING_DIMENSIONS
 from google import genai
 from google.genai import types
+
+from agentic_librarian.scouts.utils import EMBEDDING_DIMENSIONS
 
 STRINGS = [
     "enemies to lovers",

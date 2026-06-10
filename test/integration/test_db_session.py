@@ -1,6 +1,7 @@
 import pytest
-from agentic_librarian.db.session import DatabaseManager
 from sqlalchemy import text
+
+from agentic_librarian.db.session import DatabaseManager
 
 
 @pytest.mark.db_integration

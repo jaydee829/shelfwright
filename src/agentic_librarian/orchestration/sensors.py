@@ -2,8 +2,9 @@ import json
 import os
 from collections.abc import Generator
 
-from agentic_librarian.orchestration.jobs import enhance_job
 from dagster import RunRequest, SensorEvaluationContext, sensor
+
+from agentic_librarian.orchestration.jobs import enhance_job
 
 
 @sensor(job_name=enhance_job.name)

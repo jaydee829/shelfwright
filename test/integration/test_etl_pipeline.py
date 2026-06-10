@@ -8,10 +8,11 @@ with patch.dict(
     os.environ,
     {"POSTGRES_USER": "mock_user", "POSTGRES_PASSWORD": "mock_password", "GOOGLE_SEARCH_API_KEY": "mock_key"},
 ):
+    from dagster import DagsterInstance
+
     from agentic_librarian.db.models import Edition, ReadingHistory, Work
     from agentic_librarian.db.session import DatabaseManager
     from agentic_librarian.orchestration.definitions import defs
-    from dagster import DagsterInstance
 
 
 def create_mock_session(existing_edition=None):

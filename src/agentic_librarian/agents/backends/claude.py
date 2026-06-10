@@ -9,13 +9,14 @@ import os
 import threading
 from uuid import UUID, uuid4
 
+from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, query
+
 from agentic_librarian.agents import prompts
 from agentic_librarian.agents.backends.claude_tools import LIBRARIAN_TOOL_NAMES, build_librarian_mcp_server
 from agentic_librarian.agents.candidates import coerce_schema_value, extract_candidate_ids, extract_discovery_pairs
 from agentic_librarian.core.usage import record_llm_call
 from agentic_librarian.core.user_context import current_user_id
 from agentic_librarian.mcp.server import enrich_and_persist_work, log_suggestion
-from claude_agent_sdk import AgentDefinition, ClaudeAgentOptions, query
 
 
 def _model() -> str:

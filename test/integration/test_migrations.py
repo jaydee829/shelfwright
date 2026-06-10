@@ -5,11 +5,11 @@ pins the property explicitly and owns its own scratch database."""
 import os
 
 import pytest
-from agentic_librarian.db.models import Base
+from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 
+from agentic_librarian.db.models import Base
 from alembic import command
-from alembic.config import Config
 
 pytestmark = pytest.mark.db_integration
 

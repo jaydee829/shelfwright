@@ -3,11 +3,11 @@ db/session.resolve_database_url so migrations always target the same database.""
 
 from logging.config import fileConfig
 
-from agentic_librarian.db.models import Base
-from agentic_librarian.db.session import resolve_database_url
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import create_engine
 
+from agentic_librarian.db.models import Base
+from agentic_librarian.db.session import resolve_database_url
 from alembic import context
 
 config = context.config

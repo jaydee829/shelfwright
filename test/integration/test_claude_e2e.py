@@ -1,9 +1,10 @@
 import os
-from test.integration.seed_helpers import seed_recommendation_fixture
 
 import pytest
+
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp.server import set_db_manager
+from test.integration.seed_helpers import seed_recommendation_fixture
 
 pytest.importorskip("claude_agent_sdk")  # the `claude` optional extra; skip if not installed
 

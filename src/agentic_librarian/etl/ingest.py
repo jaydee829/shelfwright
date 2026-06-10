@@ -2,6 +2,7 @@ import re
 from collections.abc import Generator
 
 import pandas as pd
+
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import Author, Base, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.etl import cleaning

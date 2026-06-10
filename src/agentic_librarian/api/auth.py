@@ -15,11 +15,12 @@ from typing import NamedTuple
 from uuid import UUID
 
 import firebase_admin
+from fastapi import Header, HTTPException
+from firebase_admin import auth as firebase_auth
+
 from agentic_librarian.core.user_context import current_user_id
 from agentic_librarian.db.models import User
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import Header, HTTPException
-from firebase_admin import auth as firebase_auth
 
 logger = logging.getLogger(__name__)
 

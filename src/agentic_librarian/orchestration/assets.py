@@ -3,6 +3,8 @@ from uuid import UUID
 
 import mlflow
 import pandas as pd
+from dagster import AssetExecutionContext, DynamicPartitionsDefinition, MetadataValue, ResourceParam, asset
+
 from agentic_librarian.core.user_context import DEFAULT_USER_ID, as_user
 from agentic_librarian.db.models import (
     Author,
@@ -16,7 +18,6 @@ from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.metadata_scout import ScoutManager
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
-from dagster import AssetExecutionContext, DynamicPartitionsDefinition, MetadataValue, ResourceParam, asset
 
 csv_partitions = DynamicPartitionsDefinition(name="csv_files")
 

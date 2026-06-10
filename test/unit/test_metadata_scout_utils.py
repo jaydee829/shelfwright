@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 import pytest
+
 from agentic_librarian.scouts.metadata_scout import GoogleBooksScout
 
 

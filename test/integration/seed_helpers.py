@@ -7,6 +7,9 @@ import json
 from datetime import date
 from pathlib import Path
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,
@@ -18,8 +21,6 @@ from agentic_librarian.db.models import (
     WorkContributor,
     WorkTrope,
 )
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 _FIXTURE = json.loads((Path(__file__).parent.parent / "data" / "trope_embeddings.json").read_text())
 ROMANCE = ["enemies to lovers", "slow burn romance"]

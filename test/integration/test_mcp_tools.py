@@ -3,6 +3,8 @@ from unittest.mock import patch
 from uuid import UUID
 
 import pytest
+from sqlalchemy import text
+
 from agentic_librarian.db.models import (
     Author,
     Edition,
@@ -24,7 +26,6 @@ from agentic_librarian.mcp.server import (
     update_reading_status,
     update_suggestion_status,
 )
-from sqlalchemy import text
 
 
 @pytest.fixture

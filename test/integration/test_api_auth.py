@@ -5,11 +5,12 @@ live-marked test + the rollout runbook (spec §2)."""
 import asyncio
 
 import pytest
+from fastapi import HTTPException
+
 from agentic_librarian.api import auth as auth_module
 from agentic_librarian.core.user_context import DEFAULT_USER_ID, current_user_id
 from agentic_librarian.db.models import User
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import HTTPException
 
 pytestmark = pytest.mark.db_integration
 

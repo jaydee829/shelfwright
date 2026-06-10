@@ -8,8 +8,9 @@ import inspect
 import json
 from typing import Any
 
-from agentic_librarian.mcp import server as mcp_server
 from claude_agent_sdk import create_sdk_mcp_server, tool
+
+from agentic_librarian.mcp import server as mcp_server
 
 _SERVER_NAME = "librarian"
 

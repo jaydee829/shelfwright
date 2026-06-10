@@ -1,5 +1,10 @@
 import os
 
+from google.adk.agents import LlmAgent
+from google.adk.models.google_llm import Gemini
+from google.adk.tools import AgentTool, FunctionTool
+from google.adk.tools.google_search_tool import GoogleSearchTool
+
 from agentic_librarian.agents import prompts
 from agentic_librarian.agents.schemas import Targets
 from agentic_librarian.llm_retry import RETRY_OPTIONS
@@ -15,10 +20,6 @@ from agentic_librarian.mcp.server import (
     update_reading_status,
     update_suggestion_status,
 )
-from google.adk.agents import LlmAgent
-from google.adk.models.google_llm import Gemini
-from google.adk.tools import AgentTool, FunctionTool
-from google.adk.tools.google_search_tool import GoogleSearchTool
 
 
 def _model_name() -> str:

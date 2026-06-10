@@ -2,6 +2,7 @@ from datetime import date
 
 import pandas as pd
 import pytest
+
 from agentic_librarian.etl.cleaning import parse_completion_date, split_authors, split_formats, split_narrators
 
 

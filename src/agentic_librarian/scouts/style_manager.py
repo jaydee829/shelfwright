@@ -1,10 +1,11 @@
 import os
 
+from google import genai
+from sqlalchemy.orm import Session
+
 from agentic_librarian.db.models import Style
 from agentic_librarian.llm_retry import genai_http_options
 from agentic_librarian.scouts.utils import get_cached_embedding
-from google import genai
-from sqlalchemy.orm import Session
 
 
 class StyleManager:

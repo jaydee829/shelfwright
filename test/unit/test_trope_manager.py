@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from agentic_librarian.db.models import Trope
 from agentic_librarian.scouts.trope_manager import TropeManager
 

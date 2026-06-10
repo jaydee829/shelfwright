@@ -1,11 +1,12 @@
 import pytest
+from fastapi.testclient import TestClient
+
 from agentic_librarian.api import auth
 from agentic_librarian.api import main as api_main
 from agentic_librarian.chat import transcript
 from agentic_librarian.core import usage as usage_mod
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.session import DatabaseManager
-from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.db_integration
 

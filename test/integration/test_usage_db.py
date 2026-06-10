@@ -1,6 +1,7 @@
 """The happy path writes one row per call, stamped with the context user."""
 
 import pytest
+
 from agentic_librarian.core import usage
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import Usage

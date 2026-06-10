@@ -4,6 +4,9 @@ from datetime import date
 from uuid import UUID
 
 import numpy as np
+from sqlalchemy import func, select
+from sqlalchemy.orm import joinedload, selectinload
+
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
@@ -22,9 +25,6 @@ from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
-from sqlalchemy import func, select
-from sqlalchemy.orm import joinedload, selectinload
-
 from mcp.server.fastmcp import FastMCP
 
 # Initialize FastMCP server

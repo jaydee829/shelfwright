@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,

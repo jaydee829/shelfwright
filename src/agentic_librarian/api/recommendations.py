@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from fastapi import APIRouter, Body, Depends, HTTPException
+from sqlalchemy.orm import joinedload
+
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import Suggestions, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import APIRouter, Body, Depends, HTTPException
-from sqlalchemy.orm import joinedload
 
 router = APIRouter()
 db_manager = DatabaseManager()

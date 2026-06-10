@@ -2,8 +2,9 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-from agentic_librarian.orchestration.sensors import new_file_sensor
 from dagster import SensorEvaluationContext
+
+from agentic_librarian.orchestration.sensors import new_file_sensor
 
 
 def test_new_file_sensor_no_files():

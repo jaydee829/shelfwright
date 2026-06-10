@@ -5,6 +5,8 @@ so both paths build the catalog identically (DRY)."""
 from __future__ import annotations
 
 import pandas as pd
+from sqlalchemy.orm import Session
+
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
@@ -20,7 +22,6 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
-from sqlalchemy.orm import Session
 
 
 def _iter_style_items(style_data: dict | None, owner_label: str):

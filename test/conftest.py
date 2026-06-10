@@ -70,8 +70,9 @@ def _create_test_database():
     #    migrations construct a correct schema from scratch. (CREATE EXTENSION also
     #    lives in the baseline migration; doing it here too is harmless and keeps
     #    this fixture self-sufficient.)
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     engine = create_engine(_test_db_url())
     with engine.begin() as conn:

@@ -1,8 +1,8 @@
-from test.integration.seed_helpers import seed_recommendation_fixture
-
 import pytest
+
 from agentic_librarian.db.models import ReadingHistory, Suggestions, Trope, Work, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
+from test.integration.seed_helpers import seed_recommendation_fixture
 
 
 @pytest.mark.db_integration

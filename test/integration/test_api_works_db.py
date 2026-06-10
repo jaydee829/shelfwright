@@ -3,12 +3,13 @@
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
+
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.main import app
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Style, Trope, Work, WorkContributor, WorkStyle, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
-from fastapi.testclient import TestClient
 
 
 @pytest.fixture(autouse=True)

@@ -2,10 +2,11 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.main import app
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
-from fastapi.testclient import TestClient
 
 client = TestClient(app)
 

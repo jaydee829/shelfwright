@@ -1,13 +1,14 @@
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+
 from agentic_librarian.api import auth
 from agentic_librarian.api import main as api_main
 from agentic_librarian.api import recommendations as rec_mod
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Suggestions, User, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
-from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.db_integration
 

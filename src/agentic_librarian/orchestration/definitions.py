@@ -1,3 +1,5 @@
+from dagster import Definitions, load_assets_from_modules
+
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.orchestration import assets, jobs, sensors
 from agentic_librarian.scouts.metadata_scout import (
@@ -9,7 +11,6 @@ from agentic_librarian.scouts.metadata_scout import (
     ScoutManager,
     StyleScout,
 )
-from dagster import Definitions, load_assets_from_modules
 
 all_assets = load_assets_from_modules([assets])
 

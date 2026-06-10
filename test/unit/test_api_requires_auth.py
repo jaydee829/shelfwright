@@ -1,7 +1,8 @@
 """Every endpoint except /health requires a verified identity (Lift 1, ADR-048)."""
 
-from agentic_librarian.api.main import app
 from fastapi.testclient import TestClient
+
+from agentic_librarian.api.main import app
 
 client = TestClient(app)
 

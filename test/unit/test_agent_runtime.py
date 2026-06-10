@@ -1,9 +1,10 @@
 import os
 
 import pytest
+from google.genai import types
+
 from agentic_librarian.agents import runtime
 from agentic_librarian.agents.services import create_agent_mesh
-from google.genai import types
 
 
 @pytest.fixture(autouse=True)

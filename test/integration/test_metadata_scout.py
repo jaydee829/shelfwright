@@ -1,7 +1,8 @@
 import os
 
-import agentic_librarian.scouts.metadata_scout as md_scout
 import pytest
+
+import agentic_librarian.scouts.metadata_scout as md_scout
 
 
 @pytest.mark.integration

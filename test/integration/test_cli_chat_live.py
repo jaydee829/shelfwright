@@ -5,6 +5,7 @@ backend, when quota allows:
 (inside the app container — the claude backend additionally needs the authed `claude` CLI)."""
 
 import pytest
+
 from agentic_librarian.agents.backends import get_backend
 
 

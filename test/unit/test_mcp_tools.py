@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
 import pytest
+
 from agentic_librarian.db.models import Author, Suggestions, Work, WorkContributor
 from agentic_librarian.mcp.server import (
     check_reading_history,

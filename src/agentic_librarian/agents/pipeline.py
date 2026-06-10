@@ -7,16 +7,17 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator
 
+from google.adk.agents import BaseAgent, SequentialAgent
+from google.adk.agents.invocation_context import InvocationContext
+from google.adk.events import Event, EventActions
+from typing_extensions import override
+
 from agentic_librarian.agents.candidates import extract_candidate_ids, extract_discovery_pairs
 from agentic_librarian.agents.services import AnalystAgent, CriticAgent, ExplorerAgent
 from agentic_librarian.mcp.server import (
     enrich_and_persist_work,
     log_suggestion,
 )
-from google.adk.agents import BaseAgent, SequentialAgent
-from google.adk.agents.invocation_context import InvocationContext
-from google.adk.events import Event, EventActions
-from typing_extensions import override
 
 
 class InternalCandidatesAgent(BaseAgent):

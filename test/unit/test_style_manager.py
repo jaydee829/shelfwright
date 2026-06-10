@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from agentic_librarian.db.models import Style
 from agentic_librarian.scouts.style_manager import StyleManager
 

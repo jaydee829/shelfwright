@@ -114,6 +114,11 @@ ignore = [
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.ruff.lint.isort]
+# Pin classification so the editable-install image and CI's isolated pre-commit env
+# agree (ends the recurring I001 import-order mismatch — DEBT-032).
+known-first-party = ["agentic_librarian"]
+
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # Allow unused imports in __init__.py files
 

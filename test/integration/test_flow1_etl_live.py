@@ -3,11 +3,12 @@ import shutil
 from pathlib import Path
 
 import pytest
+from dagster import DagsterInstance, materialize
+
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Trope, Work, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.orchestration import assets
 from agentic_librarian.orchestration.definitions import create_scout_manager
-from dagster import DagsterInstance, materialize
 
 PARTITION_KEY = "20200107"
 SMOKE_CSV = Path(__file__).parent.parent / "data" / "etl_smoke" / f"{PARTITION_KEY}.csv"
@@ -67,6 +68,6 @@ def test_flow1_etl_populates_db(db_url, staged_csv):
         assert wt is not None, "no trope linked to the work"
         trope = session.query(Trope).filter(Trope.id == wt.trope_id).first()
         assert trope.embedding is not None, "trope embedding not populated"
-        assert (
-            session.query(ReadingHistory).join(Edition).filter(Edition.work_id == work.id).first() is not None
-        ), "no reading history recorded"
+        assert session.query(ReadingHistory).join(Edition).filter(Edition.work_id == work.id).first() is not None, (
+            "no reading history recorded"
+        )

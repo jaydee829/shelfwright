@@ -5,11 +5,11 @@ import os
 from uuid import UUID
 
 import pytest
-from agentic_librarian.core.user_context import DEFAULT_USER_ID
+from alembic.config import Config
 from sqlalchemy import create_engine, text
 
+from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from alembic import command
-from alembic.config import Config
 
 pytestmark = pytest.mark.db_integration
 

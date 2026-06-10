@@ -1,3 +1,8 @@
+from fastapi import Body, Depends, FastAPI, Query
+from fastapi.responses import JSONResponse, StreamingResponse
+from sqlalchemy import text
+from sqlalchemy.orm import joinedload, selectinload
+
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
 from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
@@ -13,10 +18,6 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
-from fastapi import Body, Depends, FastAPI, Query
-from fastapi.responses import JSONResponse, StreamingResponse
-from sqlalchemy import text
-from sqlalchemy.orm import joinedload, selectinload
 
 app = FastAPI(title="Agentic Librarian API")
 db_manager = DatabaseManager()

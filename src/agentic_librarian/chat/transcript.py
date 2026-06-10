@@ -7,10 +7,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy.orm import Session
+
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import Conversation, Message
 from agentic_librarian.db.session import DatabaseManager
-from sqlalchemy.orm import Session
 
 db_manager = DatabaseManager()
 

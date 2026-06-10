@@ -7,11 +7,12 @@ from abc import ABC, abstractmethod
 from contextlib import suppress
 
 import requests
-from agentic_librarian.scouts.grounded_llm import GroundedLLM, get_grounded_llm
 from bs4 import BeautifulSoup
 from googleapiclient.discovery import build
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+from agentic_librarian.scouts.grounded_llm import GroundedLLM, get_grounded_llm
 
 # Load environment variables from .env if present (for local dev)
 try:
