@@ -57,6 +57,33 @@ def test_enrich_fast_dedups_existing_work_without_rescouting(db_url, monkeypatch
     assert first_id == second_id
 
 
+def test_enrich_fast_persists_work_when_embedding_fails(db_url, monkeypatch):
+    """A genai embedding failure (e.g. bad/transient key) must NOT abort the persist —
+    the Work persists; only the vectorized tropes/styles are skipped (degrade gracefully)."""
+    from agentic_librarian.enrichment import two_phase
+    from agentic_librarian.scouts import trope_manager as tm_mod
+
+    manager = DatabaseManager(db_url)
+    monkeypatch.setattr(two_phase, "db_manager", manager)
+    fixed = {"title": "Embeddingless", "contributors": [{"name": "E. Author", "role": "Author"}],
+             "genres": ["Sci-Fi"], "moods": []}
+    monkeypatch.setattr(two_phase, "create_fast_scout_manager", lambda: _FakeManager(fixed))
+
+    # Force the trope embedding to fail the way a bad/transient API key does.
+    def _boom(self, *a, **k):
+        raise RuntimeError("embedding API error (simulated 400/429/5xx)")
+
+    monkeypatch.setattr(tm_mod.TropeManager, "standardize_trope", _boom)
+
+    result = two_phase.enrich_fast("Embeddingless", "E. Author", "ebook")
+    assert result is not None
+    work_id, created = result
+    assert created is True
+    with manager.get_session() as s:
+        work = s.get(Work, work_id)
+        assert work is not None and work.title == "Embeddingless"  # Work persisted despite the embed failure
+
+
 def test_enrich_fast_returns_none_when_scouts_find_nothing(db_url, monkeypatch):
     from agentic_librarian.enrichment import two_phase
 
