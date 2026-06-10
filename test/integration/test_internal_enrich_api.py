@@ -79,3 +79,12 @@ def test_unknown_work_returns_404(client, monkeypatch):
     monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: False)
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer good"})
     assert resp.status_code == 404
+
+
+def test_unverified_email_is_forbidden(client, monkeypatch):
+    # Mutation guard: a token with the correct SA email but email_verified=False must still 403.
+    # Deleting the `not claims.get("email_verified")` check would let this through.
+    monkeypatch.setattr(internal_mod, "_verify_oidc",
+                        lambda token, audience: {"email": QUEUE_SA, "email_verified": False})
+    resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
+    assert resp.status_code == 403
