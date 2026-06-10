@@ -10,6 +10,26 @@ then merge PR-B as the deliberate gate-opening act.
 **Prereqs:** PR-A merged; PR-B reviewed/approved and **held** (not merged); `gcloud` authed to
 `agentic-librarian-prod`; cloud-sql-proxy available.
 
+**Run from (same model as the Lift 1 runbook):** a **plain WSL shell** at the WSL clone
+(`~/agentic_librarian`) — **not** from inside the dev/app container. `gcloud` and the
+cloud-sql-proxy binary live natively on the WSL host (from the Lift 0/1 runs); anything that
+needs the Python deps (alembic, the live-verify token helper) is **docker-wrapped** —
+`docker run --rm -v "$PWD":/app -w /app … agentic_librarian-app:latest <cmd>` — invoked *from*
+that WSL shell. Browser steps (Firebase sign-in, setting repo Variables, merging PR-B) happen
+on the host.
+
+> **First, get the Stage 4 code into the WSL clone:** `infra/08`/`09` and this runbook live in
+> the un-merged PR-B branch. In `~/agentic_librarian`:
+> `git fetch origin && git checkout feat/lift2-stage4-pr-b` (run the provisioning from there),
+> then merge PR-B at step 5.
+
+| Step | Where |
+|------|-------|
+| `infra/08`/`09`, `gcloud sql export`, set repo Variables | plain WSL shell (`gcloud` native) |
+| cloud-sql-proxy | native binary on the WSL host |
+| `alembic current` / `upgrade head` | docker-wrapped, invoked from the WSL shell |
+| Google sign-in + live verify, merge PR-B | browser / GitHub UI |
+
 ## 1. Provision (gate still CLOSED)
 1. `bash infra/08-cloud-tasks.sh` — creates the queue, the invoker SA, and the IAM grants.
    Note the printed `GCP_CLOUD_TASKS_QUEUE` / `GCP_ENRICH_INVOKER_SA` values.
