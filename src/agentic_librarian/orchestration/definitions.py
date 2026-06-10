@@ -29,6 +29,27 @@ def create_scout_manager() -> ScoutManager:
     return manager
 
 
+def create_fast_scout_manager() -> ScoutManager:
+    """Fast tier (Lift 2 Stage 3): API scouts only (Hardcover, Google Books) — no LLM,
+    so the add-a-book request returns in seconds and needs no Google API key."""
+    manager = ScoutManager()
+    manager.register_scout(HardcoverScout(), priority=1)
+    manager.register_scout(GoogleBooksScout(), priority=2)
+    return manager
+
+
+def create_deep_scout_manager() -> ScoutManager:
+    """Deep tier (Lift 2 Stage 3): the slow LLM scouts (audiobook, style, tropes) run later
+    via the Cloud Tasks internal endpoint. Audiobook/DirectKnowledge self-skip on non-audiobook
+    formats; StyleScout (5) runs after them so narrator_names is populated; LLMTropeScout (6) last."""
+    manager = ScoutManager()
+    manager.register_scout(AudiobookScout(), priority=3)
+    manager.register_scout(DirectKnowledgeScout(), priority=4)
+    manager.register_scout(StyleScout(), priority=5)
+    manager.register_scout(LLMTropeScout(), priority=6)
+    return manager
+
+
 defs = Definitions(
     assets=all_assets,
     jobs=[jobs.enhance_job],
