@@ -54,7 +54,11 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Agentic Librarian API", lifespan=lifespan)
+# Stage 4 opens the Cloud Run IAM gate, making this service publicly reachable (Firebase
+# gates the data routes; /health and the SPA are intentionally public). Disable FastAPI's
+# auto-docs so the full API schema isn't exposed unauthenticated. (GET /docs etc. now fall
+# through to the SPA catch-all, which is harmless.)
+app = FastAPI(title="Agentic Librarian API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(books_router)
@@ -253,8 +257,10 @@ def spa_root():
 @app.get("/{full_path:path}")
 def spa_catch_all(full_path: str):
     """Serve a real built file when one exists; otherwise return the SPA shell so
-    client-side routes (e.g. /add, /history) resolve. The realpath check is a
-    path-traversal guard — a candidate that escapes the dist dir falls back to the shell."""
+    client-side routes (e.g. /add, /history) resolve. A genuinely-missing asset (e.g. a
+    bad /assets/* path) therefore also returns the shell (200), not a 404 — standard SPA
+    catch-all behavior. The realpath check is a path-traversal guard: a candidate that
+    escapes the dist dir falls back to the shell."""
     root = os.path.realpath(_spa_dir())
     candidate = os.path.realpath(os.path.join(root, full_path))
     if (candidate == root or candidate.startswith(root + os.sep)) and os.path.isfile(candidate):

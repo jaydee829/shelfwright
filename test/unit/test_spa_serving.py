@@ -60,3 +60,32 @@ def test_path_traversal_is_blocked(tmp_path, monkeypatch):
     resp = spa_catch_all("../secret.txt")
     # The escaped path is refused → falls back to the SPA shell (index.html), not the secret.
     assert resp.path.endswith("index.html")
+
+
+def test_sibling_prefix_collision_is_blocked(tmp_path, monkeypatch):
+    # A sibling dir whose path shares the dist prefix (dist vs dist-secret) must NOT be
+    # reachable — this is why the guard compares against root + os.sep, not a bare prefix.
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _build_dist(dist)
+    sibling = tmp_path / "dist-secret"
+    sibling.mkdir()
+    (sibling / "leak.txt").write_text("SIBLING-SECRET")
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+
+    from agentic_librarian.api.main import spa_catch_all
+
+    resp = spa_catch_all("../dist-secret/leak.txt")
+    assert resp.path.endswith("index.html")  # refused → SPA shell, not the sibling file
+
+
+def test_absolute_path_input_is_blocked(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    _build_dist(dist)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+
+    from agentic_librarian.api.main import spa_catch_all
+
+    resp = spa_catch_all("/etc/hostname")
+    assert resp.path.endswith("index.html")
