@@ -88,3 +88,11 @@ def test_unverified_email_is_forbidden(client, monkeypatch):
                         lambda token, audience: {"email": QUEUE_SA, "email_verified": False})
     resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
     assert resp.status_code == 403
+
+
+def test_unconfigured_audience_is_forbidden(client, monkeypatch):
+    # Fail-closed: without ENRICH_OIDC_AUDIENCE, google-auth would skip audience verification,
+    # so the gate must refuse rather than call _verify_oidc with audience=None.
+    monkeypatch.delenv("ENRICH_OIDC_AUDIENCE", raising=False)
+    resp = client.post(f"/internal/enrich/{uuid4()}", headers={"Authorization": "Bearer x"})
+    assert resp.status_code == 403

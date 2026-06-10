@@ -38,9 +38,10 @@ def _require_queue_caller(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Missing bearer token.")
     expected_sa = os.environ.get("ENRICH_INVOKER_SA")
     audience = os.environ.get("ENRICH_OIDC_AUDIENCE")
-    if not expected_sa:
-        # Misconfigured deployment — fail closed, never open.
-        logger.error("ENRICH_INVOKER_SA unset; refusing internal enrichment call")
+    if not expected_sa or not audience:
+        # Misconfigured deployment — fail closed, never open. A missing audience would make
+        # google-auth SKIP audience verification (defense-in-depth loss), so require it.
+        logger.error("ENRICH_INVOKER_SA/ENRICH_OIDC_AUDIENCE unset; refusing internal enrichment call")
         raise HTTPException(status_code=403, detail="Internal endpoint not configured.")
     try:
         claims = _verify_oidc(token, audience)
