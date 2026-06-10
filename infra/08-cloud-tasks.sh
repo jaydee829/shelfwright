@@ -12,6 +12,14 @@ gcloud tasks queues create "${TASKS_QUEUE_NAME}" --location="${REGION}"
 gcloud iam service-accounts create "${ENRICH_INVOKER_SA_NAME}" \
   --display-name="Cloud Tasks → internal enrich invoker"
 
+# New SAs propagate asynchronously; binding too fast intermittently 400s with
+# "does not exist". Poll until describable before binding (mirrors 05-iam-wif.sh).
+for i in $(seq 1 12); do
+  if gcloud iam service-accounts describe "${ENRICH_INVOKER_SA}" >/dev/null 2>&1; then break; fi
+  echo "Waiting for ${ENRICH_INVOKER_SA} to propagate (${i}/12)..."
+  sleep 5
+done
+
 # 3) That invoker SA may invoke the Cloud Run service (the now-open IAM gate still gates
 #    the internal route via this OIDC identity, verified in-app).
 gcloud run services add-iam-policy-binding "${SERVICE}" \
