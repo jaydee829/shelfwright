@@ -9,7 +9,7 @@ Config (wired in prod in Stage 4; absent in local dev → enqueue is a logged no
   CLOUD_TASKS_QUEUE     full queue path projects/<p>/locations/<loc>/queues/<q>
   ENRICH_TARGET_BASE_URL  the Cloud Run base URL (no trailing slash)
   ENRICH_INVOKER_SA     service-account email the queue signs the OIDC token as
-  ENRICH_OIDC_AUDIENCE  optional explicit audience (defaults to the target URL)"""
+  ENRICH_OIDC_AUDIENCE  optional explicit audience (defaults to the full task URL)"""
 
 from __future__ import annotations
 
@@ -38,13 +38,11 @@ def enqueue_enrichment(work_id: str) -> bool:
         logger.info("enrichment enqueue skipped — Cloud Tasks not configured (work %s)", work_id)
         return False
 
-    from google.cloud import tasks_v2
-
     url = f"{base.rstrip('/')}/internal/enrich/{work_id}"
     audience = os.environ.get("ENRICH_OIDC_AUDIENCE") or url
     task = {
         "http_request": {
-            "http_method": tasks_v2.HttpMethod.POST,
+            "http_method": "POST",
             "url": url,
             "oidc_token": {"service_account_email": sa, "audience": audience},
         }
