@@ -5,7 +5,7 @@ vi.mock('../auth/firebase', () => ({
 }))
 
 import { getIdToken } from '../auth/firebase'
-import { probeAccess, streamChat } from './client'
+import { addBook, probeAccess, streamChat } from './client'
 
 function sseStream(chunks: string[]): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -66,5 +66,36 @@ describe('api client', () => {
     let detail = ''
     await streamChat('hi', { onActivity: () => {}, onText: () => {}, onError: (d) => (detail = d) })
     expect(detail).toBe('boom')
+  })
+})
+
+describe('addBook', () => {
+  beforeEach(() => {
+    vi.mocked(getIdToken).mockResolvedValue('tok-123')
+  })
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('POSTs the form and returns the result', async () => {
+    const body = {
+      work_id: 'w1', title: 'Project Hail Mary',
+      read_number: 1, already_logged: false, enrichment_enqueued: true,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await addBook({ title: 'Project Hail Mary', author: 'Andy Weir', format: 'ebook', rating: 5 })
+
+    expect(result).toEqual(body)
+    const [path, init] = fetchMock.mock.calls[0]
+    expect(path).toBe('/books')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toMatchObject({ title: 'Project Hail Mary', author: 'Andy Weir' })
+  })
+
+  it('throws on a 404 (book not found)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 404 })))
+    await expect(addBook({ title: 'X', author: 'Y' })).rejects.toThrow()
   })
 })

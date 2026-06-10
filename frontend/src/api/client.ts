@@ -104,6 +104,33 @@ export async function newConversation(): Promise<Conversation> {
   return res.json() as Promise<Conversation>
 }
 
+export interface AddBookInput {
+  title: string
+  author: string
+  format?: string
+  rating?: number | null
+  notes?: string | null
+  date_completed?: string | null
+}
+
+export interface AddBookResult {
+  work_id: string
+  title: string
+  read_number: number
+  already_logged: boolean
+  enrichment_enqueued: boolean
+}
+
+export async function addBook(input: AddBookInput): Promise<AddBookResult> {
+  const res = await authedFetchRaw('/books', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!res.ok) throw new Error(`addBook → ${res.status}`)
+  return res.json() as Promise<AddBookResult>
+}
+
 export interface ChatHandlers {
   onActivity: (kind: string, detail: string) => void
   onText: (text: string) => void
