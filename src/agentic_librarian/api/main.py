@@ -1,7 +1,8 @@
 import contextlib
+import os
 
 from fastapi import Body, Depends, FastAPI, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -228,3 +229,34 @@ def chat(user: AuthenticatedUser = Depends(get_current_user), message: str = Bod
         ),
         media_type="text/event-stream",
     )
+
+
+# ---------------------------------------------------------------------------
+# SPA static serving (Lift 2 Stage 4) — served same-origin from this container.
+# Registered LAST so every API route above takes precedence over the catch-all.
+# ---------------------------------------------------------------------------
+
+
+def _spa_dir() -> str:
+    return os.environ.get("SPA_DIST_DIR", "/app/static")
+
+
+def _spa_index() -> FileResponse:
+    return FileResponse(os.path.join(_spa_dir(), "index.html"))
+
+
+@app.get("/")
+def spa_root():
+    return _spa_index()
+
+
+@app.get("/{full_path:path}")
+def spa_catch_all(full_path: str):
+    """Serve a real built file when one exists; otherwise return the SPA shell so
+    client-side routes (e.g. /add, /history) resolve. The realpath check is a
+    path-traversal guard — a candidate that escapes the dist dir falls back to the shell."""
+    root = os.path.realpath(_spa_dir())
+    candidate = os.path.realpath(os.path.join(root, full_path))
+    if (candidate == root or candidate.startswith(root + os.sep)) and os.path.isfile(candidate):
+        return FileResponse(candidate)
+    return _spa_index()
