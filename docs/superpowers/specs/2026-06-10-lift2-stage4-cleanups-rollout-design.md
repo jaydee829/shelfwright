@@ -23,7 +23,7 @@ Stage 1 transcript migration to prod.
 | D2 | IAM-gate-open mechanism | **Bundle `--allow-unauthenticated` into PR-B** | The durable open is a one-line `deploy.yml` flag flip (the deploy re-applies all flags, so a manual `gcloud` flip is reverted on the next merge). Bundling makes merging PR-B the deliberate gate-opening act — which **forces provisioning + the prod migration to happen *before* PR-B merges** (see §C). |
 | D3 | Pool consolidation depth | **All 4 pools → one lifespan-injected `DatabaseManager`** | Fully closes the Stage 1 review note (`main`, `auth`, `chat/transcript`, `core/usage` each own a lazy pool today). INF-030's off-loop writes land cleanly on the one shared pool. |
 | D4 | Live e2e verification | **CD `GET /` serves-SPA smoke + manual runbook checklist** | Playwright is only *transitively* present (`@vitest/browser-playwright`); automating Google-only Firebase sign-in is costly and low-ROI for a single-operator beta. The cheap automated guard catches the static-serving regression; the auth/LLM path is verified manually. Playwright logged as **TEST-034** (do before open signups). |
-| D5 | Prod model/backend | **`AGENT_BACKEND=gemini`, `GEMINI_MODEL=gemini-3.1-flash-lite`** | Roadmap cost lock — cheapest model; Claude-in-prod is Lift 3. (`gemini-3.1-flash-lite` is already the code default in `runtime.py`/`services.py`/`cli.py` + `.env.example`; we set it explicitly in prod so the choice is pinned, not implicit.) |
+| D5 | Prod model/backend | **`AGENT_BACKEND=adk`, `GEMINI_MODEL=gemini-3.1-flash-lite`** | Roadmap cost lock — cheapest model; Claude-in-prod is Lift 3. `AGENT_BACKEND=adk` *is* the Gemini backend (`.env.example:70`: `adk`=Gemini, `claude`=Claude — there is no `gemini` value); both `adk` and `gemini-3.1-flash-lite` are the code defaults, set explicitly in prod so the choice is pinned, not implicit. |
 | D6 | Instance cap | **`--max-instances` 1 → 2** | A ~2m30s deep-enrichment task and a user's chat should not contend for a single instance; still bounds spend. |
 | D7 | `/history` pagination scope | **End-to-end (backend params + frontend "Load more")** | Backend-only would be a **regression**: `/history` returns *all* rows today, so adding a default `limit` while the frontend stays param-less would silently truncate a large history (the operator has 330 books). |
 
@@ -89,8 +89,10 @@ merging it opens the IAM gate (D2).
      `DATABASE_URL`.
    - `--set-env-vars` gains the enrichment group + model/backend:
      `CLOUD_TASKS_QUEUE`, `ENRICH_TARGET_BASE_URL`, `ENRICH_INVOKER_SA`, `ENRICH_OIDC_AUDIENCE`,
-     `AGENT_BACKEND=gemini`, `GEMINI_MODEL=gemini-3.1-flash-lite` (plus the existing
-     `SIGNUP_MODE=invite`, `GOOGLE_CLOUD_PROJECT`).
+     `SEARCH_ENGINE_ID` (the audiobook deep scout needs it — no code default),
+     `AGENT_BACKEND=adk`, `GEMINI_MODEL=gemini-3.1-flash-lite` (plus the existing
+     `SIGNUP_MODE=invite`, `GOOGLE_CLOUD_PROJECT`). The three deep-scout **key** secrets are
+     `GOOGLE_SEARCH_API_KEY` (Gemini + Custom Search), `GOOGLE_BOOKS_API_KEY`, `HARDCOVER_API_KEY`.
    - `--max-instances` 1 → 2.
    - Live smoke gains an **unauthenticated `GET /` returns the SPA shell** assertion (HTML containing the
      app root) alongside the existing `/health` + `401`-without-Firebase checks.
