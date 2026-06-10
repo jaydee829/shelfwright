@@ -29,3 +29,7 @@ scratch/
 .agent/
 .gemini/
 .claude/
+# Node: let `npm ci` build a clean, linux-correct node_modules inside the image
+# (the new multi-stage Dockerfile COPYs frontend/ — never ship the host's win32 tree).
+**/node_modules
+frontend/dist
