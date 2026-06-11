@@ -1,26 +1,38 @@
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-
-vi.mock('../api/client', () => ({ getHistory: vi.fn() }))
-
-import { getHistory } from '../api/client'
 import HistoryView from './HistoryView'
+import * as client from '../api/client'
 
-describe('HistoryView', () => {
-  afterEach(() => vi.clearAllMocks())
+// The auto-mock of '../api/client' imports the real module to derive its shape,
+// which transitively loads firebase (getAuth throws without env keys under test).
+vi.mock('../auth/firebase', () => ({ getIdToken: vi.fn().mockResolvedValue(null) }))
+vi.mock('../api/client')
 
-  it('renders the reading log', async () => {
-    vi.mocked(getHistory).mockResolvedValue([
-      { id: 'h1', title: 'Dune', authors: ['Herbert'], date_completed: '2026-05-01', rating: 5, format: 'audiobook' },
-    ])
+function item(id: string, title: string): client.HistoryItem {
+  return { id, title, authors: ['A. Uthor'], date_completed: '2024-01-01', rating: 4, format: 'ebook' }
+}
+
+afterEach(() => vi.clearAllMocks())
+
+describe('HistoryView pagination', () => {
+  it('loads the first page and appends the next on "Load more"', async () => {
+    const full = Array.from({ length: 50 }, (_, i) => item(`a${i}`, `Book ${i}`))
+    vi.mocked(client.getHistory).mockResolvedValueOnce(full).mockResolvedValueOnce([item('b0', 'Page 2 Book')])
+
     render(<HistoryView />)
-    expect(await screen.findByText('Dune')).toBeInTheDocument()
-    expect(screen.getByText(/Herbert/)).toBeInTheDocument()
+    expect(await screen.findByText('Book 0')).toBeInTheDocument()
+    expect(client.getHistory).toHaveBeenCalledWith(50, 0)
+
+    await userEvent.click(screen.getByRole('button', { name: /load more/i }))
+    expect(await screen.findByText('Page 2 Book')).toBeInTheDocument()
+    expect(client.getHistory).toHaveBeenCalledWith(50, 50)
   })
 
-  it('shows an empty state when nothing has been read', async () => {
-    vi.mocked(getHistory).mockResolvedValue([])
+  it('hides "Load more" when the first page is short (no more rows)', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Only Book')])
     render(<HistoryView />)
-    expect(await screen.findByText(/nothing here yet/i)).toBeInTheDocument()
+    expect(await screen.findByText('Only Book')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument()
   })
 })

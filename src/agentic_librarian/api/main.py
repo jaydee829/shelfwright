@@ -1,7 +1,8 @@
 import contextlib
+import os
 
 from fastapi import Body, Depends, FastAPI, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -53,7 +54,11 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Agentic Librarian API", lifespan=lifespan)
+# Stage 4 opens the Cloud Run IAM gate, making this service publicly reachable (Firebase
+# gates the data routes; /health and the SPA are intentionally public). Disable FastAPI's
+# auto-docs so the full API schema isn't exposed unauthenticated. (GET /docs etc. now fall
+# through to the SPA catch-all, which is harmless.)
+app = FastAPI(title="Agentic Librarian API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(books_router)
@@ -78,7 +83,12 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noq
 
 
 @app.get("/history")
-def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+def get_history(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+):
+    """Paginated reading log, newest first (INF-029 — mirrors /works)."""
     with db_manager.get_session() as session:
         # Query reading history with eager loading for efficiency
         history_entries = (
@@ -86,13 +96,18 @@ def get_history(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B
             .join(Edition)
             .join(Work)
             .filter(ReadingHistory.user_id == user.id)  # my history, not the commons (ADR-048)
+            # joinedload on the to-many Work.contributors is safe under LIMIT *here* (unlike
+            # /works): the paginated root is ReadingHistory and the collection sits two to-one
+            # hops below it, so SQLAlchemy subquery-wraps the LIMIT against ReadingHistory rows.
             .options(
                 joinedload(ReadingHistory.edition)
                 .joinedload(Edition.work)
                 .joinedload(Work.contributors)
                 .joinedload(WorkContributor.author)
             )
-            .order_by(ReadingHistory.date_completed.desc())
+            .order_by(ReadingHistory.date_completed.desc(), ReadingHistory.id)
+            .offset(offset)
+            .limit(limit)
             .all()
         )
 
@@ -218,3 +233,36 @@ def chat(user: AuthenticatedUser = Depends(get_current_user), message: str = Bod
         ),
         media_type="text/event-stream",
     )
+
+
+# ---------------------------------------------------------------------------
+# SPA static serving (Lift 2 Stage 4) — served same-origin from this container.
+# Registered LAST so every API route above takes precedence over the catch-all.
+# ---------------------------------------------------------------------------
+
+
+def _spa_dir() -> str:
+    return os.environ.get("SPA_DIST_DIR", "/app/static")
+
+
+def _spa_index() -> FileResponse:
+    return FileResponse(os.path.join(_spa_dir(), "index.html"))
+
+
+@app.get("/")
+def spa_root():
+    return _spa_index()
+
+
+@app.get("/{full_path:path}")
+def spa_catch_all(full_path: str):
+    """Serve a real built file when one exists; otherwise return the SPA shell so
+    client-side routes (e.g. /add, /history) resolve. A genuinely-missing asset (e.g. a
+    bad /assets/* path) therefore also returns the shell (200), not a 404 — standard SPA
+    catch-all behavior. The realpath check is a path-traversal guard: a candidate that
+    escapes the dist dir falls back to the shell."""
+    root = os.path.realpath(_spa_dir())
+    candidate = os.path.realpath(os.path.join(root, full_path))
+    if (candidate == root or candidate.startswith(root + os.sep)) and os.path.isfile(candidate):
+        return FileResponse(candidate)
+    return _spa_index()
