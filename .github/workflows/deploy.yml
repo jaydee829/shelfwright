@@ -54,6 +54,12 @@ jobs:
           GCP_RUN_BASE_URL: ${{ vars.GCP_RUN_BASE_URL }}
           GCP_ENRICH_INVOKER_SA: ${{ vars.GCP_ENRICH_INVOKER_SA }}
           GCP_SEARCH_ENGINE_ID: ${{ vars.GCP_SEARCH_ENGINE_ID }}
+          # Firebase WEB config — baked into the SPA at build time (gitignored .env.local isn't
+          # in CI). Client-embeddable (not secret); required or the prod SPA can't sign in.
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: |
           : "${GCP_WIF_PROVIDER:?set repo Variable GCP_WIF_PROVIDER (infra/05-iam-wif.sh prints it)}"
           : "${GCP_DEPLOYER_SA:?set repo Variable GCP_DEPLOYER_SA}"
@@ -63,6 +69,10 @@ jobs:
           : "${GCP_RUN_BASE_URL:?set repo Variable GCP_RUN_BASE_URL (the Cloud Run service base URL)}"
           : "${GCP_ENRICH_INVOKER_SA:?set repo Variable GCP_ENRICH_INVOKER_SA (infra/08-cloud-tasks.sh prints it)}"
           : "${GCP_SEARCH_ENGINE_ID:?set repo Variable GCP_SEARCH_ENGINE_ID (the Programmable Search Engine id)}"
+          : "${VITE_FIREBASE_API_KEY:?set repo Variable VITE_FIREBASE_API_KEY (from frontend/.env.local)}"
+          : "${VITE_FIREBASE_AUTH_DOMAIN:?set repo Variable VITE_FIREBASE_AUTH_DOMAIN (from frontend/.env.local)}"
+          : "${VITE_FIREBASE_PROJECT_ID:?set repo Variable VITE_FIREBASE_PROJECT_ID (from frontend/.env.local)}"
+          : "${VITE_FIREBASE_APP_ID:?set repo Variable VITE_FIREBASE_APP_ID (from frontend/.env.local)}"
 
       - uses: actions/checkout@v4
 
@@ -89,7 +99,13 @@ jobs:
           pytest -m "not api_dependent and not slow and not live"
 
       - name: Build production image
-        run: docker build -f Dockerfile.api -t "$IMAGE" .
+        run: |
+          docker build -f Dockerfile.api -t "$IMAGE" \
+            --build-arg VITE_FIREBASE_API_KEY="${{ vars.VITE_FIREBASE_API_KEY }}" \
+            --build-arg VITE_FIREBASE_AUTH_DOMAIN="${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg VITE_FIREBASE_PROJECT_ID="${{ vars.VITE_FIREBASE_PROJECT_ID }}" \
+            --build-arg VITE_FIREBASE_APP_ID="${{ vars.VITE_FIREBASE_APP_ID }}" \
+            .
 
       - name: Smoke-test image in runner (broken images never reach the registry)
         run: |
