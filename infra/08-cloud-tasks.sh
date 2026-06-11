@@ -50,9 +50,13 @@ _retry gcloud iam service-accounts add-iam-policy-binding "${ENRICH_INVOKER_SA}"
   --member="serviceAccount:${RUNTIME_SA}" \
   --role="roles/iam.serviceAccountUser"
 
+# Look up the live service URL (the service already exists from Lift 0/1); SEARCH_ENGINE_ID
+# is YOUR Programmable Search Engine id (config, e.g. from .env) — not derivable from GCP.
+RUN_BASE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" --format='value(status.url)' 2>/dev/null || true)"
+
 echo "Cloud Tasks provisioned."
 echo "  Set these GitHub repo Variables for deploy.yml:"
 echo "    GCP_CLOUD_TASKS_QUEUE = ${TASKS_QUEUE_PATH}"
 echo "    GCP_ENRICH_INVOKER_SA = ${ENRICH_INVOKER_SA}"
-echo "    GCP_RUN_BASE_URL      = (the Cloud Run service URL; used for ENRICH_TARGET_BASE_URL + ENRICH_OIDC_AUDIENCE)"
-echo "    GCP_SEARCH_ENGINE_ID  = (the Programmable Search Engine id)"
+echo "    GCP_RUN_BASE_URL      = ${RUN_BASE_URL:-<gcloud run services describe ${SERVICE} --region=${REGION} --format='value(status.url)'>}"
+echo "    GCP_SEARCH_ENGINE_ID  = ${SEARCH_ENGINE_ID:-<your Programmable Search Engine id, e.g. .env SEARCH_ENGINE_ID>}"
