@@ -44,7 +44,19 @@ on the host.
    - `GCP_SEARCH_ENGINE_ID` = the Programmable Search Engine id
 
 ## 2. Back up prod (first prod write boundary)
-- `gcloud sql export sql librarian-sql gs://agentic-librarian-prod-backups/pre-stage4-$(date +%Y%m%d).sql.gz --database=agentic_librarian`
+- **One-time grant (first real `gcloud sql export`):** the Cloud SQL instance's own service
+  account must be able to write the dump to the bucket, or export 412s
+  ("service account does not have the required permissions for the bucket"):
+  ```bash
+  SQL_SA="$(gcloud sql instances describe librarian-sql --format='value(serviceAccountEmailAddress)')"
+  gcloud storage buckets add-iam-policy-binding gs://agentic-librarian-prod-backups \
+    --member="serviceAccount:${SQL_SA}" --role="roles/storage.objectAdmin"   # ~30s to propagate
+  ```
+- Export:
+  ```bash
+  gcloud sql export sql librarian-sql \
+    gs://agentic-librarian-prod-backups/pre-stage4-$(date +%Y%m%d).sql.gz --database=agentic_librarian
+  ```
 - This rollout is the first prod write (chat). From here: **back up before every migration.**
 
 ## 3. Apply the migration (gate still CLOSED)
