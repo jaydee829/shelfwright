@@ -101,7 +101,17 @@ be **running for the whole step** — it's a foreground binary, so start it in i
    Ctrl-C the proxy when the step is done.
 
 ## 4. Sanity (gate still CLOSED)
-- The current (old) image is still healthy: minted-IAM-token `GET /health` returns ok.
+A light "look before you flip the gate" check — the migration was additive (new tables the old
+image doesn't use) and nothing was redeployed, so the running service is almost certainly fine.
+Confirm it's still serving (token-free; `/health` is IAM-gated while the gate is closed and
+minting a correctly-scoped IAM token as your user account isn't worth it here):
+```bash
+gcloud run services describe librarian-api --region=us-central1 \
+  --format='table(status.conditions[].type, status.conditions[].status)'
+```
+Want `Ready = True` (+ `ConfigurationsReady`/`RoutesReady = True`). The DB side is already proven
+by step 3 (alembic at `30f1e46533e9`, tables present). The CD's own live smoke re-checks `/health`
++ 401-enforcement automatically when PR-B deploys (step 5), so a manual `/health` curl is skippable.
 
 ## 5. Merge PR-B → CD opens the gate
 - Merge PR-B. CD builds the multi-stage image, deploys with the new env/secrets, and flips to
