@@ -42,6 +42,18 @@ on the host.
      and `ENRICH_OIDC_AUDIENCE` — they MUST match or every enrichment 403s)
    - `GCP_ENRICH_INVOKER_SA` = the invoker SA email
    - `GCP_SEARCH_ENGINE_ID` = the Programmable Search Engine id
+4. **Firebase web config for the SPA** (so the deployed app can sign in — `firebase.ts` inlines
+   these at build time). Get the values from the **Firebase Console** → Project settings →
+   General → Your apps → the Web app registered in Lift 1 (§1) → SDK setup and configuration →
+   Config (`firebase apps:sdkconfig WEB --project agentic-librarian-prod` prints the same).
+   Add 4 repo **Variables** (client-embeddable, not secret): `VITE_FIREBASE_API_KEY` = `apiKey`
+   (the `AIza…` string, = Lift 1's `FIREBASE_WEB_API_KEY`), `VITE_FIREBASE_AUTH_DOMAIN` =
+   `agentic-librarian-prod.firebaseapp.com`, `VITE_FIREBASE_PROJECT_ID` = `agentic-librarian-prod`,
+   `VITE_FIREBASE_APP_ID` = `appId` (`1:…:web:…`). The deploy preflight requires them; the build
+   bakes them into the bundle.
+5. **Authorize the Cloud Run domain in Firebase** — Console → Authentication → Settings →
+   Authorized domains → add the `librarian-api-…run.app` host (from `GCP_RUN_BASE_URL`, no
+   scheme). Without it, browser `signInWithPopup` fails with `auth/unauthorized-domain`.
 
 ## 2. Back up prod (first prod write boundary)
 - **One-time grant (first real `gcloud sql export`):** the Cloud SQL instance's own service

@@ -9,6 +9,18 @@ WORKDIR /spa
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# Firebase WEB config is build-time (Vite inlines import.meta.env.VITE_* into the bundle).
+# It's gitignored (.env.local) so CI passes it as build args (client-embeddable, not secret;
+# enforced by Firebase authorized-domains + security rules). Placed after npm ci so the deps
+# layer stays cached when these change.
+ARG VITE_FIREBASE_API_KEY
+ARG VITE_FIREBASE_AUTH_DOMAIN
+ARG VITE_FIREBASE_PROJECT_ID
+ARG VITE_FIREBASE_APP_ID
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+    VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+    VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+    VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
 RUN npm run build   # → /spa/dist
 
 # --- Stage 2: Python runtime ---
