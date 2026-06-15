@@ -114,3 +114,18 @@ def test_librarian_checks_history_before_importing():
     text = prompts.LIBRARIAN_INSTRUCTION
     import_clause = text[text.index("IMPORT:") :]
     assert "check_reading_history" in import_clause
+
+
+def test_critic_uses_curated_candidates_and_guarantees_novelty():
+    text = prompts.CRITIC_INSTRUCTION
+    assert "get_recommendation_candidates" in text
+    assert "at least one" in text.lower() and "new" in text.lower()
+    assert "[New]" in text and "[Re-read" in text
+
+
+def test_librarian_guarantees_one_new_and_falls_back_to_explorer():
+    text = prompts.LIBRARIAN_INSTRUCTION
+    assert "get_recommendation_candidates" in text
+    assert "has_unread" in text
+    assert "at least one" in text.lower() and "new" in text.lower()
+    assert "[New]" in text and "[Re-read" in text

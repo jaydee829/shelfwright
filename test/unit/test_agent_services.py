@@ -93,3 +93,12 @@ def test_critic_has_the_recommendation_candidates_tool():
 def test_librarian_has_the_recommendation_candidates_tool():
     mesh = create_agent_mesh()
     assert "get_recommendation_candidates" in [t.name for t in mesh["librarian"].tools]
+
+
+def test_adk_librarian_guarantees_one_new_and_tags_rereads():
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    assert "get_recommendation_candidates" in text
+    assert "has_unread" in text
+    assert "at least one" in text.lower() and "new" in text.lower()
+    assert "[New]" in text and "[Re-read" in text
