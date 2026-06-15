@@ -62,3 +62,24 @@ def test_adk_librarian_has_the_import_tool_and_flow():
     assert "add_book_to_history" in text
     confirm = text[text.index("CONFIRM HISTORY WRITES") :]
     assert "add_book_to_history" in confirm
+
+
+def test_librarian_can_check_reading_history():
+    # D1a: the ADK Librarian orchestrator must be able to check history before importing —
+    # without this tool its "add only if not already in history" instruction is unfollowable,
+    # which is how it logged a duplicate read of an already-owned book.
+    mesh = create_agent_mesh()
+    assert "check_reading_history" in [t.name for t in mesh["librarian"].tools]
+
+
+def test_adk_librarian_checks_history_before_import():
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    import_clause = text[text.index("IMPORT") :]
+    assert "check_reading_history" in import_clause
+
+
+def test_adk_librarian_defaults_to_three_recommendations():
+    # A2: count pinned in the orchestrator instruction so Gemini stops returning a single pick.
+    mesh = create_agent_mesh()
+    assert "3 recommendations by default" in mesh["librarian"].instruction
