@@ -95,3 +95,22 @@ def test_confirm_clause_covers_the_import_tool():
     confirm = text[text.index("CONFIRM HISTORY WRITES") :]
     assert "update_reading_status" in confirm
     assert "add_book_to_history" in confirm
+
+
+def test_critic_defaults_to_three_recommendations():
+    # A2: the recommendation count must be pinned in the prompt, not left to model whim
+    # (live Gemini gave 1, Claude gave 3). The Critic produces the ranked recommendation.
+    assert "3 books by default" in prompts.CRITIC_INSTRUCTION
+
+
+def test_librarian_defaults_to_three_recommendations():
+    # A2: the conversational Librarian presents 3 by default across both backends.
+    assert "3 recommendations by default" in prompts.LIBRARIAN_INSTRUCTION
+
+
+def test_librarian_checks_history_before_importing():
+    # D1a: the Librarian must verify a book isn't already logged before add_book_to_history,
+    # so it stops manufacturing phantom "re-reads" (the Book of Jhereg duplicate).
+    text = prompts.LIBRARIAN_INSTRUCTION
+    import_clause = text[text.index("IMPORT:") :]
+    assert "check_reading_history" in import_clause
