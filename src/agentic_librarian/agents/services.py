@@ -12,6 +12,7 @@ from agentic_librarian.mcp.server import (
     add_book_to_history,
     check_reading_history,
     enrich_and_persist_work,
+    get_recommendation_candidates,
     get_unacted_suggestions,
     get_user_trope_preferences,
     get_work_details,
@@ -95,6 +96,7 @@ class CriticAgent(LlmAgent):
                 FunctionTool(search_internal_database),
                 FunctionTool(get_work_details),
                 FunctionTool(check_reading_history),
+                FunctionTool(get_recommendation_candidates),
             ],
         )
 
@@ -162,6 +164,7 @@ class LibrarianAgent(LlmAgent):
                 AgentTool(explorer),
                 AgentTool(critic),
                 FunctionTool(get_unacted_suggestions),
+                FunctionTool(get_recommendation_candidates),
                 FunctionTool(check_reading_history),
                 FunctionTool(add_book_to_history),
                 FunctionTool(enrich_and_persist_work),

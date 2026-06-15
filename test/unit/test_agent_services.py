@@ -83,3 +83,13 @@ def test_adk_librarian_defaults_to_three_recommendations():
     # A2: count pinned in the orchestrator instruction so Gemini stops returning a single pick.
     mesh = create_agent_mesh()
     assert "3 recommendations by default" in mesh["librarian"].instruction
+
+
+def test_critic_has_the_recommendation_candidates_tool():
+    mesh = create_agent_mesh()
+    assert "get_recommendation_candidates" in [t.name for t in mesh["critic"].tools]
+
+
+def test_librarian_has_the_recommendation_candidates_tool():
+    mesh = create_agent_mesh()
+    assert "get_recommendation_candidates" in [t.name for t in mesh["librarian"].tools]

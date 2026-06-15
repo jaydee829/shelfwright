@@ -150,6 +150,7 @@ def _conversation_options() -> ClaudeAgentOptions:
                 "mcp__librarian__search_internal_database",
                 "mcp__librarian__get_work_details",
                 "mcp__librarian__check_reading_history",
+                "mcp__librarian__get_recommendation_candidates",
             ],
             mcpServers=["librarian"],
             maxTurns=8,

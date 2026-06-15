@@ -354,6 +354,20 @@ def get_read_status(work_ids: list[str]) -> dict:
     return result
 
 
+@mcp.tool()
+def get_recommendation_candidates(
+    target_tropes: list[str], target_styles: list[str] = None, limit: int = 10
+) -> dict:
+    """Read-status-aware, novelty-balanced candidates for a recommendation. Returns
+    {"candidates":[{id,title,authors,genres,description,read_status,last_read,rating}],
+    "has_unread","unread_count","reread_count"}. candidates is unread-first and excludes books
+    finished <2y ago. If has_unread is false, delegate to the Explorer for a fresh discovery.
+    This is the Critic's primary catalog tool."""
+    from agentic_librarian.agents.candidates import curate_candidates
+
+    return curate_candidates(target_tropes, target_styles, limit=limit)
+
+
 _READING_STATUSES = ("read",)
 
 
