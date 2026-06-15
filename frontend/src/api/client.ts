@@ -18,6 +18,9 @@ export interface Recommendation {
   context: string | null
   suggested_at: string | null
   status: string
+  read_status?: 'new' | 'reread'
+  last_read?: string | null
+  rating?: number | null
 }
 
 export interface Ranked {

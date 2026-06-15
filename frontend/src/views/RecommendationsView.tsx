@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router'
 import { getRecommendations, setRecommendationStatus, type Recommendation } from '../api/client'
 import './RecommendationsView.css'
 
+function ReadBadge({ r }: { r: Recommendation }) {
+  if (r.read_status === 'reread') {
+    const year = r.last_read ? new Date(r.last_read).getFullYear() : null
+    const stars = r.rating ? ` · ${'★'.repeat(r.rating)}` : ''
+    return <span className="rec-badge reread">{year ? `Re-read · ${year}${stars}` : `Re-read${stars}`}</span>
+  }
+  if (r.read_status === 'new') return <span className="rec-badge new">New</span>
+  return null
+}
+
 export default function RecommendationsView() {
   const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
@@ -39,6 +49,7 @@ export default function RecommendationsView() {
             <div className="rec-head">
               <span className="rec-title">{r.title}</span>
               <span className="rec-authors">{r.authors.join(', ')}</span>
+              <ReadBadge r={r} />
             </div>
             {r.justification && <p className="rec-why">{r.justification}</p>}
             <div className="rec-actions">

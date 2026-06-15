@@ -70,4 +70,18 @@ describe('RecommendationsView', () => {
     renderWithRouter()
     expect(await screen.findByText(/no recommendations/i)).toBeInTheDocument()
   })
+
+  it('renders a New badge for unread recs and a Re-read badge for read ones', async () => {
+    vi.mocked(getRecommendations).mockResolvedValueOnce([
+      { id: '1', work_id: 'w1', title: 'Fresh Pick', authors: ['A'], justification: null,
+        context: null, suggested_at: null, status: 'Suggested', read_status: 'new', last_read: null, rating: null },
+      { id: '2', work_id: 'w2', title: 'Old Favorite', authors: ['B'], justification: null,
+        context: null, suggested_at: null, status: 'Suggested', read_status: 'reread', last_read: '2019-05-01', rating: 4 },
+    ])
+    renderWithRouter()
+
+    expect(await screen.findByText('New')).toBeInTheDocument()
+    expect(screen.getByText(/Re-read/)).toBeInTheDocument()
+    expect(screen.getByText(/2019/)).toBeInTheDocument()
+  })
 })
