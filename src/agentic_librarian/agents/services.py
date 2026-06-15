@@ -12,6 +12,7 @@ from agentic_librarian.mcp.server import (
     add_book_to_history,
     check_reading_history,
     enrich_and_persist_work,
+    get_recommendation_candidates,
     get_unacted_suggestions,
     get_user_trope_preferences,
     get_work_details,
@@ -95,6 +96,7 @@ class CriticAgent(LlmAgent):
                 FunctionTool(search_internal_database),
                 FunctionTool(get_work_details),
                 FunctionTool(check_reading_history),
+                FunctionTool(get_recommendation_candidates),
             ],
         )
 
@@ -117,7 +119,9 @@ class LibrarianAgent(LlmAgent):
 
             DELEGATION STRATEGY (internal-first — the user's enriched catalog is the primary source):
             1. Call the 'Analyst' to turn user vibes into structured targets and session constraints.
-            2. Call 'get_unacted_suggestions' with target vibes to see if we have good matches.
+            2. Call 'get_recommendation_candidates' with target vibes to get read-status-tagged,
+               novelty-balanced candidates plus a has_unread flag (it wraps get_unacted_suggestions
+               + the catalog search).
             3. Call the 'Critic' to search the internal catalog and rank candidates.
             4. Call the 'Explorer' ONLY when: internal candidates are too few or poorly matched;
                OR the strong internal matches have already been suggested or read; OR the user
@@ -127,8 +131,10 @@ class LibrarianAgent(LlmAgent):
                resolve (possibly hallucinated) — drop that candidate and continue. Pass surviving
                candidates to the 'Critic' for final ranking.
                - NOTE: Books read >2 years ago are eligible for re-read suggestions.
-            6. PRESENT 3 recommendations by default unless the user asks for a different number; do
-               not return a single pick when more good matches are available.
+            6. PRESENT 3 recommendations by default unless the user asks for a different number, and
+               ALWAYS include at least one whose read_status is "new". If has_unread is false, call
+               the 'Explorer' for a fresh discovery, enrich it, and use it as the new pick. TAG each
+               as "[New]" or "[Re-read: last read YYYY]" from its read_status/last_read.
 
             SERIES: prefer the FIRST book of a series, or the user's NEXT unread volume if they are
             mid-series. Never a later entry they haven't reached.
@@ -162,6 +168,7 @@ class LibrarianAgent(LlmAgent):
                 AgentTool(explorer),
                 AgentTool(critic),
                 FunctionTool(get_unacted_suggestions),
+                FunctionTool(get_recommendation_candidates),
                 FunctionTool(check_reading_history),
                 FunctionTool(add_book_to_history),
                 FunctionTool(enrich_and_persist_work),

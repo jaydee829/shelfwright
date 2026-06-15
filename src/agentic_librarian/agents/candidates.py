@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import re
 
-from agentic_librarian.mcp.server import get_unacted_suggestions, search_internal_database
+from agentic_librarian.mcp.server import get_read_status, get_unacted_suggestions, search_internal_database
 
 
 def coerce_schema_value(value) -> dict:
@@ -50,6 +50,62 @@ def extract_candidate_ids(state: dict) -> list[str]:
         if wid and wid not in seen:
             seen.append(wid)
     return seen
+
+
+def _candidate_view(r: dict) -> dict:
+    """Normalize a row from either source into a common candidate shape.
+    search_internal_database -> id/title/authors/genres/description;
+    get_unacted_suggestions -> id/title/justification (no authors/genres)."""
+    return {
+        "id": r.get("id"),
+        "title": r.get("title"),
+        "authors": r.get("authors") or [],
+        "genres": r.get("genres") or [],
+        "description": r.get("description") or r.get("justification") or "",
+    }
+
+
+def curate_candidates(target_tropes: list[str], target_styles: list[str] | None = None, limit: int = 10) -> dict:
+    """Deterministic, read-status-aware candidate set for recommendations (spec A1/A3).
+    Unions internal vector matches + prior unacted (unread) suggestions, annotates each with
+    read status, DROPS books finished <2y ago, orders unread-first, and reports has_unread so
+    the caller can fall back to the Explorer for a fresh discovery."""
+    rows = search_internal_database(target_tropes=target_tropes, target_styles=target_styles, limit=limit)
+    rows += get_unacted_suggestions(target_tropes=target_tropes, target_styles=target_styles, limit=limit)
+    by_id: dict[str, dict] = {}
+    for r in rows:
+        wid = r.get("id")
+        if wid and wid not in by_id:
+            by_id[wid] = r
+    if not by_id:
+        return {"candidates": [], "has_unread": False, "unread_count": 0, "reread_count": 0}
+
+    status = get_read_status(list(by_id.keys()))
+    unread: list[dict] = []
+    reread: list[dict] = []
+    for wid, r in by_id.items():
+        st = status.get(wid) or {}
+        if st.get("status") == "Read":
+            if not st.get("is_re_read_candidate"):
+                continue  # finished <2y ago: neither new nor a valid re-read — drop
+            reread.append(
+                {
+                    **_candidate_view(r),
+                    "read_status": "reread",
+                    "last_read": st.get("last_read"),
+                    "rating": st.get("rating"),
+                }
+            )
+        else:
+            unread.append({**_candidate_view(r), "read_status": "new", "last_read": None, "rating": None})
+
+    candidates_out = (unread + reread)[:limit]
+    return {
+        "candidates": candidates_out,
+        "has_unread": bool(unread),
+        "unread_count": len(unread),
+        "reread_count": len(reread),
+    }
 
 
 def extract_discovery_pairs(state: dict) -> list[tuple[str, str]]:

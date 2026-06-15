@@ -269,6 +269,13 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
         ]
 
 
+def reread_eligibility(date_completed: date) -> tuple[bool, float]:
+    """The re-read rule in ONE place: a finished book becomes re-read-eligible more than
+    2.0 years after completion. Returns (is_re_read_candidate, years_since_completion)."""
+    years_since = (date.today() - date_completed).days / 365.25
+    return years_since > 2.0, years_since
+
+
 @mcp.tool()
 def check_reading_history(title: str, author: str) -> dict:
     """Checks if a book has been read and determines re-read eligibility."""
@@ -288,19 +295,77 @@ def check_reading_history(title: str, author: str) -> dict:
         )
 
         if entry:
-            completion_date = entry.date_completed
-            today = date.today()
-            delta = today - completion_date
-            years_since = delta.days / 365.25
-
+            is_candidate, years_since = reread_eligibility(entry.date_completed)
             return {
                 "status": "Read",
-                "date_completed": completion_date.isoformat(),
+                "date_completed": entry.date_completed.isoformat(),
                 "years_since_completion": round(years_since, 2),
-                "is_re_read_candidate": years_since > 2.0,
+                "is_re_read_candidate": is_candidate,
                 "rating": entry.user_rating,
             }
         return {"status": "Unread", "is_re_read_candidate": True}
+
+
+@mcp.tool()
+def get_read_status(work_ids: list[str]) -> dict:
+    """Batch read-status for the current user across many works (one query). For each given
+    work id: {"status": "Read"|"Unread", "last_read": ISO|None, "years_since": float|None,
+    "is_re_read_candidate": bool, "rating": int|None}. Works with no read row are "Unread".
+    Used by the recommendation curation to annotate candidates without N per-title calls."""
+    user_id = get_required_user_id()
+    by_uuid: dict = {}
+    for wid in work_ids:
+        u = _parse_uuid(wid)
+        if u is not None:
+            by_uuid[u] = wid
+    result: dict[str, dict] = {
+        wid: {
+            "status": "Unread",
+            "last_read": None,
+            "years_since": None,
+            "is_re_read_candidate": True,
+            "rating": None,
+        }
+        for wid in work_ids
+    }
+    if not by_uuid:
+        return result
+    with db_manager.get_session() as session:
+        rows = (
+            session.query(ReadingHistory, Edition.work_id)
+            .join(Edition)
+            .filter(Edition.work_id.in_(list(by_uuid.keys())), ReadingHistory.user_id == user_id)
+            .order_by(ReadingHistory.date_completed.desc())
+            .all()
+        )
+        seen: set = set()
+        for rh, work_uuid in rows:
+            if work_uuid in seen:  # rows are date-desc; first per work is the latest read
+                continue
+            seen.add(work_uuid)
+            is_candidate, years_since = reread_eligibility(rh.date_completed)
+            result[by_uuid[work_uuid]] = {
+                "status": "Read",
+                "last_read": rh.date_completed.isoformat(),
+                "years_since": round(years_since, 2),
+                "is_re_read_candidate": is_candidate,
+                "rating": rh.user_rating,
+            }
+    return result
+
+
+@mcp.tool()
+def get_recommendation_candidates(
+    target_tropes: list[str], target_styles: list[str] | None = None, limit: int = 10
+) -> dict:
+    """Read-status-aware, novelty-balanced candidates for a recommendation. Returns
+    {"candidates":[{id,title,authors,genres,description,read_status,last_read,rating}],
+    "has_unread","unread_count","reread_count"}. candidates is unread-first and excludes books
+    finished <2y ago. If has_unread is false, delegate to the Explorer for a fresh discovery.
+    This is the Critic's primary catalog tool."""
+    from agentic_librarian.agents.candidates import curate_candidates
+
+    return curate_candidates(target_tropes, target_styles, limit=limit)
 
 
 _READING_STATUSES = ("read",)

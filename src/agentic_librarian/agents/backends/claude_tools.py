@@ -48,6 +48,12 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
         mcp_server.get_unacted_suggestions,
     ),
     (
+        "get_recommendation_candidates",
+        "Read-status-aware, novelty-balanced catalog candidates (unread-first; has_unread flag).",
+        _schema({"target_tropes": _STR_ARRAY, "target_styles": _STR_ARRAY, "limit": _INT}, required=["target_tropes"]),
+        mcp_server.get_recommendation_candidates,
+    ),
+    (
         "get_work_details",
         "Deep metadata + tropes + styles for a work id.",
         _schema({"work_id": _STR}, required=["work_id"]),
