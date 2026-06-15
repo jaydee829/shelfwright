@@ -112,5 +112,5 @@ def test_librarian_checks_history_before_importing():
     # D1a: the Librarian must verify a book isn't already logged before add_book_to_history,
     # so it stops manufacturing phantom "re-reads" (the Book of Jhereg duplicate).
     text = prompts.LIBRARIAN_INSTRUCTION
-    import_clause = text[text.index("IMPORT") :]
+    import_clause = text[text.index("IMPORT:") :]
     assert "check_reading_history" in import_clause

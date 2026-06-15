@@ -75,7 +75,7 @@ def test_librarian_can_check_reading_history():
 def test_adk_librarian_checks_history_before_import():
     mesh = create_agent_mesh()
     text = mesh["librarian"].instruction
-    import_clause = text[text.index("IMPORT") :]
+    import_clause = text[text.index("IMPORT:") :]
     assert "check_reading_history" in import_clause
 
 
