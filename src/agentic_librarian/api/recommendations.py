@@ -52,7 +52,7 @@ def get_recommendations(user: AuthenticatedUser = Depends(get_current_user)):  #
             for rh, wid in rh_rows:
                 read_by_work.setdefault(wid, rh)  # first per work = latest (date-desc)
 
-        def _read_fields(work_id: object) -> dict:
+        def _read_fields(work_id: UUID) -> dict:
             rh = read_by_work.get(work_id)
             if rh is None:
                 return {"read_status": "new", "last_read": None, "rating": None}

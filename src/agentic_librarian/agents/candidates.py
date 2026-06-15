@@ -65,7 +65,7 @@ def _candidate_view(r: dict) -> dict:
     }
 
 
-def curate_candidates(target_tropes: list[str], target_styles: list[str] = None, limit: int = 10) -> dict:
+def curate_candidates(target_tropes: list[str], target_styles: list[str] | None = None, limit: int = 10) -> dict:
     """Deterministic, read-status-aware candidate set for recommendations (spec A1/A3).
     Unions internal vector matches + prior unacted (unread) suggestions, annotates each with
     read status, DROPS books finished <2y ago, orders unread-first, and reports has_unread so

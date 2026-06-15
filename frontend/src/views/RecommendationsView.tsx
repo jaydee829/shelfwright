@@ -5,7 +5,7 @@ import './RecommendationsView.css'
 
 function ReadBadge({ r }: { r: Recommendation }) {
   if (r.read_status === 'reread') {
-    const year = r.last_read ? new Date(r.last_read).getFullYear() : null
+    const year = r.last_read ? r.last_read.slice(0, 4) : null
     const stars = r.rating ? ` · ${'★'.repeat(r.rating)}` : ''
     return <span className="rec-badge reread">{year ? `Re-read · ${year}${stars}` : `Re-read${stars}`}</span>
   }
