@@ -39,14 +39,14 @@ def seeded_status_works(db_url):
         unread_work, _ = make_work("Never Read")
         session.add(
             ReadingHistory(
-                edition_id=old_ed.id, user_id=DEFAULT_USER_ID,
-                date_completed=today - timedelta(days=int(3 * 365.25)), user_rating=5,
+                edition_id=old_ed.id,
+                user_id=DEFAULT_USER_ID,
+                date_completed=today - timedelta(days=int(3 * 365.25)),
+                user_rating=5,
             )
         )
         session.add(
-            ReadingHistory(
-                edition_id=recent_ed.id, user_id=DEFAULT_USER_ID, date_completed=today - timedelta(days=200)
-            )
+            ReadingHistory(edition_id=recent_ed.id, user_id=DEFAULT_USER_ID, date_completed=today - timedelta(days=200))
         )
         session.flush()
         ids = {"old_read": str(old_work.id), "recent_read": str(recent_work.id), "unread": str(unread_work.id)}

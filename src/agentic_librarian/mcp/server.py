@@ -355,9 +355,7 @@ def get_read_status(work_ids: list[str]) -> dict:
 
 
 @mcp.tool()
-def get_recommendation_candidates(
-    target_tropes: list[str], target_styles: list[str] = None, limit: int = 10
-) -> dict:
+def get_recommendation_candidates(target_tropes: list[str], target_styles: list[str] = None, limit: int = 10) -> dict:
     """Read-status-aware, novelty-balanced candidates for a recommendation. Returns
     {"candidates":[{id,title,authors,genres,description,read_status,last_read,rating}],
     "has_unread","unread_count","reread_count"}. candidates is unread-first and excludes books

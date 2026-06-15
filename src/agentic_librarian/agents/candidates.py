@@ -89,7 +89,12 @@ def curate_candidates(target_tropes: list[str], target_styles: list[str] = None,
             if not st.get("is_re_read_candidate"):
                 continue  # finished <2y ago: neither new nor a valid re-read — drop
             reread.append(
-                {**_candidate_view(r), "read_status": "reread", "last_read": st.get("last_read"), "rating": st.get("rating")}
+                {
+                    **_candidate_view(r),
+                    "read_status": "reread",
+                    "last_read": st.get("last_read"),
+                    "rating": st.get("rating"),
+                }
             )
         else:
             unread.append({**_candidate_view(r), "read_status": "new", "last_read": None, "rating": None})
