@@ -306,6 +306,54 @@ def check_reading_history(title: str, author: str) -> dict:
         return {"status": "Unread", "is_re_read_candidate": True}
 
 
+@mcp.tool()
+def get_read_status(work_ids: list[str]) -> dict:
+    """Batch read-status for the current user across many works (one query). For each given
+    work id: {"status": "Read"|"Unread", "last_read": ISO|None, "years_since": float|None,
+    "is_re_read_candidate": bool, "rating": int|None}. Works with no read row are "Unread".
+    Used by the recommendation curation to annotate candidates without N per-title calls."""
+    user_id = get_required_user_id()
+    by_uuid: dict = {}
+    for wid in work_ids:
+        u = _parse_uuid(wid)
+        if u is not None:
+            by_uuid[u] = wid
+    result: dict[str, dict] = {
+        wid: {
+            "status": "Unread",
+            "last_read": None,
+            "years_since": None,
+            "is_re_read_candidate": True,
+            "rating": None,
+        }
+        for wid in work_ids
+    }
+    if not by_uuid:
+        return result
+    with db_manager.get_session() as session:
+        rows = (
+            session.query(ReadingHistory, Edition.work_id)
+            .join(Edition)
+            .filter(Edition.work_id.in_(list(by_uuid.keys())), ReadingHistory.user_id == user_id)
+            .order_by(ReadingHistory.date_completed.desc())
+            .all()
+        )
+        seen: set = set()
+        for rh, work_uuid in rows:
+            if work_uuid in seen:  # rows are date-desc; first per work is the latest read
+                continue
+            seen.add(work_uuid)
+            is_candidate, years_since = reread_eligibility(rh.date_completed)
+            result[by_uuid[work_uuid]] = {
+                "status": "Read",
+                "last_read": rh.date_completed.isoformat(),
+                "years_since": round(years_since, 2),
+                "is_re_read_candidate": is_candidate,
+                "rating": rh.user_rating,
+            }
+    return result
+
+
 _READING_STATUSES = ("read",)
 
 
