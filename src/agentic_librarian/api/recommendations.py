@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import joinedload
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
-from agentic_librarian.db.models import Suggestions, Work, WorkContributor
+from agentic_librarian.db.models import Edition, ReadingHistory, Suggestions, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 
 router = APIRouter()
@@ -39,6 +39,29 @@ def get_recommendations(user: AuthenticatedUser = Depends(get_current_user)):  #
             .order_by(Suggestions.suggested_at.desc())
             .all()
         )
+        work_ids = [s.work_id for s in rows]
+        read_by_work: dict = {}
+        if work_ids:
+            rh_rows = (
+                session.query(ReadingHistory, Edition.work_id)
+                .join(Edition)
+                .filter(Edition.work_id.in_(work_ids), ReadingHistory.user_id == user.id)
+                .order_by(ReadingHistory.date_completed.desc())
+                .all()
+            )
+            for rh, wid in rh_rows:
+                read_by_work.setdefault(wid, rh)  # first per work = latest (date-desc)
+
+        def _read_fields(work_id: object) -> dict:
+            rh = read_by_work.get(work_id)
+            if rh is None:
+                return {"read_status": "new", "last_read": None, "rating": None}
+            return {
+                "read_status": "reread",
+                "last_read": rh.date_completed.isoformat(),
+                "rating": rh.user_rating,
+            }
+
         return [
             {
                 "id": str(s.id),
@@ -49,6 +72,7 @@ def get_recommendations(user: AuthenticatedUser = Depends(get_current_user)):  #
                 "context": s.context,
                 "suggested_at": s.suggested_at.isoformat() if s.suggested_at else None,
                 "status": s.status,
+                **_read_fields(s.work_id),
             }
             for s in rows
         ]
