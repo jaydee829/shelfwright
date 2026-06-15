@@ -269,6 +269,13 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
         ]
 
 
+def reread_eligibility(date_completed: date) -> tuple[bool, float]:
+    """The re-read rule in ONE place: a finished book becomes re-read-eligible more than
+    2.0 years after completion. Returns (is_re_read_candidate, years_since_completion)."""
+    years_since = (date.today() - date_completed).days / 365.25
+    return years_since > 2.0, years_since
+
+
 @mcp.tool()
 def check_reading_history(title: str, author: str) -> dict:
     """Checks if a book has been read and determines re-read eligibility."""
@@ -288,16 +295,12 @@ def check_reading_history(title: str, author: str) -> dict:
         )
 
         if entry:
-            completion_date = entry.date_completed
-            today = date.today()
-            delta = today - completion_date
-            years_since = delta.days / 365.25
-
+            is_candidate, years_since = reread_eligibility(entry.date_completed)
             return {
                 "status": "Read",
-                "date_completed": completion_date.isoformat(),
+                "date_completed": entry.date_completed.isoformat(),
                 "years_since_completion": round(years_since, 2),
-                "is_re_read_candidate": years_since > 2.0,
+                "is_re_read_candidate": is_candidate,
                 "rating": entry.user_rating,
             }
         return {"status": "Unread", "is_re_read_candidate": True}
