@@ -28,6 +28,7 @@ export default function ChatView() {
     setLiveSteps([])
     stepId.current = 0
     let steps: ActivityStep[] = []
+    let lastDetail = ''
     // Append the user turn plus an in-flight assistant placeholder (empty content; not rendered
     // as a bubble until text arrives — the live trail is the pending indicator).
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }])
@@ -36,9 +37,13 @@ export default function ChatView() {
       onActivity: (kind, detail) => {
         const label = labelForActivity(kind, detail)
         if (!label) return
+        // Dedupe on the stable detail key, NOT the phrase: labelForActivity picks a random
+        // phrase each call, so consecutive same-stage events would otherwise read as distinct.
+        const normalizedDetail = (detail || '').toLowerCase()
+        if (normalizedDetail === lastDetail) return
+        lastDetail = normalizedDetail
         const prev = steps[steps.length - 1]
         if (prev && prev.status === 'running') {
-          if (prev.text === label.text) return // dedupe consecutive identical labels
           steps = [
             ...steps.slice(0, -1),
             { ...prev, status: 'done' },

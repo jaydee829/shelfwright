@@ -86,4 +86,21 @@ describe('ChatView', () => {
     await waitFor(() => expect(screen.getByText('Done.')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: /how i found these/i })).not.toBeInTheDocument()
   })
+
+  it('dedupes consecutive same-stage events into one step (random phrase per call)', async () => {
+    vi.mocked(streamChat).mockImplementation(async (_msg: string, h: ChatHandlers) => {
+      // Two Explorer events: phrases are random per call, so dedupe must key on the detail,
+      // not the phrase text — otherwise these collapse to two steps.
+      h.onActivity('tool', 'Explorer')
+      h.onActivity('tool', 'Explorer')
+      h.onText('Try Dune.')
+    })
+    render(<ChatView />)
+    await screen.findByPlaceholderText(/ask the librarian/i)
+    await userEvent.type(screen.getByPlaceholderText(/ask the librarian/i), 'recommend a book')
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
+
+    await waitFor(() => expect(screen.getByText('Try Dune.')).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: /how i found these \(1 step\)/i })).toBeInTheDocument()
+  })
 })
