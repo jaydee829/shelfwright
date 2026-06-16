@@ -46,6 +46,18 @@ export default function HistoryView() {
               {h.format && <span className="history-format">{h.format}</span>}
               {h.date_completed && <span className="history-date">{h.date_completed}</span>}
             </div>
+            <div className="history-tropes">
+              {h.tropes && h.tropes.length > 0 ? (
+                <>
+                  {h.genre && <span className="trope-chip genre">{h.genre}</span>}
+                  {h.tropes.map((t) => (
+                    <span key={t} className="trope-chip">{t}</span>
+                  ))}
+                </>
+              ) : (
+                <span className="trope-chip enriching">Enriching…</span>
+              )}
+            </div>
           </li>
         ))}
       </ul>

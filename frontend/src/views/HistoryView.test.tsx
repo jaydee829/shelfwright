@@ -35,4 +35,30 @@ describe('HistoryView pagination', () => {
     expect(await screen.findByText('Only Book')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument()
   })
+
+  it('renders genre + trope chips when a row has tropes', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([
+      {
+        id: 'x', title: 'Tropey', authors: ['A'], date_completed: '2024-01-01', rating: 4, format: 'ebook',
+        genre: 'Fantasy', tropes: ['Found Family', 'Antihero', 'Heist'],
+      },
+    ])
+    render(<HistoryView />)
+    expect(await screen.findByText('Tropey')).toBeInTheDocument()
+    expect(screen.getByText('Fantasy')).toBeInTheDocument()
+    expect(screen.getByText('Found Family')).toBeInTheDocument()
+    expect(screen.queryByText(/Enriching/)).not.toBeInTheDocument()
+  })
+
+  it('renders an Enriching… chip when a row has no tropes', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([
+      {
+        id: 'y', title: 'Fresh', authors: ['B'], date_completed: '2024-01-01', rating: null, format: 'ebook',
+        genre: null, tropes: [],
+      },
+    ])
+    render(<HistoryView />)
+    expect(await screen.findByText('Fresh')).toBeInTheDocument()
+    expect(screen.getByText(/Enriching/)).toBeInTheDocument()
+  })
 })

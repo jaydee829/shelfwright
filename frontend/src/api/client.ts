@@ -8,6 +8,8 @@ export interface HistoryItem {
   date_completed: string | null
   rating: number | null
   format: string | null
+  genre?: string | null
+  tropes?: string[]
 }
 
 export interface Recommendation {
