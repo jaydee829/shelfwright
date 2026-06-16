@@ -1,0 +1,9 @@
+.activity-trail { align-self: flex-start; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #6b7280; }
+.activity-trail.done { margin: 2px 0; }
+.trail-step { display: flex; align-items: center; gap: 6px; }
+.trail-step.milestone .trail-text { font-style: italic; }
+.trail-mark { display: inline-block; width: 1em; text-align: center; }
+.trail-mark.running { animation: trail-spin 1s linear infinite; }
+.trail-mark.done { color: #1f6f43; }
+.trail-toggle { background: none; border: none; padding: 0; color: #6b7280; cursor: pointer; font-size: 13px; text-align: left; }
+@keyframes trail-spin { to { transform: rotate(360deg); } }
