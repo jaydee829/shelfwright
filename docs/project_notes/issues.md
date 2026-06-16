@@ -12,6 +12,12 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-16 - DEBT-035: Detect stuck/failed background enrichment
+- **Status**: Open (deferred from C1/C2 enrichment-visibility by decision)
+- **Description**: Enrichment status is DERIVED from trope presence (no enriched_at/status column), so a deep pass that failed, found no tropes, or whose Cloud Task never fired is indistinguishable from one still in flight — History shows "Enriching…" indefinitely.
+- **URL**: spec `docs/superpowers/specs/2026-06-16-enrichment-visibility-design.md` (D5)
+- **Notes**: Future fix needs a creation/enqueue timestamp (Work has no created_at) + a timeout sweep or explicit status to flag long-pending works as failed/retryable; pairs with a retry action alongside D1b (history edit/delete).
+
 ### 2026-01-27 - MEM-001: Initialize Project Memory
 - **Status**: Completed
 - **Description**: Setting up `docs/project_notes/` and memory protocols.

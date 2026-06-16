@@ -43,7 +43,7 @@ describe('AddBookView', () => {
     expect(vi.mocked(addBook)).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Dune', author: 'Frank Herbert' }),
     )
-    expect(await screen.findByText(/added .*dune/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Enriching in the background/i)).toBeInTheDocument()
   })
 
   it('shows an error when the book is not found', async () => {

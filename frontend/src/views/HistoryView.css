@@ -8,3 +8,7 @@
 .history-authors { color: #6b7280; font-size: 14px; }
 .history-meta { display: flex; gap: 10px; align-items: center; font-size: 13px; color: #6b7280; }
 .history-rating { color: #f59e0b; }
+.history-tropes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.trope-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #eef2ff; color: #3730a3; }
+.trope-chip.genre { background: #e0e7ff; font-weight: 600; }
+.trope-chip.enriching { background: transparent; color: #6b7280; font-style: italic; padding-left: 0; }

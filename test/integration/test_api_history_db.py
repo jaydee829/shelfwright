@@ -92,3 +92,38 @@ def test_history_paginates_newest_first(two_user_client, db_url):
     page2 = c.get("/history?limit=2&offset=2").json()
     assert [h["date_completed"] for h in page1] == ["2025-05-05", "2024-04-04"]  # newest first
     assert [h["date_completed"] for h in page2] == ["2023-03-03", "2021-01-01"]  # next page, no overlap
+
+
+def test_history_includes_genre_and_top_three_tropes(two_user_client, db_url):
+    from agentic_librarian.db.models import Trope, WorkTrope
+
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author = AuthorModel(name="Trope Author")
+        work = Work(
+            title="Tropey Book",
+            genres=["Fantasy", "Adventure"],
+            contributors=[WorkContributor(author=author, role="Author")],
+        )
+        edition = Edition(work=work, format="ebook")
+        session.add_all([author, work, edition])
+        session.flush()
+        for name, score in [("Heist", 0.90), ("Found Family", 0.95), ("Antihero", 0.99), ("Low Score", 0.10)]:
+            trope = Trope(name=name)
+            session.add(trope)
+            session.flush()
+            session.add(WorkTrope(work_id=work.id, trope_id=trope.id, relevance_score=score))
+        session.add(ReadingHistory(edition_id=edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2026, 1, 2)))
+        session.flush()
+
+    rows = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com").get("/history").json()
+    row = next(r for r in rows if r["title"] == "Tropey Book")
+    assert row["genre"] == "Fantasy"
+    assert row["tropes"] == ["Antihero", "Found Family", "Heist"]  # top 3, score desc; "Low Score" dropped
+
+
+def test_history_no_tropes_returns_empty_list(two_user_client):
+    rows = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com").get("/history").json()
+    shared = next(r for r in rows if r["title"] == "Shared Book")
+    assert shared["tropes"] == []
+    assert shared["genre"] is None

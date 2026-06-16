@@ -99,11 +99,17 @@ def get_history(
             # joinedload on the to-many Work.contributors is safe under LIMIT *here* (unlike
             # /works): the paginated root is ReadingHistory and the collection sits two to-one
             # hops below it, so SQLAlchemy subquery-wraps the LIMIT against ReadingHistory rows.
+            # Work.tropes is a to-many so we use selectinload (separate IN query) to avoid
+            # cartesian-multiplying rows with the contributors joinedload.
             .options(
                 joinedload(ReadingHistory.edition)
                 .joinedload(Edition.work)
                 .joinedload(Work.contributors)
-                .joinedload(WorkContributor.author)
+                .joinedload(WorkContributor.author),
+                joinedload(ReadingHistory.edition)
+                .joinedload(Edition.work)
+                .selectinload(Work.tropes)
+                .joinedload(WorkTrope.trope),
             )
             .order_by(ReadingHistory.date_completed.desc(), ReadingHistory.id)
             .offset(offset)
@@ -111,21 +117,26 @@ def get_history(
             .all()
         )
 
-        return [
-            {
-                "id": str(h.id),
-                "title": h.edition.work.title,
-                "authors": [
-                    c.author.name for c in h.edition.work.contributors if c.role == "Author"
-                ],  # ETL always writes role="Author"
-                "date_completed": h.date_completed.isoformat()
-                if h.date_completed
-                else None,  # schema forbids NULL; guard is defensive only
-                "rating": h.user_rating,
-                "format": h.edition.format,
-            }
-            for h in history_entries
-        ]
+        def _genre_and_tropes(work):
+            top = sorted(work.tropes, key=lambda wt: wt.relevance_score, reverse=True)[:3]
+            return (work.genres[0] if work.genres else None, [wt.trope.name for wt in top])
+
+        result = []
+        for h in history_entries:
+            genre, tropes = _genre_and_tropes(h.edition.work)
+            result.append(
+                {
+                    "id": str(h.id),
+                    "title": h.edition.work.title,
+                    "authors": [c.author.name for c in h.edition.work.contributors if c.role == "Author"],
+                    "date_completed": h.date_completed.isoformat() if h.date_completed else None,
+                    "rating": h.user_rating,
+                    "format": h.edition.format,
+                    "genre": genre,
+                    "tropes": tropes,
+                }
+            )
+        return result
 
 
 @app.get("/works")
