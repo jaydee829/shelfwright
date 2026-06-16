@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { getCurrentConversation, newConversation, streamChat, type ChatMessage } from '../api/client'
+import { labelForActivity, type ActivityStep } from '../api/activityLabels'
+import { CompletedActivityTrail, LiveActivityTrail } from './ActivityTrail'
 import './ChatView.css'
 
 export default function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
-  const [activity, setActivity] = useState<string | null>(null)
+  const [liveSteps, setLiveSteps] = useState<ActivityStep[]>([])
   const [sending, setSending] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const stepId = useRef(0)
 
   useEffect(() => {
     void getCurrentConversation().then((c) => setMessages(c.messages))
@@ -15,19 +18,37 @@ export default function ChatView() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView?.({ behavior: 'smooth' })
-  }, [messages, activity])
+  }, [messages, liveSteps])
 
   async function send() {
     const text = input.trim()
     if (!text || sending) return
     setInput('')
     setSending(true)
-    setActivity(null)
-    // Append the user turn plus an empty assistant bubble we fill in as text streams in.
+    setLiveSteps([])
+    stepId.current = 0
+    let steps: ActivityStep[] = []
+    // Append the user turn plus an in-flight assistant placeholder (empty content; not rendered
+    // as a bubble until text arrives — the live trail is the pending indicator).
     setMessages((m) => [...m, { role: 'user', content: text }, { role: 'assistant', content: '' }])
     let reply = ''
     await streamChat(text, {
-      onActivity: (_kind, detail) => setActivity(detail),
+      onActivity: (kind, detail) => {
+        const label = labelForActivity(kind, detail)
+        if (!label) return
+        const prev = steps[steps.length - 1]
+        if (prev && prev.status === 'running') {
+          if (prev.text === label.text) return // dedupe consecutive identical labels
+          steps = [
+            ...steps.slice(0, -1),
+            { ...prev, status: 'done' },
+            { id: ++stepId.current, text: label.text, stepKind: label.stepKind, status: 'running' },
+          ]
+        } else {
+          steps = [...steps, { id: ++stepId.current, text: label.text, stepKind: label.stepKind, status: 'running' }]
+        }
+        setLiveSteps(steps)
+      },
       onText: (chunk) => {
         reply += chunk
         setMessages((m) => [...m.slice(0, -1), { role: 'assistant', content: reply }])
@@ -37,14 +58,22 @@ export default function ChatView() {
         setMessages((m) => [...m.slice(0, -1), { role: 'assistant', content: reply }])
       },
     })
-    setActivity(null)
+    // Finalize: mark the last running step done and attach the trail to the assistant message.
+    steps = steps.map((s) => (s.status === 'running' ? { ...s, status: 'done' } : s))
+    setMessages((m) => {
+      const copy = [...m]
+      const last = copy[copy.length - 1]
+      if (last && last.role === 'assistant') copy[copy.length - 1] = { ...last, steps }
+      return copy
+    })
+    setLiveSteps([])
     setSending(false)
   }
 
   async function startNew() {
     const c = await newConversation()
     setMessages(c.messages)
-    setActivity(null)
+    setLiveSteps([])
   }
 
   return (
@@ -54,9 +83,12 @@ export default function ChatView() {
       </div>
       <div className="chat-thread">
         {messages.map((m, i) => (
-          <div key={i} className={`bubble ${m.role}`}>{m.content}</div>
+          <div key={i} className="msg-row">
+            {m.role === 'assistant' && m.steps && m.steps.length > 0 && <CompletedActivityTrail steps={m.steps} />}
+            {(m.content || m.role === 'user') && <div className={`bubble ${m.role}`}>{m.content}</div>}
+          </div>
         ))}
-        {activity && <div className="activity-chip">{activity}…</div>}
+        {sending && <LiveActivityTrail steps={liveSteps} />}
         <div ref={bottomRef} />
       </div>
       <form

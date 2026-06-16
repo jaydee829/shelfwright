@@ -1,4 +1,5 @@
 import { getIdToken } from '../auth/firebase'
+import type { ActivityStep } from './activityLabels'
 
 export interface HistoryItem {
   id: string
@@ -46,6 +47,7 @@ export interface Analysis {
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+  steps?: ActivityStep[]
 }
 
 export interface Conversation {
