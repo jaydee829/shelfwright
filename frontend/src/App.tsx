@@ -6,6 +6,7 @@ import SignIn from './components/SignIn'
 import AddBookView from './views/AddBookView'
 import AnalysisView from './views/AnalysisView'
 import ChatView from './views/ChatView'
+import HistoryEditView from './views/HistoryEditView'
 import HistoryView from './views/HistoryView'
 import RecommendationsView from './views/RecommendationsView'
 
@@ -20,6 +21,7 @@ function Gate() {
         <Route element={<AppShell />}>
           <Route index element={<ChatView />} />
           <Route path="history" element={<HistoryView />} />
+          <Route path="history/:id/edit" element={<HistoryEditView />} />
           <Route path="recommendations" element={<RecommendationsView />} />
           <Route path="analysis" element={<AnalysisView />} />
           <Route path="add" element={<AddBookView />} />

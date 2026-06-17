@@ -90,6 +90,22 @@ export async function deleteHistory(id: string): Promise<void> {
   if (!res.ok) throw new Error(`delete history → ${res.status}`)
 }
 
+export interface HistoryUpdate {
+  date_completed?: string | null
+  rating?: number | null
+  notes?: string | null
+}
+
+export async function updateHistory(id: string, body: HistoryUpdate): Promise<HistoryItem> {
+  const res = await authedFetchRaw(`/history/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`update history → ${res.status}`)
+  return res.json()
+}
+
 export function getRecommendations(): Promise<Recommendation[]> {
   return getJson<Recommendation[]>('/recommendations')
 }
