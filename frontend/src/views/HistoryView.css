@@ -22,4 +22,4 @@
 .confirm-box { background: var(--bg); border-radius: 12px; padding: 20px; max-width: 22rem; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .confirm-error { color: var(--danger); font-size: 0.9rem; margin-top: 8px; }
-.confirm-actions .danger { background: var(--danger); color: var(--on-accent); border: none; border-radius: 6px; padding: 6px 12px; }
+.confirm-actions .danger { background: var(--danger); color: var(--on-danger); border: none; border-radius: 6px; padding: 6px 12px; }

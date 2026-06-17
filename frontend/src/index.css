@@ -9,6 +9,8 @@
   --border: #d1d5db;
   --accent: #6366f1;
   --on-accent: #ffffff;
+  --on-danger: #ffffff;
+  --on-badge: #ffffff;
   --strong-bg: #111827;
   --strong-fg: #ffffff;
   --topbar-bg: #111827;
@@ -38,7 +40,9 @@
   --text-soft: #cbd5e1;
   --border: #374151;
   --accent: #818cf8;
-  --on-accent: #ffffff;
+  --on-accent: #0f1115;
+  --on-danger: #0f1115;
+  --on-badge: #ffffff;
   --strong-bg: #374151;
   --strong-fg: #e5e7eb;
   --topbar-bg: #0b0d12;

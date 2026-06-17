@@ -8,5 +8,5 @@
 .rec-actions button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; background: var(--bg); }
 .rec-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .rec-badge { font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 0.5rem; margin-left: 0.5rem; }
-.rec-badge.new { background: var(--badge-new-bg); color: var(--on-accent); }
-.rec-badge.reread { background: var(--badge-reread-bg); color: var(--on-accent); }
+.rec-badge.new { background: var(--badge-new-bg); color: var(--on-badge); }
+.rec-badge.reread { background: var(--badge-reread-bg); color: var(--on-badge); }
