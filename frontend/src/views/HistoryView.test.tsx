@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from 'react-router'
 import HistoryView from './HistoryView'
 import * as client from '../api/client'
 
@@ -13,6 +14,8 @@ function item(id: string, title: string): client.HistoryItem {
   return { id, title, authors: ['A. Uthor'], date_completed: '2024-01-01', rating: 4, format: 'ebook' }
 }
 
+const renderView = () => render(<HistoryView />, { wrapper: MemoryRouter })
+
 afterEach(() => vi.clearAllMocks())
 
 describe('HistoryView pagination', () => {
@@ -20,7 +23,7 @@ describe('HistoryView pagination', () => {
     const full = Array.from({ length: 50 }, (_, i) => item(`a${i}`, `Book ${i}`))
     vi.mocked(client.getHistory).mockResolvedValueOnce(full).mockResolvedValueOnce([item('b0', 'Page 2 Book')])
 
-    render(<HistoryView />)
+    renderView()
     expect(await screen.findByText('Book 0')).toBeInTheDocument()
     expect(client.getHistory).toHaveBeenCalledWith(50, 0)
 
@@ -31,7 +34,7 @@ describe('HistoryView pagination', () => {
 
   it('hides "Load more" when the first page is short (no more rows)', async () => {
     vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Only Book')])
-    render(<HistoryView />)
+    renderView()
     expect(await screen.findByText('Only Book')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /load more/i })).not.toBeInTheDocument()
   })
@@ -43,7 +46,7 @@ describe('HistoryView pagination', () => {
         genre: 'Fantasy', tropes: ['Found Family', 'Antihero', 'Heist'],
       },
     ])
-    render(<HistoryView />)
+    renderView()
     expect(await screen.findByText('Tropey')).toBeInTheDocument()
     expect(screen.getByText('Fantasy')).toBeInTheDocument()
     expect(screen.getByText('Found Family')).toBeInTheDocument()
@@ -57,8 +60,52 @@ describe('HistoryView pagination', () => {
         genre: null, tropes: [],
       },
     ])
-    render(<HistoryView />)
+    renderView()
     expect(await screen.findByText('Fresh')).toBeInTheDocument()
     expect(screen.getByText(/Enriching/)).toBeInTheDocument()
+  })
+
+  it('opens the ⋮ menu with Edit and Delete', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
+    renderView()
+    await screen.findByText('Jhereg')
+    await userEvent.click(screen.getByRole('button', { name: /actions for Jhereg/i }))
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument()
+  })
+
+  it('confirms then deletes the row', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
+    vi.mocked(client.deleteHistory).mockResolvedValueOnce()
+    renderView()
+    await screen.findByText('Jhereg')
+    await userEvent.click(screen.getByRole('button', { name: /actions for Jhereg/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^delete$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /delete entry/i }))
+    expect(client.deleteHistory).toHaveBeenCalledWith('a0')
+    await waitFor(() => expect(screen.queryByText('Jhereg')).not.toBeInTheDocument())
+  })
+
+  it('shows an error and keeps the row when delete fails', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
+    vi.mocked(client.deleteHistory).mockRejectedValueOnce(new Error('boom'))
+    renderView()
+    await screen.findByText('Jhereg')
+    await userEvent.click(screen.getByRole('button', { name: /actions for Jhereg/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^delete$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /delete entry/i }))
+    expect(await screen.findByText(/couldn't delete that entry/i)).toBeInTheDocument()
+    expect(screen.getByText('Jhereg')).toBeInTheDocument()  // row stays
+  })
+
+  it('cancel in the confirm dialog keeps the row', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
+    renderView()
+    await screen.findByText('Jhereg')
+    await userEvent.click(screen.getByRole('button', { name: /actions for Jhereg/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^delete$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /cancel/i }))
+    expect(client.deleteHistory).not.toHaveBeenCalled()
+    expect(screen.getByText('Jhereg')).toBeInTheDocument()
   })
 })

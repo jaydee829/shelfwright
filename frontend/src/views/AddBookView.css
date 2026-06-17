@@ -14,3 +14,5 @@
 .addbook-error {
   color: var(--danger, #c62828);
 }
+.edit-context { font-size: 0.9rem; color: #374151; }
+.edit-actions { display: flex; gap: 0.5rem; }

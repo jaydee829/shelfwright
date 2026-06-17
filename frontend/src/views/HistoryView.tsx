@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
-import { getHistory, type HistoryItem } from '../api/client'
+import { useNavigate } from 'react-router'
+import { deleteHistory, getHistory, type HistoryItem } from '../api/client'
 import './HistoryView.css'
 
 const PAGE_SIZE = 50
 
 export default function HistoryView() {
+  const navigate = useNavigate()
   const [items, setItems] = useState<HistoryItem[] | null>(null)
   const [hasMore, setHasMore] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
+  const [menuFor, setMenuFor] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<HistoryItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     void getHistory(PAGE_SIZE, 0).then((page) => {
@@ -25,6 +31,21 @@ export default function HistoryView() {
       setHasMore(page.length === PAGE_SIZE)
     } finally {
       setLoadingMore(false)
+    }
+  }
+
+  async function doDelete() {
+    if (!confirm) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteHistory(confirm.id)
+      setItems((cur) => (cur ? cur.filter((h) => h.id !== confirm.id) : cur))
+      setConfirm(null)
+    } catch {
+      setError("Couldn't delete that entry — try again.")
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -58,6 +79,36 @@ export default function HistoryView() {
                 <span className="trope-chip enriching">Enriching…</span>
               )}
             </div>
+            <div className="history-actions">
+              <button
+                className="kebab"
+                aria-label={`Actions for ${h.title}`}
+                aria-haspopup="menu"
+                onClick={() => setMenuFor(menuFor === h.id ? null : h.id)}
+              >
+                ⋮
+              </button>
+              {menuFor === h.id && (
+                <div className="row-menu" role="menu">
+                  <button
+                    onClick={() => {
+                      setMenuFor(null)
+                      navigate(`/history/${h.id}/edit`, { state: h })
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuFor(null)
+                      setConfirm(h)
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
+            </div>
           </li>
         ))}
       </ul>
@@ -65,6 +116,31 @@ export default function HistoryView() {
         <button className="history-load-more" onClick={() => void loadMore()} disabled={loadingMore}>
           {loadingMore ? 'Loading…' : 'Load more'}
         </button>
+      )}
+      {confirm && (
+        <div className="confirm-backdrop" role="dialog" aria-modal="true" aria-label="Confirm delete">
+          <div className="confirm-box">
+            <p>
+              Delete your read of "{confirm.title}"
+              {confirm.date_completed ? ` finished ${confirm.date_completed}` : ''}? This can't be undone.
+            </p>
+            {error && <p className="confirm-error">{error}</p>}
+            <div className="confirm-actions">
+              <button
+                onClick={() => {
+                  setConfirm(null)
+                  setError(null)
+                }}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button className="danger" onClick={() => void doDelete()} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete entry'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

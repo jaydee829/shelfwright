@@ -127,3 +127,45 @@ def test_history_no_tropes_returns_empty_list(two_user_client):
     shared = next(r for r in rows if r["title"] == "Shared Book")
     assert shared["tropes"] == []
     assert shared["genre"] is None
+
+
+def test_delete_history_removes_only_callers_row(two_user_client):
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry_id = client.get("/history").json()[0]["id"]
+    assert client.delete(f"/history/{entry_id}").status_code == 200
+    assert entry_id not in [h["id"] for h in client.get("/history").json()]
+
+
+def test_delete_history_other_users_row_is_404(two_user_client, db_url):
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        friend_id = str(session.query(ReadingHistory).filter(ReadingHistory.user_id == FRIEND_ID).first().id)
+    assert two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com").delete(f"/history/{friend_id}").status_code == 404
+    with manager.get_session() as session:
+        assert session.get(ReadingHistory, UUID(friend_id)) is not None
+
+
+def test_patch_history_updates_rating_date_notes(two_user_client):
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry_id = client.get("/history").json()[0]["id"]
+    resp = client.patch(f"/history/{entry_id}", json={"rating": 5, "date_completed": "2020-12-31", "notes": "loved it"})
+    assert resp.status_code == 200
+    assert resp.json()["rating"] == 5 and resp.json()["date_completed"] == "2020-12-31"
+    row = next(h for h in client.get("/history").json() if h["id"] == entry_id)
+    assert row["rating"] == 5 and row["date_completed"] == "2020-12-31" and row["notes"] == "loved it"
+
+
+def test_patch_history_rejects_bad_input_and_other_users(two_user_client, db_url):
+    from datetime import timedelta
+
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry_id = client.get("/history").json()[0]["id"]
+    assert client.patch(f"/history/{entry_id}", json={"rating": True}).status_code == 422
+    assert client.patch(f"/history/{entry_id}", json={"rating": 9}).status_code == 422
+    future = (date.today() + timedelta(days=3)).isoformat()
+    assert client.patch(f"/history/{entry_id}", json={"date_completed": future}).status_code == 422
+    assert client.patch(f"/history/{entry_id}", json={"date_completed": None}).status_code == 422
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        friend_id = str(session.query(ReadingHistory).filter(ReadingHistory.user_id == FRIEND_ID).first().id)
+    assert client.patch(f"/history/{friend_id}", json={"rating": 3}).status_code == 404

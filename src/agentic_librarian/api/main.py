@@ -1,8 +1,11 @@
 import contextlib
 import os
+from datetime import date
+from uuid import UUID
 
-from fastapi import Body, Depends, FastAPI, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -82,6 +85,37 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noq
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
 
 
+def _history_item(h) -> dict:
+    """Serialize one ReadingHistory row to the /history payload shape (shared by GET + PATCH)."""
+    work = h.edition.work
+    top = sorted(work.tropes, key=lambda wt: wt.relevance_score, reverse=True)[:3]
+    return {
+        "id": str(h.id),
+        "title": work.title,
+        "authors": [c.author.name for c in work.contributors if c.role == "Author"],
+        "date_completed": h.date_completed.isoformat() if h.date_completed else None,
+        "rating": h.user_rating,
+        "format": h.edition.format,
+        "notes": h.user_notes,
+        "genre": work.genres[0] if work.genres else None,
+        "tropes": [wt.trope.name for wt in top],
+    }
+
+
+def _history_options():
+    """Shared eager-load options for ReadingHistory queries (GET + PATCH)."""
+    return [
+        joinedload(ReadingHistory.edition)
+        .joinedload(Edition.work)
+        .joinedload(Work.contributors)
+        .joinedload(WorkContributor.author),
+        joinedload(ReadingHistory.edition)
+        .joinedload(Edition.work)
+        .selectinload(Work.tropes)
+        .joinedload(WorkTrope.trope),
+    ]
+
+
 @app.get("/history")
 def get_history(
     limit: int = Query(50, ge=1, le=200),
@@ -101,42 +135,83 @@ def get_history(
             # hops below it, so SQLAlchemy subquery-wraps the LIMIT against ReadingHistory rows.
             # Work.tropes is a to-many so we use selectinload (separate IN query) to avoid
             # cartesian-multiplying rows with the contributors joinedload.
-            .options(
-                joinedload(ReadingHistory.edition)
-                .joinedload(Edition.work)
-                .joinedload(Work.contributors)
-                .joinedload(WorkContributor.author),
-                joinedload(ReadingHistory.edition)
-                .joinedload(Edition.work)
-                .selectinload(Work.tropes)
-                .joinedload(WorkTrope.trope),
-            )
+            .options(*_history_options())
             .order_by(ReadingHistory.date_completed.desc(), ReadingHistory.id)
             .offset(offset)
             .limit(limit)
             .all()
         )
+        return [_history_item(h) for h in history_entries]
 
-        def _genre_and_tropes(work):
-            top = sorted(work.tropes, key=lambda wt: wt.relevance_score, reverse=True)[:3]
-            return (work.genres[0] if work.genres else None, [wt.trope.name for wt in top])
 
-        result = []
-        for h in history_entries:
-            genre, tropes = _genre_and_tropes(h.edition.work)
-            result.append(
-                {
-                    "id": str(h.id),
-                    "title": h.edition.work.title,
-                    "authors": [c.author.name for c in h.edition.work.contributors if c.role == "Author"],
-                    "date_completed": h.date_completed.isoformat() if h.date_completed else None,
-                    "rating": h.user_rating,
-                    "format": h.edition.format,
-                    "genre": genre,
-                    "tropes": tropes,
-                }
-            )
-        return result
+class HistoryUpdate(BaseModel):
+    date_completed: date | None = None
+    rating: int | None = None
+    notes: str | None = None
+
+    @field_validator("rating", mode="before")
+    @classmethod
+    def _no_bool_rating(cls, v: object) -> object:
+        if isinstance(v, bool):
+            raise ValueError("rating must be an integer, not a boolean")
+        return v
+
+    @field_validator("rating")
+    @classmethod
+    def _rating_range(cls, v: int | None) -> int | None:
+        if v is not None and not 1 <= v <= 5:
+            raise ValueError("rating must be from 1 to 5")
+        return v
+
+    @field_validator("date_completed")
+    @classmethod
+    def _not_future(cls, v: date | None) -> date | None:
+        if v is not None and v > date.today():
+            raise ValueError("date_completed cannot be in the future")
+        return v
+
+
+@app.delete("/history/{entry_id}")
+def delete_history(entry_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+    with db_manager.get_session() as session:
+        row = (
+            session.query(ReadingHistory)
+            .filter(ReadingHistory.id == entry_id, ReadingHistory.user_id == user.id)  # only mine (ADR-048)
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="history entry not found")
+        session.delete(row)
+        session.flush()
+    return {"id": str(entry_id), "deleted": True}
+
+
+@app.patch("/history/{entry_id}")
+def update_history(
+    entry_id: UUID,
+    req: HistoryUpdate,
+    user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
+):
+    fields = req.model_dump(exclude_unset=True)  # only what the client actually sent
+    if "date_completed" in fields and fields["date_completed"] is None:
+        raise HTTPException(status_code=422, detail="date_completed cannot be null")
+    with db_manager.get_session() as session:
+        row = (
+            session.query(ReadingHistory)
+            .filter(ReadingHistory.id == entry_id, ReadingHistory.user_id == user.id)
+            .options(*_history_options())
+            .first()
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail="history entry not found")
+        if "date_completed" in fields:
+            row.date_completed = fields["date_completed"]
+        if "rating" in fields:
+            row.user_rating = fields["rating"]
+        if "notes" in fields:
+            row.user_notes = fields["notes"]
+        session.flush()
+        return _history_item(row)
 
 
 @app.get("/works")
