@@ -8,6 +8,7 @@ export interface HistoryItem {
   date_completed: string | null
   rating: number | null
   format: string | null
+  notes?: string | null
   genre?: string | null
   tropes?: string[]
 }
@@ -82,6 +83,11 @@ export async function probeAccess(): Promise<'ready' | 'notInvited' | 'error'> {
 
 export function getHistory(limit = 50, offset = 0): Promise<HistoryItem[]> {
   return getJson<HistoryItem[]>(`/history?limit=${limit}&offset=${offset}`)
+}
+
+export async function deleteHistory(id: string): Promise<void> {
+  const res = await authedFetchRaw(`/history/${id}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`delete history → ${res.status}`)
 }
 
 export function getRecommendations(): Promise<Recommendation[]> {
