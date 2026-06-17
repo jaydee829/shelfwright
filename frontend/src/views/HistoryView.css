@@ -21,4 +21,5 @@
 .confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: grid; place-items: center; z-index: 50; }
 .confirm-box { background: #fff; border-radius: 12px; padding: 20px; max-width: 22rem; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.confirm-error { color: #c62828; font-size: 0.9rem; margin-top: 8px; }
 .confirm-actions .danger { background: #c62828; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; }

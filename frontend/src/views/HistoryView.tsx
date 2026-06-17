@@ -13,6 +13,7 @@ export default function HistoryView() {
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<HistoryItem | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     void getHistory(PAGE_SIZE, 0).then((page) => {
@@ -36,10 +37,13 @@ export default function HistoryView() {
   async function doDelete() {
     if (!confirm) return
     setDeleting(true)
+    setError(null)
     try {
       await deleteHistory(confirm.id)
       setItems((cur) => (cur ? cur.filter((h) => h.id !== confirm.id) : cur))
       setConfirm(null)
+    } catch {
+      setError("Couldn't delete that entry — try again.")
     } finally {
       setDeleting(false)
     }
@@ -120,8 +124,17 @@ export default function HistoryView() {
               Delete your read of "{confirm.title}"
               {confirm.date_completed ? ` finished ${confirm.date_completed}` : ''}? This can't be undone.
             </p>
+            {error && <p className="confirm-error">{error}</p>}
             <div className="confirm-actions">
-              <button onClick={() => setConfirm(null)} disabled={deleting}>Cancel</button>
+              <button
+                onClick={() => {
+                  setConfirm(null)
+                  setError(null)
+                }}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
               <button className="danger" onClick={() => void doDelete()} disabled={deleting}>
                 {deleting ? 'Deleting…' : 'Delete entry'}
               </button>

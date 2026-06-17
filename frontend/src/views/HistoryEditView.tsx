@@ -54,7 +54,13 @@ export default function HistoryEditView() {
         </label>
         <label>
           Date finished
-          <input type="date" value={dateFinished} onChange={(e) => setDateFinished(e.target.value)} required />
+          <input
+            type="date"
+            value={dateFinished}
+            onChange={(e) => setDateFinished(e.target.value)}
+            max={new Date().toLocaleDateString('en-CA')}
+            required
+          />
         </label>
         <label>
           Notes

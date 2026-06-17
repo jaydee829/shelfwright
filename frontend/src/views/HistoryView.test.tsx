@@ -86,6 +86,18 @@ describe('HistoryView pagination', () => {
     await waitFor(() => expect(screen.queryByText('Jhereg')).not.toBeInTheDocument())
   })
 
+  it('shows an error and keeps the row when delete fails', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
+    vi.mocked(client.deleteHistory).mockRejectedValueOnce(new Error('boom'))
+    renderView()
+    await screen.findByText('Jhereg')
+    await userEvent.click(screen.getByRole('button', { name: /actions for Jhereg/i }))
+    await userEvent.click(screen.getByRole('button', { name: /^delete$/i }))
+    await userEvent.click(screen.getByRole('button', { name: /delete entry/i }))
+    expect(await screen.findByText(/couldn't delete that entry/i)).toBeInTheDocument()
+    expect(screen.getByText('Jhereg')).toBeInTheDocument()  // row stays
+  })
+
   it('cancel in the confirm dialog keeps the row', async () => {
     vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Jhereg')])
     renderView()
