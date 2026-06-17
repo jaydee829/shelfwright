@@ -1,25 +1,25 @@
 .history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
 .history-row {
   display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 12px; border: 1px solid #e5e7eb; border-radius: 10px;
+  padding: 12px; border: 1px solid var(--surface-2); border-radius: 10px;
 }
 .history-main { display: flex; flex-direction: column; }
 .history-title { font-weight: 600; }
-.history-authors { color: #6b7280; font-size: 14px; }
-.history-meta { display: flex; gap: 10px; align-items: center; font-size: 13px; color: #6b7280; }
-.history-rating { color: #f59e0b; }
+.history-authors { color: var(--text-muted); font-size: 14px; }
+.history-meta { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--text-muted); }
+.history-rating { color: var(--star); }
 .history-tropes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.trope-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #eef2ff; color: #3730a3; }
-.trope-chip.genre { background: #e0e7ff; font-weight: 600; }
-.trope-chip.enriching { background: transparent; color: #6b7280; font-style: italic; padding-left: 0; }
+.trope-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--chip-bg); color: var(--chip-fg); }
+.trope-chip.genre { background: var(--chip-genre-bg); font-weight: 600; }
+.trope-chip.enriching { background: transparent; color: var(--text-muted); font-style: italic; padding-left: 0; }
 .history-row { position: relative; }
 .history-actions { position: absolute; top: 6px; right: 6px; }
-.kebab { background: none; border: none; font-size: 18px; line-height: 1; padding: 2px 6px; cursor: pointer; color: #6b7280; }
-.row-menu { position: absolute; right: 0; top: 100%; z-index: 5; background: #fff; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column; min-width: 96px; }
+.kebab { background: none; border: none; font-size: 18px; line-height: 1; padding: 2px 6px; cursor: pointer; color: var(--text-muted); }
+.row-menu { position: absolute; right: 0; top: 100%; z-index: 5; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px var(--menu-shadow); display: flex; flex-direction: column; min-width: 96px; }
 .row-menu button { background: none; border: none; text-align: left; padding: 8px 12px; cursor: pointer; }
-.row-menu button:hover { background: #f3f4f6; }
-.confirm-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: grid; place-items: center; z-index: 50; }
-.confirm-box { background: #fff; border-radius: 12px; padding: 20px; max-width: 22rem; }
+.row-menu button:hover { background: var(--surface); }
+.confirm-backdrop { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; z-index: 50; }
+.confirm-box { background: var(--bg); border-radius: 12px; padding: 20px; max-width: 22rem; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.confirm-error { color: #c62828; font-size: 0.9rem; margin-top: 8px; }
-.confirm-actions .danger { background: #c62828; color: #fff; border: none; border-radius: 6px; padding: 6px 12px; }
+.confirm-error { color: var(--danger); font-size: 0.9rem; margin-top: 8px; }
+.confirm-actions .danger { background: var(--danger); color: var(--on-danger); border: none; border-radius: 6px; padding: 6px 12px; }

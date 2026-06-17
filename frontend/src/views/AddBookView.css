@@ -9,10 +9,10 @@
   font-size: 0.9rem;
 }
 .addbook-done {
-  color: var(--ok, #2e7d32);
+  color: var(--ok);
 }
 .addbook-error {
-  color: var(--danger, #c62828);
+  color: var(--danger);
 }
-.edit-context { font-size: 0.9rem; color: #374151; }
+.edit-context { font-size: 0.9rem; color: var(--text-soft); }
 .edit-actions { display: flex; gap: 0.5rem; }

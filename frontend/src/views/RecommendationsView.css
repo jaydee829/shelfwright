@@ -1,12 +1,12 @@
 .rec-list { display: flex; flex-direction: column; gap: 12px; }
-.rec-card { padding: 14px; border: 1px solid #e5e7eb; border-radius: 12px; }
+.rec-card { padding: 14px; border: 1px solid var(--surface-2); border-radius: 12px; }
 .rec-head { display: flex; flex-direction: column; }
 .rec-title { font-weight: 600; }
-.rec-authors { color: #6b7280; font-size: 14px; }
-.rec-why { color: #374151; font-size: 14px; }
+.rec-authors { color: var(--text-muted); font-size: 14px; }
+.rec-why { color: var(--text-soft); font-size: 14px; }
 .rec-actions { display: flex; gap: 8px; }
-.rec-actions button { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 12px; background: #fff; }
+.rec-actions button { border: 1px solid var(--border); border-radius: 8px; padding: 6px 12px; background: var(--bg); }
 .rec-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
 .rec-badge { font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 0.5rem; margin-left: 0.5rem; }
-.rec-badge.new { background: #1f6f43; color: #fff; }
-.rec-badge.reread { background: #5a4a8a; color: #fff; }
+.rec-badge.new { background: var(--badge-new-bg); color: var(--on-badge); }
+.rec-badge.reread { background: var(--badge-reread-bg); color: var(--on-badge); }
