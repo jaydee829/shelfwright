@@ -178,6 +178,16 @@ def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)
             .order_by(ImportRow.id)
             .all()
         ]
+        stalled = (
+            session.query(func.count())
+            .select_from(ImportRow)
+            .filter(
+                ImportRow.import_job_id == job_id,
+                ImportRow.status == "processing",
+                ImportRow.updated_at < datetime.now(UTC) - STALLED_AFTER,
+            )
+            .scalar()
+        )
         active = counts.get("pending", 0) + counts.get("processing", 0)
         return {
             "import_job_id": str(job_id),
@@ -186,6 +196,7 @@ def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)
             "counts": counts,
             "outcomes": outcomes,
             "complete": active == 0,
+            "stalled": stalled,
             "report": report,
         }
 

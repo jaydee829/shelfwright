@@ -242,6 +242,7 @@ export interface ImportStatus {
   counts: Record<string, number>
   outcomes: Record<string, number>
   complete: boolean
+  stalled: number
   report: Array<{
     title: string | null; author: string | null; status: string
     outcome: string | null; skip_reason: string | null; error: string | null

@@ -69,3 +69,21 @@ def test_report_lists_skipped_rows(client):
     body = c.get(f"/import/{job_id}").json()
     assert body["counts"]["skipped"] == 1
     assert any(item["status"] == "skipped" for item in body["report"])
+
+
+def test_stalled_processing_rows_are_counted(client):
+    from datetime import UTC, datetime, timedelta
+
+    c, manager = client
+    with manager.get_session() as s:
+        job = ImportJob(user_id=DEFAULT_USER_ID, source="goodreads", total_rows=1)
+        s.add(job)
+        s.flush()
+        old = datetime.now(UTC) - timedelta(minutes=30)
+        s.add(ImportRow(import_job_id=job.id, user_id=DEFAULT_USER_ID, destination="history",
+                        status="processing", updated_at=old))
+        s.flush()
+        job_id = job.id
+    body = c.get(f"/import/{job_id}").json()
+    assert body["stalled"] == 1
+    assert body["complete"] is False

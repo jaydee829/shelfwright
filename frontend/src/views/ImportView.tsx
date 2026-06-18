@@ -181,15 +181,14 @@ export default function ImportView() {
               <li>⏭ {status.counts.skipped ?? 0} skipped</li>
             </ul>
           )}
-          {status?.complete && (
-            <>
-              {status.report.length > 0 && (
-                <button onClick={downloadReport}>Download report</button>
-              )}
-              {(status.counts.failed ?? 0) > 0 && (
-                <button disabled={busy} onClick={onRetry}>Retry failed</button>
-              )}
-            </>
+          {status && (status.stalled ?? 0) > 0 && (
+            <p className="import-error">{status.stalled} row(s) appear stuck. You can retry them.</p>
+          )}
+          {status && ((status.counts.failed ?? 0) > 0 || (status.stalled ?? 0) > 0) && (
+            <button disabled={busy} onClick={onRetry}>Retry failed/stalled</button>
+          )}
+          {status?.complete && status.report.length > 0 && (
+            <button onClick={downloadReport}>Download report</button>
           )}
         </div>
       )}

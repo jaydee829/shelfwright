@@ -37,7 +37,7 @@ describe('ImportView', () => {
     vi.spyOn(client, 'commitImport').mockResolvedValue({ import_job_id: 'j1', total_rows: 2, enqueued: 2 })
     vi.spyOn(client, 'getImportJob').mockResolvedValue({
       import_job_id: 'j1', source: 'goodreads', total_rows: 2,
-      counts: { done: 2 }, outcomes: { linked: 2 }, complete: true, report: [],
+      counts: { done: 2 }, outcomes: { linked: 2 }, complete: true, stalled: 0, report: [],
     })
     render(<ImportView />)
     uploadFile()
@@ -45,5 +45,21 @@ describe('ImportView', () => {
     fireEvent.click(screen.getByRole('button', { name: /continue/i }))     // map → review
     fireEvent.click(screen.getByRole('button', { name: /start import/i })) // review → progress
     await waitFor(() => expect(screen.getByText(/2 \/ 2/)).toBeInTheDocument())
+  })
+
+  it('offers retry when rows are stalled (not yet complete)', async () => {
+    vi.spyOn(client, 'previewImport').mockResolvedValue(PREVIEW)
+    vi.spyOn(client, 'commitImport').mockResolvedValue({ import_job_id: 'j1', total_rows: 2, enqueued: 2 })
+    vi.spyOn(client, 'getImportJob').mockResolvedValue({
+      import_job_id: 'j1', source: 'goodreads', total_rows: 2,
+      counts: { processing: 1, done: 1 }, outcomes: {}, complete: false, stalled: 1, report: [],
+    })
+    vi.spyOn(client, 'retryImport').mockResolvedValue({ retried: 1 })
+    render(<ImportView />)
+    uploadFile()
+    await screen.findByText(/Detected: goodreads/i)
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }))
+    fireEvent.click(screen.getByRole('button', { name: /start import/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument())
   })
 })
