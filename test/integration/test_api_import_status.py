@@ -1,0 +1,63 @@
+"""Derived progress + retry, scoped to the owner (Spec 2026-06-18, ADR-048)."""
+
+from datetime import date
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from agentic_librarian.api import imports as imports_mod
+from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
+from agentic_librarian.api.imports import router
+from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
+from agentic_librarian.db.models import ImportJob, ImportRow
+from agentic_librarian.db.session import DatabaseManager
+
+pytestmark = pytest.mark.db_integration
+
+
+@pytest.fixture()
+def client(db_url, monkeypatch):
+    manager = DatabaseManager(db_url)
+    monkeypatch.setattr(imports_mod, "db_manager", manager)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(id=DEFAULT_USER_ID, email=DEFAULT_USER_EMAIL)
+    return TestClient(app), manager
+
+
+def _seed_job(manager, statuses):
+    with manager.get_session() as s:
+        job = ImportJob(user_id=DEFAULT_USER_ID, source="goodreads", total_rows=len(statuses))
+        s.add(job)
+        s.flush()
+        for st in statuses:
+            s.add(ImportRow(import_job_id=job.id, user_id=DEFAULT_USER_ID, destination="history",
+                            status=st, outcome=("linked" if st == "done" else None),
+                            date_completed=date(2024, 1, 1)))
+        s.flush()
+        return job.id
+
+
+def test_progress_is_derived_from_rows(client):
+    c, manager = client
+    job_id = _seed_job(manager, ["done", "done", "failed", "pending"])
+    body = c.get(f"/import/{job_id}").json()
+    assert body["total_rows"] == 4
+    assert body["counts"]["done"] == 2
+    assert body["counts"]["failed"] == 1
+    assert body["counts"]["pending"] == 1
+    assert body["complete"] is False  # a pending row remains
+
+
+def test_retry_re_enqueues_failed_rows(client, monkeypatch):
+    c, manager = client
+    job_id = _seed_job(manager, ["failed", "done"])
+    enq = []
+    monkeypatch.setattr(imports_mod, "enqueue_import_row", lambda rid: enq.append(rid) or True)
+    r = c.post(f"/import/{job_id}/retry")
+    assert r.status_code == 200
+    assert len(enq) == 1  # only the failed row
+    body = c.get(f"/import/{job_id}").json()
+    assert body["counts"].get("failed", 0) == 0
+    assert body["counts"]["pending"] == 1

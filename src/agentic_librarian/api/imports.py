@@ -7,8 +7,11 @@ import csv
 import io
 import json
 import logging
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import func
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import ImportJob, ImportRow
@@ -20,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_ROWS = 2000
+STALLED_AFTER = timedelta(minutes=15)
 
 db_manager = DatabaseManager()
 
@@ -139,3 +143,73 @@ async def commit(
             logger.exception("import-row enqueue failed for row %s", rid)
 
     return {"import_job_id": job_id, "total_rows": len(parsed), "enqueued": len(enqueue_ids)}
+
+
+def _load_owned_job(session, job_id, user_id):
+    job = session.get(ImportJob, job_id)
+    if job is None or job.user_id != user_id:
+        raise HTTPException(status_code=404, detail="import job not found")
+    return job
+
+
+@router.get("/import/{job_id}")
+def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+    with db_manager.get_session() as session:
+        job = _load_owned_job(session, job_id, user.id)
+        counts = dict(
+            session.query(ImportRow.status, func.count())
+            .filter(ImportRow.import_job_id == job_id)
+            .group_by(ImportRow.status)
+            .all()
+        )
+        outcomes = dict(
+            session.query(ImportRow.outcome, func.count())
+            .filter(ImportRow.import_job_id == job_id, ImportRow.outcome.isnot(None))
+            .group_by(ImportRow.outcome)
+            .all()
+        )
+        report = [
+            {"title": r.raw_title, "author": r.raw_author, "status": r.status,
+             "outcome": r.outcome, "skip_reason": r.skip_reason, "error": r.error_detail}
+            for r in session.query(ImportRow)
+            .filter(ImportRow.import_job_id == job_id, ImportRow.status.in_(("failed", "skipped")))
+            .all()
+        ]
+        active = counts.get("pending", 0) + counts.get("processing", 0)
+        return {
+            "import_job_id": str(job_id),
+            "source": job.source,
+            "total_rows": job.total_rows,
+            "counts": counts,
+            "outcomes": outcomes,
+            "complete": active == 0,
+            "report": report,
+        }
+
+
+@router.post("/import/{job_id}/retry")
+def retry(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
+    cutoff = datetime.now(UTC) - STALLED_AFTER
+    retry_ids: list[str] = []
+    with db_manager.get_session() as session:
+        _load_owned_job(session, job_id, user.id)
+        rows = (
+            session.query(ImportRow)
+            .filter(
+                ImportRow.import_job_id == job_id,
+                (ImportRow.status == "failed")
+                | ((ImportRow.status == "processing") & (ImportRow.updated_at < cutoff)),
+            )
+            .all()
+        )
+        for row in rows:
+            row.status = "pending"
+            row.error_detail = None
+            retry_ids.append(str(row.id))
+
+    for rid in retry_ids:
+        try:
+            enqueue_import_row(rid)
+        except Exception:  # noqa: BLE001
+            logger.exception("retry enqueue failed for row %s", rid)
+    return {"retried": len(retry_ids)}
