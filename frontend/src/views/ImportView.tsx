@@ -20,6 +20,7 @@ export default function ImportView() {
   const [status, setStatus] = useState<ImportStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [pollKey, setPollKey] = useState(0)
 
   async function onFile(f: File) {
     setFile(f)
@@ -54,6 +55,21 @@ export default function ImportView() {
     }
   }
 
+  async function onRetry() {
+    if (!jobId || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await retryImport(jobId)
+      setStatus(null)
+      setPollKey((k) => k + 1) // restart polling so progress reappears after retry
+    } catch {
+      setError('Retry could not start. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const timer = useRef<number | null>(null)
   useEffect(() => {
     if (step !== 'progress' || !jobId) return
@@ -73,7 +89,7 @@ export default function ImportView() {
       active = false
       if (timer.current) window.clearTimeout(timer.current)
     }
-  }, [step, jobId])
+  }, [step, jobId, pollKey])
 
   function downloadReport() {
     if (!status) return
@@ -100,12 +116,15 @@ export default function ImportView() {
       {step === 'upload' && (
         <div className="import-step">
           <p>Upload a CSV — a Goodreads export, or your own with title, author and date columns.</p>
-          <input
-            data-testid="import-file"
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
-          />
+          <label>
+            Choose CSV file
+            <input
+              data-testid="import-file"
+              type="file"
+              accept=".csv,text/csv"
+              onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])}
+            />
+          </label>
         </div>
       )}
 
@@ -164,9 +183,11 @@ export default function ImportView() {
           )}
           {status?.complete && (
             <>
-              <button onClick={downloadReport}>Download report</button>
-              {(status.counts.failed ?? 0) > 0 && jobId && (
-                <button onClick={() => retryImport(jobId)}>Retry failed</button>
+              {status.report.length > 0 && (
+                <button onClick={downloadReport}>Download report</button>
+              )}
+              {(status.counts.failed ?? 0) > 0 && (
+                <button disabled={busy} onClick={onRetry}>Retry failed</button>
               )}
             </>
           )}
