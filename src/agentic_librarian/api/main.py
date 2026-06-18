@@ -11,9 +11,11 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
 from agentic_librarian.api import analysis, auth, recommendations
+from agentic_librarian.api import imports as imports_api
 from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.books import router as books_router
+from agentic_librarian.api.imports import router as imports_router
 from agentic_librarian.api.internal import router as internal_router
 from agentic_librarian.api.recommendations import router as recommendations_router
 from agentic_librarian.chat import stream, transcript
@@ -54,6 +56,7 @@ async def lifespan(app: FastAPI):
     usage.set_db_manager(shared)
     recommendations.set_db_manager(shared)
     analysis.set_db_manager(shared)
+    imports_api.set_db_manager(shared)
     yield
 
 
@@ -66,6 +69,7 @@ app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(books_router)
 app.include_router(internal_router)
+app.include_router(imports_router)
 
 
 @app.get("/health")
