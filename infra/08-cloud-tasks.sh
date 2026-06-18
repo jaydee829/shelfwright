@@ -27,6 +27,19 @@ gcloud services enable cloudtasks.googleapis.com
 gcloud tasks queues describe "${TASKS_QUEUE_NAME}" --location="${REGION}" >/dev/null 2>&1 \
   || gcloud tasks queues create "${TASKS_QUEUE_NAME}" --location="${REGION}"
 
+# 1b) The queue the bulk-import per-row worker enqueues onto — SEPARATE from the enrich queue
+#     so a large import burst can't starve interactive deep-enrich (Spec 2026-06-18 D7). The
+#     conservative dispatch rate is the quota-safety lever: it caps the parallel shallow-scout
+#     burst under the Books/Hardcover + Gemini limits (raise it once comfortable on paid tier).
+#     Reuses the SAME invoker SA + runtime-SA enqueuer/impersonation grants created below
+#     (project-level enqueuer + the invoker's run.invoker are queue-independent), so it needs
+#     no extra IAM. Idempotent: create only if absent.
+IMPORT_TASKS_QUEUE_NAME="librarian-import"
+IMPORT_TASKS_QUEUE_PATH="projects/${PROJECT_ID}/locations/${REGION}/queues/${IMPORT_TASKS_QUEUE_NAME}"
+gcloud tasks queues describe "${IMPORT_TASKS_QUEUE_NAME}" --location="${REGION}" >/dev/null 2>&1 \
+  || gcloud tasks queues create "${IMPORT_TASKS_QUEUE_NAME}" --location="${REGION}" \
+       --max-dispatches-per-second=2 --max-concurrent-dispatches=5
+
 # 2) The service account whose OIDC token authorizes calls to the internal enrich route.
 gcloud iam service-accounts describe "${ENRICH_INVOKER_SA}" >/dev/null 2>&1 \
   || gcloud iam service-accounts create "${ENRICH_INVOKER_SA_NAME}" \
@@ -56,7 +69,8 @@ RUN_BASE_URL="$(gcloud run services describe "${SERVICE}" --region="${REGION}" -
 
 echo "Cloud Tasks provisioned."
 echo "  Set these GitHub repo Variables for deploy.yml:"
-echo "    GCP_CLOUD_TASKS_QUEUE = ${TASKS_QUEUE_PATH}"
-echo "    GCP_ENRICH_INVOKER_SA = ${ENRICH_INVOKER_SA}"
+echo "    GCP_CLOUD_TASKS_QUEUE  = ${TASKS_QUEUE_PATH}"
+echo "    GCP_IMPORT_TASKS_QUEUE = ${IMPORT_TASKS_QUEUE_PATH}"
+echo "    GCP_ENRICH_INVOKER_SA  = ${ENRICH_INVOKER_SA}"
 echo "    GCP_RUN_BASE_URL      = ${RUN_BASE_URL:-<gcloud run services describe ${SERVICE} --region=${REGION} --format='value(status.url)'>}"
 echo "    GCP_SEARCH_ENGINE_ID  = ${SEARCH_ENGINE_ID:-<your Programmable Search Engine id, e.g. .env SEARCH_ENGINE_ID>}"
