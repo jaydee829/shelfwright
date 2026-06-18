@@ -12,6 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.db.models import ImportJob, ImportRow
@@ -145,8 +146,9 @@ async def commit(
     return {"import_job_id": job_id, "total_rows": len(parsed), "enqueued": len(enqueue_ids)}
 
 
-def _load_owned_job(session, job_id, user_id):
+def _load_owned_job(session: Session, job_id: UUID, user_id: UUID) -> ImportJob:
     job = session.get(ImportJob, job_id)
+    # 404 (not 403) for a job owned by another user: don't reveal it exists (ADR-048).
     if job is None or job.user_id != user_id:
         raise HTTPException(status_code=404, detail="import job not found")
     return job
@@ -173,6 +175,7 @@ def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)
              "outcome": r.outcome, "skip_reason": r.skip_reason, "error": r.error_detail}
             for r in session.query(ImportRow)
             .filter(ImportRow.import_job_id == job_id, ImportRow.status.in_(("failed", "skipped")))
+            .order_by(ImportRow.id)
             .all()
         ]
         active = counts.get("pending", 0) + counts.get("processing", 0)

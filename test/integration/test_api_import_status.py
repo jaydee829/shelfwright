@@ -61,3 +61,11 @@ def test_retry_re_enqueues_failed_rows(client, monkeypatch):
     body = c.get(f"/import/{job_id}").json()
     assert body["counts"].get("failed", 0) == 0
     assert body["counts"]["pending"] == 1
+
+
+def test_report_lists_skipped_rows(client):
+    c, manager = client
+    job_id = _seed_job(manager, ["skipped", "done"])
+    body = c.get(f"/import/{job_id}").json()
+    assert body["counts"]["skipped"] == 1
+    assert any(item["status"] == "skipped" for item in body["report"])
