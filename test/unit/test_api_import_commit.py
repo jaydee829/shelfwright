@@ -83,6 +83,11 @@ def test_commit_writes_rows_and_enqueues_only_non_skip(monkeypatch):
     assert dests == ["history", "skip", "suggestion"]
     assert len(enq) == 2  # exactly the two non-skip rows enqueued
     assert r.json()["import_job_id"] == str(job.id)
+    skip_row = next(r for r in rec.rows if r.destination == "skip")
+    assert skip_row.status == "skipped"
+    assert skip_row.skip_reason  # non-empty reason recorded
+    hist_row = next(r for r in rec.rows if r.destination == "history")
+    assert hist_row.status == "pending"
 
 
 def test_commit_422_when_required_mapping_missing(monkeypatch):

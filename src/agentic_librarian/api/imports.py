@@ -111,7 +111,8 @@ async def commit(
             user_id=user.id, source=source, original_filename=original_filename, total_rows=len(parsed)
         )
         session.add(job)
-        session.flush()
+        session.flush()  # populate job.id for the ImportRow FK
+        to_enqueue: list[ImportRow] = []
         for p in parsed:
             destination, skip_reason = bucketing.bucket(
                 p, import_to_read=import_to_read, import_currently_reading=import_currently_reading
@@ -125,9 +126,10 @@ async def commit(
                 skip_reason=skip_reason,
             )
             session.add(row)
-            session.flush()
             if destination != "skip":
-                enqueue_ids.append(str(row.id))
+                to_enqueue.append(row)
+        session.flush()  # one flush populates all ImportRow.id values
+        enqueue_ids = [str(row.id) for row in to_enqueue]
         job_id = str(job.id)
 
     for rid in enqueue_ids:
