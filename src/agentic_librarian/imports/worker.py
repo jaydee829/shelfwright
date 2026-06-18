@@ -61,6 +61,8 @@ def process_import_row(row_id: UUID) -> str:
             raise LookupError("import row not found")
         if row.status == "done":
             return "done"
+        # 'processing' is intentionally NOT short-circuited: re-claiming a row on a Cloud Tasks
+        # redelivery is safe because add_read_event and _upsert_suggestion are both idempotent.
         row.status = "processing"
         data = {
             "title": row.raw_title or "", "author": row.raw_author or "",
@@ -90,7 +92,7 @@ def process_import_row(row_id: UUID) -> str:
                     notes=data["notes"], fmt=data["fmt"],
                 )
             outcome = "duplicate" if event["already_logged"] else ("created" if created else "linked")
-        else:  # suggestion
+        else:  # 'suggestion'. ('skip' rows are never enqueued — commit filters them — so they never reach here.)
             shelf = data["shelf"]
             context = f"imported:{shelf}" if shelf in ("to-read", "currently-reading") else "imported"
             with db_manager.get_session() as session:
