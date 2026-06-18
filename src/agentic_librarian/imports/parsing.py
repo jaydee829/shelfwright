@@ -4,7 +4,7 @@ test-value surface, where Goodreads/generic format variability lives."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
 # Goodreads exports carry this stable header signature.
 _GOODREADS_SIGNATURE = {"Book Id", "Title", "Author", "Exclusive Shelf"}
@@ -77,3 +77,59 @@ def suggest_mapping(headers: list[str], source: str) -> dict[str, str | None]:
                 break
         mapping[field] = match
     return mapping
+
+
+def _cell(row: dict, col: str | None) -> str:
+    if not col:
+        return ""
+    return (row.get(col) or "").strip()
+
+
+def _parse_date(text: str) -> tuple[date | None, bool]:
+    """Return (date or None, bad_date). bad_date is True only when text is present but
+    unusable (unparseable or in the future). A blank string is (None, False)."""
+    if not text:
+        return None, False
+    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%m/%d/%Y"):
+        try:
+            d = datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+        if d > date.today():
+            return None, True
+        return d, False
+    return None, True
+
+
+def _parse_rating(text: str) -> int | None:
+    try:
+        n = int(text)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= 5 else None  # Goodreads 0 = unrated; out-of-range dropped
+
+
+def _normalize_format(text: str) -> str:
+    return _BINDING_TO_FORMAT.get(_norm(text), "ebook")
+
+
+def parse_rows(rows: list[dict], mapping: dict[str, str | None]) -> list[ParsedRow]:
+    out: list[ParsedRow] = []
+    for row in rows:
+        raw_date = _cell(row, mapping.get("date_completed"))
+        parsed_date, bad = _parse_date(raw_date)
+        notes = _cell(row, mapping.get("notes")) or None
+        out.append(
+            ParsedRow(
+                raw_title=_cell(row, mapping.get("title")),
+                raw_author=_cell(row, mapping.get("author")),
+                raw_format=_normalize_format(_cell(row, mapping.get("format"))),
+                raw_date=raw_date,
+                date_completed=parsed_date,
+                bad_date=bad,
+                rating=_parse_rating(_cell(row, mapping.get("rating"))),
+                notes=notes,
+                shelf=_norm(_cell(row, mapping.get("shelf"))),
+            )
+        )
+    return out
