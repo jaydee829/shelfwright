@@ -51,7 +51,7 @@ class ParsedRow:
     shelf: str               # lowercased exclusive shelf; '' when absent
 
 
-def _norm(s: str) -> str:
+def _norm(s: str | None) -> str:
     return " ".join((s or "").strip().lower().split())
 
 
@@ -63,13 +63,14 @@ def suggest_mapping(headers: list[str], source: str) -> dict[str, str | None]:
     if source == "goodreads":
         present = set(headers)
         return {field: (col if col in present else None) for field, col in _GOODREADS_MAP.items()}
-    norm_headers = [(_norm(h), h) for h in headers]
+    norm_headers = [(set(_norm(h).split()), h) for h in headers]
     mapping: dict[str, str | None] = {}
     for field, syns in _SYNONYMS.items():
         match = None
         for syn in syns:
-            for nh, original in norm_headers:
-                if nh == syn or syn in nh:
+            syn_tokens = set(syn.split())
+            for tokens, original in norm_headers:
+                if syn_tokens <= tokens:  # all synonym words present as whole tokens
                     match = original
                     break
             if match:

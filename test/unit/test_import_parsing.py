@@ -29,3 +29,16 @@ def test_suggest_mapping_generic_fuzzy_matches_synonyms():
     assert m["date_completed"] == "Date Finished"
     assert m["rating"] == "Stars"
     assert m["format"] is None  # no format-like column present
+
+
+def test_suggest_mapping_avoids_substring_false_positives():
+    m = parsing.suggest_mapping(["Subtitle", "Author", "Unfinished"], "generic")
+    assert m["title"] is None          # 'Subtitle' must not match the 'title' synonym
+    assert m["author"] == "Author"
+    assert m["date_completed"] is None  # 'Unfinished' must not match the 'finished' synonym
+
+
+def test_suggest_mapping_by_synonym_requires_whole_word():
+    m = parsing.suggest_mapping(["Standby", "Title"], "generic")
+    assert m["author"] is None  # 'Standby' must not match the short 'by' synonym
+    assert m["title"] == "Title"
