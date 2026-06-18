@@ -12,6 +12,19 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
 
 ## Log
 
+### 2026-06-17 - CD: push-to-main stopped auto-triggering Deploy to Cloud Run (OPEN)
+- **Issue**: After PR #49 (`3e47830`, 2026-06-15) auto-deployed, the next 5 merges to `main` (#50–#54,
+  all touching `src/`/`frontend/`) produced NO push-triggered workflow runs at all — neither Deploy nor
+  Python CI on push — so #50–#54 were merged but not deployed (prod stayed on the #49 image).
+- **Root Cause**: UNCONFIRMED. `deploy.yml` is `active`, its `on: push: main` + path filters match the
+  changed files, and nothing in those commits edits `deploy.yml`. PR-side (`pull_request`) CI ran fine
+  throughout, so only main-`push` event triggers went silent (GitHub-side; not a code change).
+- **Solution (workaround)**: manual `workflow_dispatch` of "Deploy to Cloud Run" on `main` (run
+  27723605516) deployed `3d2dafe` successfully (smoke green). Real fix pending root-cause.
+- **Prevention**: inspect the GitHub Actions web UI (Actions usage/spending cap, repo Actions
+  permission/settings change around 2026-06-15, or a transient incident); `workflow_dispatch` is the
+  reliable manual fallback meanwhile.
+
 ### 2026-02-06 - Fragile Year Extraction in Metadata Scout
 - **Issue**: `original_publication_year` extraction failed for common date formats (e.g., "January 2023", "2023/01/01"), defaulting to `None`.
 - **Root Cause**: Manual string splitting `split("-")[0]` only handled "YYYY-MM-DD" format.

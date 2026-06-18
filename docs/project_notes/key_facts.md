@@ -80,6 +80,26 @@ This file tracks important project configuration, constants, and environment det
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.
 - **Cost guardrail**: $25/mo budget, email alerts at 50/90/100% (~$12–16/mo expected).
 
+## Frontend Theming (light/dark)
+- **Design tokens**: semantic CSS custom properties live in `frontend/src/index.css` —
+  `:root` holds the LIGHT palette (values equal the pre-theme colors, so light is unchanged),
+  `:root[data-theme="dark"]` overrides for dark. All component CSS uses `var(--token)` (no
+  hardcoded hex outside `index.css`). Text-on-color is split by role: `--on-accent` / `--on-danger`
+  (dark text in dark mode) vs `--on-badge` (white in both — badges stay medium-dark) for WCAG contrast.
+- **Theme control** (`frontend/src/theme.ts`): on load, resolve `localStorage['theme']` else the OS
+  `prefers-color-scheme`; `setTheme` sets `data-theme` on `<html>` + persists (storage/matchMedia in
+  try/catch). `main.tsx` applies it before render (no flash). ☀/🌙 toggle in the TopBar.
+- This token layer is the **foundation for "Visual Identity v2"** (the planned redesign extends it with
+  a real palette + type/spacing scales + component restyle).
+
+## CI/CD note (deploy anomaly, 2026-06-17, OPEN)
+- `Deploy to Cloud Run` (deploy.yml) is **active** with `push: main` (paths src/frontend/pyproject/
+  Dockerfile.api/deploy.yml/.dockerignore) **and** `workflow_dispatch`. It auto-deployed through #49
+  (`3e47830`, 2026-06-15) but then **stopped firing on main pushes** for #50–#54 (no push-triggered runs
+  at all; PR `pull_request` CI unaffected; nothing in those commits touches deploy.yml). Worked around by
+  **manual `workflow_dispatch`** (run 27723605516 deployed `3d2dafe`). Root cause TBD — check the Actions
+  web UI (usage/spending cap? Actions permission change?) so merges auto-deploy again.
+
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.
 - **DO NOT** store PII.

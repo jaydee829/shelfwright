@@ -741,3 +741,32 @@ This file documents key architectural decisions, their context, and trade-offs.
 - The CD smoke can no longer reach `/health/db` (Firebase-gated) — it asserts
   401-enforcement instead; DB connectivity verification moves to the operator runbook.
 - Prod usage rows start flowing when Lift 2 deploys the mesh.
+
+### ADR-049: Semantic CSS design tokens + dark mode (2026-06-17)
+**Context:**
+- Dark mode (beta item E1) needed a color system; the frontend had ~46 hardcoded hex across 9 CSS files
+  and no theming layer.
+**Decision:**
+- Introduce semantic CSS custom-property tokens in `index.css` (`:root` light = the prior colors;
+  `:root[data-theme="dark"]` override). Component CSS uses `var(--token)` only. `theme.ts` resolves
+  localStorage→OS, persists, sets `data-theme` on `<html>`; `main.tsx` applies before render; TopBar toggle.
+- Split text-on-color tokens by role (`--on-accent`/`--on-danger` vs `--on-badge`) for WCAG AA contrast
+  once accent/danger invert to light in dark mode.
+**Consequences:**
+- Light mode is pixel-identical (tokens = prior values); the token layer is the foundation the planned
+  "Visual Identity v2" redesign extends (palette + type/spacing scales + component restyle).
+- PR #54 (`3d2dafe`).
+
+### ADR-050: Enrichment status DERIVED from trope presence (no status column) (2026-06-16)
+**Context:**
+- Beta C1/C2 needed History to show whether a book's deep (background) enrichment finished; `Work` has no
+  status/`created_at` column.
+**Decision:**
+- Derive "enriched" from trope presence (deep pass is the only thing that adds tropes) rather than add an
+  `enriched_at`/status column + backfill. History shows tropes once present, else an "Enriching…" chip.
+**Alternatives Considered:**
+- `enriched_at` timestamp / full status enum -> rejected: migration + backfill, and still can't cleanly
+  show a true "failed" without a timeout sweep.
+**Consequences:**
+- No DB migration. Cannot distinguish failed/empty/never-ran from in-flight (perpetual "Enriching…") —
+  logged as DEBT-035 for a future timeout sweep. PR #52 (`93c2d8f`).

@@ -12,6 +12,18 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-15..17 - BETA-FEEDBACK: ship + deploy operator's beta feedback (A1–E1)
+- **Status**: Completed + deployed
+- **Description**: Triaged the operator's friends-and-family beta feedback into 8 items and shipped each
+  via its own brainstorm→spec→plan→subagent-driven PR (all Gemini-reviewed, squash-merged):
+  #49 A2 default-3 recs + D1a Librarian `check_reading_history`; #50 A1 ≥1-new novelty guarantee +
+  A3 re-read labels; #51 B1 chat activity trail; #52 C1/C2 enrichment visibility + tropes in History;
+  #53 D1b history edit/delete; #54 E1 dark mode.
+- **URL**: specs/plans under `docs/superpowers/{specs,plans}/2026-06-{10,15,16,17}-*`
+- **Notes**: Deployed to prod 2026-06-17 — image `librarian-api:3d2dafe` via manual `workflow_dispatch`
+  (see bugs.md CD anomaly). No migrations/new secrets for #50–#54. Follow-ons: DEBT-035 (below);
+  "Visual Identity v2" redesign (extends the ADR-049 token layer).
+
 ### 2026-06-16 - DEBT-035: Detect stuck/failed background enrichment
 - **Status**: Open (deferred from C1/C2 enrichment-visibility by decision)
 - **Description**: Enrichment status is DERIVED from trope presence (no enriched_at/status column), so a deep pass that failed, found no tropes, or whose Cloud Task never fired is indistinguishable from one still in flight — History shows "Enriching…" indefinitely.
