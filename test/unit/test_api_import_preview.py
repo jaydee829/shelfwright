@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
-from agentic_librarian.api.imports import router
+from agentic_librarian.api.imports import MAX_ROWS, router
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 
 app = FastAPI()
@@ -36,4 +36,11 @@ def test_preview_detects_goodreads_and_suggests_mapping():
 
 def test_preview_rejects_empty_file():
     r = _upload("")
+    assert r.status_code == 422
+
+
+def test_preview_rejects_oversize_file():
+    header = "Title,Author,Date Read,Exclusive Shelf\n"
+    body = "".join(f"Book {i},Author {i},2024/01/01,read\n" for i in range(MAX_ROWS + 1))
+    r = _upload(header + body)
     assert r.status_code == 422

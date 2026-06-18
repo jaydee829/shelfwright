@@ -26,6 +26,8 @@ def _read_csv(raw: bytes) -> tuple[list[str], list[dict]]:
     rows = list(reader)
     if not headers or not rows:
         raise HTTPException(status_code=422, detail="The file has no data rows.")
+    if len(rows) > MAX_ROWS:
+        raise HTTPException(status_code=422, detail=f"File has {len(rows)} rows; the limit is {MAX_ROWS}.")
     return list(headers), rows
 
 
