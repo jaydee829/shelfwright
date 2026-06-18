@@ -1,0 +1,6 @@
+.import { max-width: 720px; margin: 0 auto; padding: 1rem; }
+.import-step { margin-top: 1rem; }
+.import-counts { display: flex; gap: 1rem; flex-wrap: wrap; }
+.import-progress-bar { height: 12px; background: var(--surface-2, #eee); border-radius: 6px; overflow: hidden; }
+.import-progress-bar > span { display: block; height: 100%; background: var(--accent, #5b8def); }
+.import-error { color: var(--danger, #c0392b); }
