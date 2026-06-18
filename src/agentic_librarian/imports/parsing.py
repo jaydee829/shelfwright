@@ -4,7 +4,7 @@ test-value surface, where Goodreads/generic format variability lives."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
 # Goodreads exports carry this stable header signature.
 _GOODREADS_SIGNATURE = {"Book Id", "Title", "Author", "Exclusive Shelf"}
@@ -56,7 +56,7 @@ def _norm(s: str) -> str:
 
 
 def sniff_source(headers: list[str]) -> str:
-    return "goodreads" if _GOODREADS_SIGNATURE <= set(headers) else "generic"
+    return "goodreads" if set(headers) >= _GOODREADS_SIGNATURE else "generic"
 
 
 def suggest_mapping(headers: list[str], source: str) -> dict[str, str | None]:
