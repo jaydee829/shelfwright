@@ -213,6 +213,76 @@ export async function streamChat(message: string, handlers: ChatHandlers): Promi
   }
 }
 
+export type ColumnMapping = Partial<Record<
+  'title' | 'author' | 'format' | 'date_completed' | 'rating' | 'notes' | 'shelf',
+  string | null
+>>
+
+export interface ImportPreview {
+  source: 'goodreads' | 'generic'
+  headers: string[]
+  suggested_mapping: ColumnMapping
+  preview_rows: Array<{
+    title: string; author: string; format: string
+    date_completed: string | null; rating: number | null; shelf: string
+  }>
+  counts: { read_dated: number; read_undated: number; to_read: number; currently_reading: number; total: number }
+}
+
+export interface ImportCommitResult {
+  import_job_id: string
+  total_rows: number
+  enqueued: number
+}
+
+export interface ImportStatus {
+  import_job_id: string
+  source: string
+  total_rows: number
+  counts: Record<string, number>
+  outcomes: Record<string, number>
+  complete: boolean
+  report: Array<{
+    title: string | null; author: string | null; status: string
+    outcome: string | null; skip_reason: string | null; error: string | null
+  }>
+}
+
+export async function previewImport(file: File, mapping?: ColumnMapping): Promise<ImportPreview> {
+  const form = new FormData()
+  form.set('file', file)
+  if (mapping) form.set('mapping', JSON.stringify(mapping))
+  const res = await authedFetchRaw('/import/preview', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`preview import → ${res.status}`)
+  return res.json() as Promise<ImportPreview>
+}
+
+export async function commitImport(
+  file: File,
+  mapping: ColumnMapping,
+  opts: { importToRead: boolean; importCurrentlyReading: boolean },
+): Promise<ImportCommitResult> {
+  const form = new FormData()
+  form.set('file', file)
+  form.set('mapping', JSON.stringify(mapping))
+  form.set('import_to_read', String(opts.importToRead))
+  form.set('import_currently_reading', String(opts.importCurrentlyReading))
+  form.set('original_filename', file.name)
+  const res = await authedFetchRaw('/import/commit', { method: 'POST', body: form })
+  if (!res.ok) throw new Error(`commit import → ${res.status}`)
+  return res.json() as Promise<ImportCommitResult>
+}
+
+export function getImportJob(jobId: string): Promise<ImportStatus> {
+  return getJson<ImportStatus>(`/import/${jobId}`)
+}
+
+export async function retryImport(jobId: string): Promise<{ retried: number }> {
+  const res = await authedFetchRaw(`/import/${jobId}/retry`, { method: 'POST' })
+  if (!res.ok) throw new Error(`retry import → ${res.status}`)
+  return res.json() as Promise<{ retried: number }>
+}
+
 function dispatchFrame(frame: string, handlers: ChatHandlers): void {
   let event = 'message'
   let data = ''
