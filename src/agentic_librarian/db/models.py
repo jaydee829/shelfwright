@@ -265,3 +265,46 @@ class UserCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class ImportJob(Base):
+    """One bulk-import upload (Spec 2026-06-18). Progress is derived from import_rows,
+    not stored here — so Cloud Tasks redelivery can never double-count."""
+
+    __tablename__ = "import_jobs"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # 'goodreads' | 'generic'
+    original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+
+class ImportRow(Base):
+    """One parsed source row. The Cloud Task targets this id; status is the idempotency
+    boundary (a redelivered row whose status is already 'done' is a no-op)."""
+
+    __tablename__ = "import_rows"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    import_job_id: Mapped[UUID] = mapped_column(ForeignKey("import_jobs.id"), nullable=False, index=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    raw_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_author: Mapped[str | None] = mapped_column(String, nullable=True)
+    raw_format: Mapped[str | None] = mapped_column(String, nullable=True)  # normalized vocab
+    raw_date: Mapped[str | None] = mapped_column(String, nullable=True)  # original text, for the report
+    date_completed: Mapped[date | None] = mapped_column(Date, nullable=True)  # parsed; set for history rows
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    destination: Mapped[str] = mapped_column(String, nullable=False)  # 'history' | 'suggestion' | 'skip'
+    shelf: Mapped[str | None] = mapped_column(String, nullable=True)  # drives the suggestion context tag
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    outcome: Mapped[str | None] = mapped_column(String, nullable=True)  # linked|created|duplicate|not_found|error
+    skip_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    work_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+    )
