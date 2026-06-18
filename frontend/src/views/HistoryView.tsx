@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { deleteHistory, getHistory, type HistoryItem } from '../api/client'
 import './HistoryView.css'
 
@@ -55,6 +55,7 @@ export default function HistoryView() {
   return (
     <div>
       <h2>Reading history</h2>
+      <Link to="/import">Import history</Link>
       <ul className="history-list">
         {items.map((h) => (
           <li key={h.id} className="history-row">

@@ -22,6 +22,7 @@ vi.mock('./views/RecommendationsView', () => ({ default: () => <div>recs-view</d
 vi.mock('./views/AnalysisView', () => ({ default: () => <div>analysis-view</div> }))
 vi.mock('./views/AddBookView', () => ({ default: () => <div>add-view</div> }))
 vi.mock('./views/HistoryEditView', () => ({ default: () => <div>history-edit-view</div> }))
+vi.mock('./views/ImportView', () => ({ default: () => <div>ImportView</div> }))
 
 import App from './App'
 
@@ -43,5 +44,12 @@ describe('App gate', () => {
     render(<App />)
     expect(screen.getByText('chat-view')).toBeInTheDocument()
     expect(screen.getByRole('navigation')).toBeInTheDocument()
+  })
+
+  it('renders the import route', () => {
+    state.status = 'ready'
+    window.history.pushState({}, '', '/import')
+    render(<App />)
+    expect(screen.getByText('ImportView')).toBeInTheDocument()
   })
 })
