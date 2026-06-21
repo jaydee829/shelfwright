@@ -60,3 +60,16 @@ def enrich(work_id: UUID, authorization: str | None = Header(None)):  # noqa: B0
         # Non-retryable: the work no longer exists. 404 stops Cloud Tasks from retrying.
         raise HTTPException(status_code=404, detail="work not found")
     return {"work_id": str(work_id), "status": "enriched"}
+
+
+@router.post("/internal/import-row/{row_id}")
+def import_row(row_id: UUID, authorization: str | None = Header(None)):  # noqa: B008
+    _require_queue_caller(authorization)
+    from agentic_librarian.imports import worker
+
+    try:
+        result = worker.process_import_row(row_id)
+    except LookupError as e:
+        # Non-retryable: the row is gone. 404 stops Cloud Tasks from retrying.
+        raise HTTPException(status_code=404, detail="import row not found") from e
+    return {"row_id": str(row_id), "result": result}

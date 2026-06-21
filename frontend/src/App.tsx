@@ -8,6 +8,7 @@ import AnalysisView from './views/AnalysisView'
 import ChatView from './views/ChatView'
 import HistoryEditView from './views/HistoryEditView'
 import HistoryView from './views/HistoryView'
+import ImportView from './views/ImportView'
 import RecommendationsView from './views/RecommendationsView'
 
 function Gate() {
@@ -25,6 +26,7 @@ function Gate() {
           <Route path="recommendations" element={<RecommendationsView />} />
           <Route path="analysis" element={<AnalysisView />} />
           <Route path="add" element={<AddBookView />} />
+          <Route path="import" element={<ImportView />} />
         </Route>
       </Routes>
     </BrowserRouter>

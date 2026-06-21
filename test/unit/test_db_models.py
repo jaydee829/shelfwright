@@ -62,3 +62,31 @@ from agentic_librarian.db import models
 def test_model_structure_parameterized(model_class, attribute):
     """Verify that all core models have their expected columns."""
     assert hasattr(model_class, attribute)
+
+
+def test_import_job_and_row_models_exist():
+    from agentic_librarian.db.models import ImportJob, ImportRow
+
+    assert ImportJob.__tablename__ == "import_jobs"
+    assert ImportRow.__tablename__ == "import_rows"
+    # ImportRow carries everything the worker needs without loading the job.
+    cols = ImportRow.__table__.columns.keys()
+    for c in (
+        "import_job_id",
+        "user_id",
+        "raw_title",
+        "raw_author",
+        "raw_format",
+        "raw_date",
+        "date_completed",
+        "rating",
+        "notes",
+        "destination",
+        "shelf",
+        "status",
+        "outcome",
+        "skip_reason",
+        "work_id",
+        "error_detail",
+    ):
+        assert c in cols, c
