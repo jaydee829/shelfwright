@@ -32,9 +32,16 @@ def _seed_job(manager, statuses):
         s.add(job)
         s.flush()
         for st in statuses:
-            s.add(ImportRow(import_job_id=job.id, user_id=DEFAULT_USER_ID, destination="history",
-                            status=st, outcome=("linked" if st == "done" else None),
-                            date_completed=date(2024, 1, 1)))
+            s.add(
+                ImportRow(
+                    import_job_id=job.id,
+                    user_id=DEFAULT_USER_ID,
+                    destination="history",
+                    status=st,
+                    outcome=("linked" if st == "done" else None),
+                    date_completed=date(2024, 1, 1),
+                )
+            )
         s.flush()
         return job.id
 
@@ -80,8 +87,15 @@ def test_stalled_processing_rows_are_counted(client):
         s.add(job)
         s.flush()
         old = datetime.now(UTC) - timedelta(minutes=30)
-        s.add(ImportRow(import_job_id=job.id, user_id=DEFAULT_USER_ID, destination="history",
-                        status="processing", updated_at=old))
+        s.add(
+            ImportRow(
+                import_job_id=job.id,
+                user_id=DEFAULT_USER_ID,
+                destination="history",
+                status="processing",
+                updated_at=old,
+            )
+        )
         s.flush()
         job_id = job.id
     body = c.get(f"/import/{job_id}").json()

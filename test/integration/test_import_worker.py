@@ -49,9 +49,16 @@ def _make_row(manager, **kw):
         s.add(job)
         s.flush()
         defaults = {
-            "import_job_id": job.id, "user_id": DEFAULT_USER_ID, "raw_title": "Dune",
-            "raw_author": "Frank Herbert", "raw_format": "ebook", "raw_date": "2024-01-01",
-            "date_completed": date(2024, 1, 1), "destination": "history", "shelf": "read", "status": "pending",
+            "import_job_id": job.id,
+            "user_id": DEFAULT_USER_ID,
+            "raw_title": "Dune",
+            "raw_author": "Frank Herbert",
+            "raw_format": "ebook",
+            "raw_date": "2024-01-01",
+            "date_completed": date(2024, 1, 1),
+            "destination": "history",
+            "shelf": "read",
+            "status": "pending",
         }
         defaults.update(kw)
         row = ImportRow(**defaults)
@@ -111,8 +118,13 @@ def test_redelivery_of_done_row_is_a_noop(wired):
 def test_suggestion_routing_writes_suggestion_with_context(wired):
     work_id = _seed_work(wired, "Wishlist Book", "W Author")  # de-dup hit resolves the work_id
     row_id = _make_row(
-        wired, raw_title="Wishlist Book", raw_author="W Author", destination="suggestion",
-        shelf="to-read", date_completed=None, raw_date="",
+        wired,
+        raw_title="Wishlist Book",
+        raw_author="W Author",
+        destination="suggestion",
+        shelf="to-read",
+        date_completed=None,
+        raw_date="",
     )
     assert worker.process_import_row(row_id) == "done"
     with wired.get_session() as s:

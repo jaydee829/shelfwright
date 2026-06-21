@@ -16,14 +16,19 @@ client = TestClient(app)
 
 CSV = (
     "Book Id,Title,Author,My Rating,Binding,Date Read,Exclusive Shelf,My Review\n"
-    "1,Dune,Frank Herbert,5,Kindle Edition,2024/03/05,read,loved it\n"          # history
-    "2,Hyperion,Dan Simmons,0,Audiobook,,to-read,\n"                            # suggestion (opt-in)
-    "3,Blank,No Date,0,Paperback,,read,\n"                                      # skip (no date)
+    "1,Dune,Frank Herbert,5,Kindle Edition,2024/03/05,read,loved it\n"  # history
+    "2,Hyperion,Dan Simmons,0,Audiobook,,to-read,\n"  # suggestion (opt-in)
+    "3,Blank,No Date,0,Paperback,,read,\n"  # skip (no date)
 )
 
 _GOODREADS_MAP = {
-    "title": "Title", "author": "Author", "format": "Binding", "date_completed": "Date Read",
-    "rating": "My Rating", "notes": "My Review", "shelf": "Exclusive Shelf",
+    "title": "Title",
+    "author": "Author",
+    "format": "Binding",
+    "date_completed": "Date Read",
+    "rating": "My Rating",
+    "notes": "My Review",
+    "shelf": "Exclusive Shelf",
 }
 
 
@@ -44,6 +49,7 @@ class _Recorder:
 
     def flush(self):
         from uuid import uuid4
+
         for j in self.jobs:
             if getattr(j, "id", None) is None:
                 j.id = uuid4()
@@ -68,8 +74,12 @@ def _commit(monkeypatch, *, to_read=True):
     r = client.post(
         "/import/commit",
         files={"file": ("export.csv", io.BytesIO(CSV.encode()), "text/csv")},
-        data={"mapping": json.dumps(_GOODREADS_MAP), "import_to_read": str(to_read).lower(),
-              "import_currently_reading": "true", "original_filename": "export.csv"},
+        data={
+            "mapping": json.dumps(_GOODREADS_MAP),
+            "import_to_read": str(to_read).lower(),
+            "import_currently_reading": "true",
+            "original_filename": "export.csv",
+        },
     )
     return r, rec, enq
 

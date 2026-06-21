@@ -66,9 +66,12 @@ def _counts(parsed: list[parsing.ParsedRow]) -> dict:
 
 def _preview_row(p: parsing.ParsedRow) -> dict:
     return {
-        "title": p.raw_title, "author": p.raw_author, "format": p.raw_format,
+        "title": p.raw_title,
+        "author": p.raw_author,
+        "format": p.raw_format,
         "date_completed": p.date_completed.isoformat() if p.date_completed else None,
-        "rating": p.rating, "shelf": p.shelf,
+        "rating": p.rating,
+        "shelf": p.shelf,
     }
 
 
@@ -112,9 +115,7 @@ async def commit(
 
     enqueue_ids: list[str] = []
     with db_manager.get_session() as session:
-        job = ImportJob(
-            user_id=user.id, source=source, original_filename=original_filename, total_rows=len(parsed)
-        )
+        job = ImportJob(user_id=user.id, source=source, original_filename=original_filename, total_rows=len(parsed))
         session.add(job)
         session.flush()  # populate job.id for the ImportRow FK
         to_enqueue: list[ImportRow] = []
@@ -123,10 +124,17 @@ async def commit(
                 p, import_to_read=import_to_read, import_currently_reading=import_currently_reading
             )
             row = ImportRow(
-                import_job_id=job.id, user_id=user.id,
-                raw_title=p.raw_title, raw_author=p.raw_author, raw_format=p.raw_format,
-                raw_date=p.raw_date, date_completed=p.date_completed if destination == "history" else None,
-                rating=p.rating, notes=p.notes, destination=destination, shelf=p.shelf,
+                import_job_id=job.id,
+                user_id=user.id,
+                raw_title=p.raw_title,
+                raw_author=p.raw_author,
+                raw_format=p.raw_format,
+                raw_date=p.raw_date,
+                date_completed=p.date_completed if destination == "history" else None,
+                rating=p.rating,
+                notes=p.notes,
+                destination=destination,
+                shelf=p.shelf,
                 status="skipped" if destination == "skip" else "pending",
                 skip_reason=skip_reason,
             )
@@ -171,8 +179,14 @@ def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)
             .all()
         )
         report = [
-            {"title": r.raw_title, "author": r.raw_author, "status": r.status,
-             "outcome": r.outcome, "skip_reason": r.skip_reason, "error": r.error_detail}
+            {
+                "title": r.raw_title,
+                "author": r.raw_author,
+                "status": r.status,
+                "outcome": r.outcome,
+                "skip_reason": r.skip_reason,
+                "error": r.error_detail,
+            }
             for r in session.query(ImportRow)
             .filter(ImportRow.import_job_id == job_id, ImportRow.status.in_(("failed", "skipped")))
             .order_by(ImportRow.id)
@@ -211,8 +225,7 @@ def retry(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  #
             session.query(ImportRow)
             .filter(
                 ImportRow.import_job_id == job_id,
-                (ImportRow.status == "failed")
-                | ((ImportRow.status == "processing") & (ImportRow.updated_at < cutoff)),
+                (ImportRow.status == "failed") | ((ImportRow.status == "processing") & (ImportRow.updated_at < cutoff)),
             )
             .all()
         )

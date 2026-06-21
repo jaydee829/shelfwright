@@ -31,10 +31,17 @@ _SYNONYMS = {
 }
 
 _BINDING_TO_FORMAT = {
-    "kindle edition": "ebook", "ebook": "ebook", "kindle": "ebook",
-    "paperback": "paperback", "mass market paperback": "paperback",
-    "hardcover": "hardcover", "hardback": "hardcover",
-    "audiobook": "audiobook", "audio cd": "audiobook", "audible audio": "audiobook", "audio": "audiobook",
+    "kindle edition": "ebook",
+    "ebook": "ebook",
+    "kindle": "ebook",
+    "paperback": "paperback",
+    "mass market paperback": "paperback",
+    "hardcover": "hardcover",
+    "hardback": "hardcover",
+    "audiobook": "audiobook",
+    "audio cd": "audiobook",
+    "audible audio": "audiobook",
+    "audio": "audiobook",
 }
 
 
@@ -42,13 +49,13 @@ _BINDING_TO_FORMAT = {
 class ParsedRow:
     raw_title: str
     raw_author: str
-    raw_format: str          # normalized vocab; defaults to 'ebook'
-    raw_date: str            # original text (may be '')
+    raw_format: str  # normalized vocab; defaults to 'ebook'
+    raw_date: str  # original text (may be '')
     date_completed: date | None  # parsed; None if blank/unparseable/future
-    bad_date: bool           # raw_date non-empty but unparseable or future
+    bad_date: bool  # raw_date non-empty but unparseable or future
     rating: int | None
     notes: str | None
-    shelf: str               # lowercased exclusive shelf; '' when absent
+    shelf: str  # lowercased exclusive shelf; '' when absent
 
 
 def _norm(s: str | None) -> str:

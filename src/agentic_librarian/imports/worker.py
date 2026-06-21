@@ -24,11 +24,7 @@ db_manager = DatabaseManager()
 def _upsert_suggestion(session, *, work_id: UUID, user_id: UUID, context: str) -> bool:
     """Get-or-create the user's wishlist suggestion. Returns True if created, False if it
     already existed (re-import safe — mirrors add_read_event's idempotency)."""
-    existing = (
-        session.query(Suggestions)
-        .filter_by(work_id=work_id, user_id=user_id, status="Suggested")
-        .first()
-    )
+    existing = session.query(Suggestions).filter_by(work_id=work_id, user_id=user_id, status="Suggested").first()
     if existing:
         return False
     session.add(Suggestions(work_id=work_id, user_id=user_id, status="Suggested", context=context))
@@ -65,10 +61,15 @@ def process_import_row(row_id: UUID) -> str:
         # redelivery is safe because add_read_event and _upsert_suggestion are both idempotent.
         row.status = "processing"
         data = {
-            "title": row.raw_title or "", "author": row.raw_author or "",
-            "fmt": row.raw_format or "ebook", "completed": row.date_completed,
-            "rating": row.rating, "notes": row.notes, "destination": row.destination,
-            "shelf": row.shelf or "", "user_id": row.user_id,
+            "title": row.raw_title or "",
+            "author": row.raw_author or "",
+            "fmt": row.raw_format or "ebook",
+            "completed": row.date_completed,
+            "rating": row.rating,
+            "notes": row.notes,
+            "destination": row.destination,
+            "shelf": row.shelf or "",
+            "user_id": row.user_id,
         }
 
     # 2. Resolve the work (de-dup, else shallow scouts) OUTSIDE our session — enrich_fast
@@ -88,17 +89,18 @@ def process_import_row(row_id: UUID) -> str:
         if data["destination"] == "history":
             with as_user(data["user_id"]):
                 event = two_phase.add_read_event(
-                    work_id, completed=data["completed"], rating=data["rating"],
-                    notes=data["notes"], fmt=data["fmt"],
+                    work_id,
+                    completed=data["completed"],
+                    rating=data["rating"],
+                    notes=data["notes"],
+                    fmt=data["fmt"],
                 )
             outcome = "duplicate" if event["already_logged"] else ("created" if created else "linked")
         else:  # 'suggestion'. ('skip' rows are never enqueued — commit filters them — so they never reach here.)
             shelf = data["shelf"]
             context = f"imported:{shelf}" if shelf in ("to-read", "currently-reading") else "imported"
             with db_manager.get_session() as session:
-                is_new = _upsert_suggestion(
-                    session, work_id=work_id, user_id=data["user_id"], context=context
-                )
+                is_new = _upsert_suggestion(session, work_id=work_id, user_id=data["user_id"], context=context)
             outcome = "created" if (is_new and created) else ("linked" if is_new else "duplicate")
     except Exception as e:  # noqa: BLE001 - transient: record + re-raise for retry
         _record_error(row_id, f"{type(e).__name__}: {e}")

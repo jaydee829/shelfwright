@@ -299,10 +299,14 @@ class ImportRow(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     destination: Mapped[str] = mapped_column(String, nullable=False)  # 'history' | 'suggestion' | 'skip'
     shelf: Mapped[str | None] = mapped_column(String, nullable=True)  # drives the suggestion context tag
-    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")  # 'pending' | 'processing' | 'done' | 'failed' | 'skipped'
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default="pending"
+    )  # 'pending' | 'processing' | 'done' | 'failed' | 'skipped'
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)  # linked|created|duplicate|not_found
     skip_reason: Mapped[str | None] = mapped_column(String, nullable=True)
-    work_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)  # resolved Work; soft reference, no FK by design (import_rows are a transient staging/audit log)
+    work_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=True
+    )  # resolved Work; soft reference, no FK by design (import_rows are a transient staging/audit log)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
