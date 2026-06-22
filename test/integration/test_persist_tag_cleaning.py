@@ -27,6 +27,7 @@ def test_persist_cleans_genres_and_moods(db_url):
     row = {
         "Title": "Tag Cleaning Test",
         "Author_1": "T. Author",
+        "format": "ebook",
         "genres": [f"science-fiction-fantasy-{UUID}", f"audiobook-{UUID}", "Fiction"],
         "moods": [f"dark-{UUID}", "Dark"],
         "skip_enrichment": True,

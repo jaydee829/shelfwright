@@ -48,6 +48,7 @@ UUID = "4c14c349-8d52-4893-aaf0-34f7e33bf275"
         (["business-economics", "Business & Economics"], ["Business & Economics"]),
         (["sci-fi", "scifi", "Science-Fiction"], ["Science Fiction"]),
         ([f"general-{UUID}", "Fiction / Science Fiction / General"], ["Science Fiction"]),
+        ([123, None, "Fantasy"], ["Fantasy"]),  # non-string elements dropped
         ([], []),
         (None, []),
     ],

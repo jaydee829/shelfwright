@@ -40,6 +40,8 @@ def apply_changes(session, changes: list[Change] | None = None) -> int:
     n = 0
     for c in changes:
         w = session.get(Work, c.work_id)  # identity-map hit — plan_changes already loaded it
+        if w is None:  # deleted between plan and apply — skip
+            continue
         w.genres, w.moods = c.genres_after, c.moods_after
         n += 1
     return n

@@ -12,8 +12,10 @@ _HAS_DIGIT_RE = re.compile(r"\d")
 _BISAC_FILLER = {"general", "fiction", "nonfiction", "non fiction", "books", "miscellaneous"}
 
 
-def _strip_uuid(tag: str) -> str:
-    return _UUID_RE.sub("", tag or "")
+def _strip_uuid(tag: object) -> str:
+    if not isinstance(tag, str):
+        return ""  # non-string tags (scraper noise) are dropped downstream
+    return _UUID_RE.sub("", tag)
 
 
 def _normalize(tag: str) -> str:
