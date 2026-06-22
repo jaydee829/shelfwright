@@ -34,3 +34,38 @@ def _bisac_reduce(tag: str) -> str:
 
 def _titlecase(norm: str) -> str:
     return " ".join(w.capitalize() for w in norm.split())
+
+
+def _clean_one(tag: str, *, alias: dict, combo: dict, denylist: set) -> list[str]:
+    n = _normalize(_bisac_reduce(_strip_uuid(tag)))
+    if not n:
+        return []
+    if n in combo:
+        return list(combo[n])  # already canonical
+    if n in alias:
+        return [alias[n]]
+    if n in denylist or _HAS_DIGIT_RE.search(n) or len(n) <= 1:
+        return []
+    return [_titlecase(n)]  # unknown-but-valid: keep, cleaned
+
+
+def _dedup(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for it in items:
+        k = it.lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(it)
+    return out
+
+
+def clean_genres(raw: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for tag in raw or []:
+        out.extend(_clean_one(tag, alias=tag_maps.ALIAS_MAP, combo=tag_maps.COMBO_MAP, denylist=tag_maps.DENYLIST))
+    result = _dedup(out)
+    if len(result) > 1:  # drop over-broad umbrellas only when more specific genres remain
+        pruned = [g for g in result if g not in tag_maps.CONDITIONAL_DROP]
+        result = pruned or result
+    return result

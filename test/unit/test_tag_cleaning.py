@@ -1,3 +1,6 @@
+import pytest
+
+from agentic_librarian.etl import tag_cleaning as tc
 from agentic_librarian.etl import tag_maps
 
 
@@ -11,9 +14,6 @@ def test_seed_maps_have_expected_entries():
     assert "Fiction" in tag_maps.CONDITIONAL_DROP
     assert isinstance(tag_maps.MOOD_ALIAS_MAP, dict)
     assert isinstance(tag_maps.MOOD_DENYLIST, set)
-
-
-from agentic_librarian.etl import tag_cleaning as tc
 
 
 def test_strip_uuid_and_normalize():
@@ -31,3 +31,32 @@ def test_bisac_reduce_takes_deepest_non_filler():
 def test_titlecase():
     assert tc._titlecase("science fiction") == "Science Fiction"
     assert tc._titlecase("business & economics") == "Business & Economics"
+
+
+UUID = "4c14c349-8d52-4893-aaf0-34f7e33bf275"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ([f"science-fiction-fantasy-{UUID}"], ["Science Fiction", "Fantasy"]),
+        ([f"audiobook-{UUID}"], []),
+        ([f"epic-{UUID}"], ["Epic"]),
+        ([f"action-adventure-{UUID}"], ["Action & Adventure"]),
+        (["fiction", "Fiction", "Fantasy"], ["Fantasy"]),
+        (["fiction"], ["Fiction"]),
+        (["business-economics", "Business & Economics"], ["Business & Economics"]),
+        (["sci-fi", "scifi", "Science-Fiction"], ["Science Fiction"]),
+        ([f"general-{UUID}", "Fiction / Science Fiction / General"], ["Science Fiction"]),
+        ([], []),
+        (None, []),
+    ],
+)
+def test_clean_genres(raw, expected):
+    assert tc.clean_genres(raw) == expected
+
+
+def test_clean_genres_is_idempotent():
+    msgs = [f"science-fiction-fantasy-{UUID}", "fiction", "Fantasy", f"audiobook-{UUID}"]
+    once = tc.clean_genres(msgs)
+    assert tc.clean_genres(once) == once
