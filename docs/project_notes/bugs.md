@@ -12,18 +12,31 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
 
 ## Log
 
-### 2026-06-17 - CD: push-to-main stopped auto-triggering Deploy to Cloud Run (OPEN)
+### 2026-06-17 - CD: push-to-main stopped auto-triggering Deploy to Cloud Run (RESOLVED 2026-06-22)
 - **Issue**: After PR #49 (`3e47830`, 2026-06-15) auto-deployed, the next 5 merges to `main` (#50–#54,
   all touching `src/`/`frontend/`) produced NO push-triggered workflow runs at all — neither Deploy nor
   Python CI on push — so #50–#54 were merged but not deployed (prod stayed on the #49 image).
-- **Root Cause**: UNCONFIRMED. `deploy.yml` is `active`, its `on: push: main` + path filters match the
-  changed files, and nothing in those commits edits `deploy.yml`. PR-side (`pull_request`) CI ran fine
-  throughout, so only main-`push` event triggers went silent (GitHub-side; not a code change).
-- **Solution (workaround)**: manual `workflow_dispatch` of "Deploy to Cloud Run" on `main` (run
-  27723605516) deployed `3d2dafe` successfully (smoke green). Real fix pending root-cause.
-- **Prevention**: inspect the GitHub Actions web UI (Actions usage/spending cap, repo Actions
-  permission/settings change around 2026-06-15, or a transient incident); `workflow_dispatch` is the
-  reliable manual fallback meanwhile.
+- **Root Cause** (CONFIRMED 2026-06-22 via commit inspection): self-inflicted `[skip ci]`, **leaked
+  through squash-merge**. Each feature's `docs(spec)`/`docs(plan)` commits were intentionally tagged
+  `[skip ci]` (docs shouldn't deploy). On **squash-merge**, GitHub concatenates every squashed commit's
+  subject into the merge commit **body**, so the squash commits for #50–#54 literally contained
+  `[skip ci]` in their bodies. GitHub honors `[skip ci]` **anywhere in the HEAD commit message**, so it
+  skipped ALL workflows (Deploy + CI) for those pushes. The timeline confirms it: `#49` (no `[skip ci]`
+  bullet) deployed; `#50–#54` (every squash body carries `[skip ci]` docs bullets) were skipped; `#55`
+  (its spec/plan were committed WITHOUT `[skip ci]`) deployed cleanly and the "anomaly" vanished. It was
+  never a GitHub-side glitch — the `[skip ci]` context was lost in a conversation compaction, so it got
+  misfiled as unexplained.
+- **Solution**: nothing to fix in the pipeline — it behaved exactly as designed. Recovery for an
+  already-merged-but-skipped commit = manual `workflow_dispatch` of "Deploy to Cloud Run" on `main` (as
+  done for `3d2dafe`, run 27723605516).
+- **Prevention** (future merges — do NOT let `[skip ci]` reach a deployable squash-merge body):
+  1. At squash-merge, **edit the squash commit message** in GitHub's merge dialog and delete the
+     `* …[skip ci]` bullets before confirming.
+  2. Don't put `[skip ci]` in commit **subjects** that will be squashed into a deploying merge; reserve
+     `[skip ci]` for standalone docs-only **direct-to-main** commits (e.g. `9aeef38`, `e2602b9`), whose
+     own subject carries it intentionally.
+  3. Prefer a path-filter / docs-only branch convention to gate deploys instead of `[skip ci]`.
+  4. After any merge to `main`, glance at the Actions tab to confirm **Deploy actually fired**.
 
 ### 2026-02-06 - Fragile Year Extraction in Metadata Scout
 - **Issue**: `original_publication_year` extraction failed for common date formats (e.g., "January 2023", "2023/01/01"), defaulting to `None`.
