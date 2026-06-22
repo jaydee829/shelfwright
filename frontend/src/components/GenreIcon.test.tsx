@@ -25,4 +25,20 @@ describe('GenreIcon', () => {
     const { container } = render(<GenreIcon genres={['general']} />)
     expect(container.querySelector('svg')?.getAttribute('aria-label')).toBe('Other')
   })
+  it('renders a non-empty icon body for every supported genre (guards against missing paths)', () => {
+    const samples = [
+      'fantasy', 'science-fiction', 'adventure', 'mystery', 'romance', 'horror',
+      'thriller', 'classics', 'historical', 'young-adult', 'lgbtq', 'war', 'dystopian', 'general',
+    ]
+    for (const g of samples) {
+      const { container } = render(<GenreIcon genres={[g]} />)
+      const svg = container.querySelector('svg')!
+      expect(svg.getAttribute('aria-label')).toBeTruthy()
+      expect(svg.innerHTML.length).toBeGreaterThan(0)
+    }
+  })
+  it('renders the dystopian icon with its label', () => {
+    const { container } = render(<GenreIcon genres={['dystopian']} />)
+    expect(container.querySelector('svg')?.getAttribute('aria-label')).toBe('Dystopian')
+  })
 })
