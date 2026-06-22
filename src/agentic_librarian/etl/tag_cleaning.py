@@ -36,7 +36,7 @@ def _titlecase(norm: str) -> str:
     return " ".join(w.capitalize() for w in norm.split())
 
 
-def _clean_one(tag: str, *, alias: dict, combo: dict, denylist: set) -> list[str]:
+def _clean_one(tag: str, *, alias: dict[str, str], combo: dict[str, list[str]], denylist: set[str]) -> list[str]:
     n = _normalize(_bisac_reduce(_strip_uuid(tag)))
     if not n:
         return []
@@ -67,5 +67,5 @@ def clean_genres(raw: list[str] | None) -> list[str]:
     result = _dedup(out)
     if len(result) > 1:  # drop over-broad umbrellas only when more specific genres remain
         pruned = [g for g in result if g not in tag_maps.CONDITIONAL_DROP]
-        result = pruned or result
+        result = pruned or result  # never empty the list, even if every genre were an umbrella term
     return result
