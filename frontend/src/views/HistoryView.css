@@ -1,5 +1,4 @@
 /* ---- layout ---- */
-.view-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-3); }
 .history-import-link { font-size: var(--fs-sm); color: var(--text-muted); }
 
 .history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
@@ -60,7 +59,3 @@
 }
 .confirm-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
 .confirm-error { color: var(--danger); font-size: var(--fs-sm); margin-top: var(--space-2); }
-.history-btn-danger {
-  background: var(--danger); color: var(--on-danger);
-  box-shadow: none;
-}

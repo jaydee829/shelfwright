@@ -139,7 +139,7 @@ export default function HistoryView() {
               >
                 Cancel
               </button>
-              <button className="btn history-btn-danger" onClick={() => void doDelete()} disabled={deleting}>
+              <button className="btn btn--danger" onClick={() => void doDelete()} disabled={deleting}>
                 {deleting ? 'Deleting…' : 'Delete entry'}
               </button>
             </div>

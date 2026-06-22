@@ -212,12 +212,6 @@
   color: var(--chip-fg);
 }
 
-/* ---- danger button modifier ---- */
-.btn--danger {
-  background: var(--danger);
-  color: var(--on-danger);
-  box-shadow: none;
-}
 
 @media (prefers-reduced-motion: reduce) {
   .import-file-label,

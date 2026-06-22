@@ -44,3 +44,7 @@
   border: 1px solid var(--border); box-shadow: none;
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn--danger { background: var(--danger); color: var(--on-danger); box-shadow: none; }
+
+/* ---- view header (title + summary/link row) ---- */
+.view-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-3); }
