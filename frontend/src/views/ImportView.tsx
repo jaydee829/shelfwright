@@ -116,7 +116,7 @@ export default function ImportView() {
       {step === 'upload' && (
         <div className="import-step">
           <p>Upload a CSV — a Goodreads export, or your own with title, author and date columns.</p>
-          <label>
+          <label className="import-file-label">
             Choose CSV file
             <input
               data-testid="import-file"
@@ -136,35 +136,42 @@ export default function ImportView() {
             <span>{preview.counts.to_read} to-read</span>
             <span>{preview.counts.currently_reading} currently-reading</span>
           </div>
-          {FIELDS.map((field) => (
-            <label key={field} style={{ display: 'block' }}>
-              {field}
-              <select
-                value={mapping[field] ?? ''}
-                onChange={(e) => setMapping({ ...mapping, [field]: e.target.value || null })}
-              >
-                <option value="">—</option>
-                {preview.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-              </select>
-            </label>
-          ))}
-          <button disabled={missing.length > 0 || busy} onClick={() => setStep('review')}>Continue</button>
+          <div className="import-map-fields">
+            {FIELDS.map((field) => (
+              <label key={field}>
+                {field}
+                <select
+                  value={mapping[field] ?? ''}
+                  onChange={(e) => setMapping({ ...mapping, [field]: e.target.value || null })}
+                >
+                  <option value="">—</option>
+                  {preview.headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
           {missing.length > 0 && <p className="import-error">Map required columns: {missing.join(', ')}</p>}
+          <div className="import-actions">
+            <button className="btn" disabled={missing.length > 0 || busy} onClick={() => setStep('review')}>Continue</button>
+          </div>
         </div>
       )}
 
       {step === 'review' && preview && (
         <div className="import-step">
           <p>{preview.counts.read_dated} books will be added to your history.</p>
-          <label>
+          <label className="import-check-label">
             <input type="checkbox" checked={toRead} onChange={(e) => setToRead(e.target.checked)} />
             Import {preview.counts.to_read} to-read books as wishlist
           </label>
-          <label>
+          <label className="import-check-label">
             <input type="checkbox" checked={currently} onChange={(e) => setCurrently(e.target.checked)} />
             Import {preview.counts.currently_reading} currently-reading as wishlist
           </label>
-          <button disabled={busy} onClick={onCommit}>Start import</button>
+          <div className="import-actions">
+            <button className="btn--ghost btn" onClick={() => setStep('map')}>Back</button>
+            <button className="btn" disabled={busy} onClick={onCommit}>Start import</button>
+          </div>
         </div>
       )}
 
@@ -173,23 +180,25 @@ export default function ImportView() {
           <div className="import-progress-bar">
             <span style={{ width: `${status && status.total_rows ? (done / status.total_rows) * 100 : 0}%` }} />
           </div>
-          <p>{done} / {status?.total_rows ?? '…'}</p>
+          <p className="import-progress-count">{done} / {status?.total_rows ?? '…'}</p>
           {status && (
-            <ul>
-              <li>✓ {status.counts.done ?? 0} imported</li>
-              <li>⚠ {status.counts.failed ?? 0} failed</li>
-              <li>⏭ {status.counts.skipped ?? 0} skipped</li>
+            <ul className="import-status-list">
+              <li className="import-status-done">✓ {status.counts.done ?? 0} imported</li>
+              <li className="import-status-failed">⚠ {status.counts.failed ?? 0} failed</li>
+              <li className="import-status-skipped">⏭ {status.counts.skipped ?? 0} skipped</li>
             </ul>
           )}
           {status && (status.stalled ?? 0) > 0 && (
             <p className="import-error">{status.stalled} row(s) appear stuck. You can retry them.</p>
           )}
-          {status && ((status.counts.failed ?? 0) > 0 || (status.stalled ?? 0) > 0) && (
-            <button disabled={busy} onClick={onRetry}>Retry failed/stalled</button>
-          )}
-          {status?.complete && status.report.length > 0 && (
-            <button onClick={downloadReport}>Download report</button>
-          )}
+          <div className="import-actions">
+            {status && ((status.counts.failed ?? 0) > 0 || (status.stalled ?? 0) > 0) && (
+              <button className="btn btn--danger" disabled={busy} onClick={onRetry}>Retry failed/stalled</button>
+            )}
+            {status?.complete && status.report.length > 0 && (
+              <button className="btn btn--ghost" onClick={downloadReport}>Download report</button>
+            )}
+          </div>
         </div>
       )}
     </div>
