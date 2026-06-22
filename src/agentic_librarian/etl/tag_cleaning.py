@@ -69,3 +69,10 @@ def clean_genres(raw: list[str] | None) -> list[str]:
         pruned = [g for g in result if g not in tag_maps.CONDITIONAL_DROP]
         result = pruned or result  # never empty the list, even if every genre were an umbrella term
     return result
+
+
+def clean_moods(raw: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for tag in raw or []:
+        out.extend(_clean_one(tag, alias=tag_maps.MOOD_ALIAS_MAP, combo={}, denylist=tag_maps.MOOD_DENYLIST))
+    return _dedup(out)

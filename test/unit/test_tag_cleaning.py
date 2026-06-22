@@ -60,3 +60,23 @@ def test_clean_genres_is_idempotent():
     msgs = [f"science-fiction-fantasy-{UUID}", "fiction", "Fantasy", f"audiobook-{UUID}"]
     once = tc.clean_genres(msgs)
     assert tc.clean_genres(once) == once
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ([f"dark-{UUID}", "Dark"], ["Dark"]),  # uuid strip + case dedup
+        ([f"audiobook-{UUID}"], []),  # junk dropped
+        (["lighthearted", "Light-Hearted"], ["Lighthearted"]),  # alias collapse
+        (["Mysterious", "reflective"], ["Mysterious", "Reflective"]),  # unknown kept, title-cased
+        (["general"], []),
+        (None, []),
+    ],
+)
+def test_clean_moods(raw, expected):
+    assert tc.clean_moods(raw) == expected
+
+
+def test_clean_moods_no_combo_split():
+    # moods never split on the genre COMBO_MAP
+    assert tc.clean_moods(["science fiction fantasy"]) == ["Science Fiction Fantasy"]
