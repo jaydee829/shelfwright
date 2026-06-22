@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { getRecommendations, setRecommendationStatus, type Recommendation } from '../api/client'
+import { GenreIcon } from '../components/GenreIcon'
+import { NewMarker } from '../components/NewMarker'
+import { computeNewIds, markSeen } from '../lib/lastVisit'
 import './RecommendationsView.css'
 
 function ReadBadge({ r }: { r: Recommendation }) {
@@ -17,23 +20,19 @@ export default function RecommendationsView() {
   const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const newIds = useMemo(() => (recs ? computeNewIds('recs', recs.map((r) => r.id)) : new Set<string>()), [recs])
 
-  useEffect(() => {
-    void getRecommendations().then(setRecs)
-  }, [])
+  useEffect(() => { void getRecommendations().then(setRecs) }, [])
+  useEffect(() => { if (recs) markSeen('recs', recs.map((r) => r.id)) }, [recs])
 
   async function dismiss(id: string) {
     setBusy(id)
     try {
       await setRecommendationStatus(id, 'Dismissed')
-      setRecs((current) => (current ? current.filter((r) => r.id !== id) : current))
-    } finally {
-      setBusy(null)
-    }
+      setRecs((cur) => (cur ? cur.filter((r) => r.id !== id) : cur))
+    } finally { setBusy(null) }
   }
-
   function readThis(r: Recommendation) {
-    // Open the add-book form prefilled; on a successful add it marks this suggestion Read.
     navigate('/add', { state: { title: r.title, author: r.authors.join(', '), suggestionId: r.id } })
   }
 
@@ -42,10 +41,15 @@ export default function RecommendationsView() {
 
   return (
     <div>
-      <h2>Recommendations</h2>
+      <header className="view-head">
+        <h2>Recommendations</h2>
+        {newIds.size > 0 && <span className="view-head__summary">{newIds.size} new</span>}
+      </header>
       <div className="rec-list">
         {recs.map((r) => (
-          <article key={r.id} className="rec-card">
+          <article key={r.id} className="book-card rec-card">
+            <GenreIcon className="rec-genre" genres={r.genres} />
+            {newIds.has(r.id) && <NewMarker kind="new" />}
             <div className="rec-head">
               <span className="rec-title">{r.title}</span>
               <span className="rec-authors">{r.authors.join(', ')}</span>
@@ -53,8 +57,8 @@ export default function RecommendationsView() {
             </div>
             {r.justification && <p className="rec-why">{r.justification}</p>}
             <div className="rec-actions">
-              <button onClick={() => readThis(r)}>✓ I read this</button>
-              <button onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
+              <button className="btn" onClick={() => readThis(r)}>✓ I read this</button>
+              <button className="btn btn--ghost" onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
             </div>
           </article>
         ))}

@@ -25,6 +25,7 @@ export interface Recommendation {
   read_status?: 'new' | 'reread'
   last_read?: string | null
   rating?: number | null
+  genres?: string[]
 }
 
 export interface Ranked {

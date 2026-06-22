@@ -80,7 +80,7 @@ describe('RecommendationsView', () => {
     ])
     renderWithRouter()
 
-    expect(await screen.findByText('New')).toBeInTheDocument()
+    expect((await screen.findAllByText('New'))[0]).toBeInTheDocument()
     expect(screen.getByText(/Re-read/)).toBeInTheDocument()
     expect(screen.getByText(/2019/)).toBeInTheDocument()
   })
