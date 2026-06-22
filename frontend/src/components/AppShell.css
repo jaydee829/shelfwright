@@ -1,15 +1,25 @@
 .topbar {
   position: fixed; top: 0; left: 0; right: 0; height: 56px; z-index: 10;
   display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
-  background: var(--topbar-bg); color: var(--topbar-fg);
+  color: var(--topbar-fg);
+  background: linear-gradient(180deg,#2c1c17,#20120e);
+  border-bottom: 2px solid; border-image: linear-gradient(90deg,#8a6a2e,var(--gilt),#8a6a2e) 1;
 }
-.topbar-title { font-weight: 600; }
-.topbar-right { display: flex; align-items: center; gap: 12px; }
+.topbar::before { /* leather grain */
+  content: ""; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: overlay; opacity: .5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='90'%3E%3Cfilter id='l'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.6 0.75' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23l)'/%3E%3C/svg%3E");
+}
+.topbar-title { position: relative; z-index: 1; font-family: var(--font-display); font-weight: 600; }
+.topbar-title::before { content: "✦ "; color: var(--gilt); }
+.topbar-right { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; }
 .avatar {
   display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
-  background: var(--accent); color: var(--on-accent); font-weight: 600;
+  background: var(--accent); color: var(--on-accent); font-weight: 600; box-shadow: 0 0 0 1px rgba(227,184,94,.5);
 }
-.topbar-right button { background: transparent; color: var(--topbar-fg); border: 1px solid var(--topbar-border); border-radius: 6px; padding: 4px 10px; }
+.topbar-right button, .theme-toggle {
+  background: transparent; color: var(--topbar-fg);
+  border: 1px solid var(--topbar-border); border-radius: var(--radius); padding: 4px 10px;
+}
 
 /* Mobile-first: content sits below the top bar and above the bottom nav. */
 .content { padding: 72px 16px 88px; max-width: 820px; margin: 0 auto; }
