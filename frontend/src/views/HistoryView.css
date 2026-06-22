@@ -20,11 +20,12 @@
 
 /* ---- chips row ---- */
 .history-tropes { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
-.history-genre { /* .chip--special already handles background/color */ }
+.history-genre { background: var(--chip-genre-bg); font-weight: 600; }
 .history-enriching { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
 
 /* ---- kebab action menu ---- */
-.history-actions { position: absolute; top: var(--space-2); right: var(--space-2); }
+/* right offset clears the 12px book-card fore-edge decoration */
+.history-actions { position: absolute; top: var(--space-2); right: var(--space-5); }
 .kebab {
   background: none; border: none; font-size: 18px; line-height: 1;
   padding: 2px 6px; cursor: pointer; color: var(--text-muted);

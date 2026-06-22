@@ -73,7 +73,7 @@ export default function HistoryView() {
             <div className="history-tropes">
               {h.tropes && h.tropes.length > 0 ? (
                 <>
-                  {h.genre && <span className="chip chip--special history-genre">{h.genre}</span>}
+                  {h.genre && <span className="chip history-genre">{h.genre}</span>}
                   {h.tropes.map((t) => (
                     <span key={t} className="chip">{t}</span>
                   ))}
