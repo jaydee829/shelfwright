@@ -91,7 +91,7 @@ export default function AddBookView() {
           Notes
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </label>
-        <button type="submit" disabled={!canSubmit}>Add to history</button>
+        <button type="submit" className="btn addbook-submit" disabled={!canSubmit}>Add to history</button>
       </form>
       {done && <p className="addbook-done">{done}</p>}
       {error && <p className="addbook-error">{error}</p>}

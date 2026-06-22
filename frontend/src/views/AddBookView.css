@@ -1,18 +1,55 @@
+/* ---- AddBookView ---- */
+.addbook { max-width: 28rem; }
+
+.addbook h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-display);
+  color: var(--text);
+  margin-bottom: var(--space-4);
+}
+
 .addbook-form {
   display: grid;
-  gap: 0.75rem;
-  max-width: 28rem;
+  gap: var(--space-4);
 }
+
 .addbook-form label {
   display: grid;
-  gap: 0.25rem;
-  font-size: 0.9rem;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
+
+.addbook-form input,
+.addbook-form select,
+.addbook-form textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font: var(--fs-body) / 1.4 var(--font-body);
+  width: 100%;
+}
+
+.addbook-form textarea {
+  resize: vertical;
+}
+
+/* gilt focus ring is set globally via :focus-visible in index.css */
+
+.addbook-submit {
+  margin-top: var(--space-1);
+}
+
 .addbook-done {
   color: var(--ok);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-3);
 }
+
 .addbook-error {
   color: var(--danger);
+  font-size: var(--fs-sm);
+  margin-top: var(--space-3);
 }
-.edit-context { font-size: 0.9rem; color: var(--text-soft); }
-.edit-actions { display: flex; gap: 0.5rem; }
