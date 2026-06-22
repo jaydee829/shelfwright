@@ -44,7 +44,7 @@ a free side benefit, no extra work.
   - `science-fiction-fantasy-<uuid>` → `["Science Fiction", "Fantasy"]`
   - `audiobook-<uuid>` → dropped (not a genre)
   - `epic-<uuid>` → `["Epic"]`
-  - `action-adventure-<uuid>` → `["Action", "Adventure"]`
+  - `action-adventure-<uuid>` → `["Action & Adventure"]` (BISAC keeps it as one genre, not split)
   - `fiction` / `Fiction` → collapse to `Fiction`, and **drop if other genres are present**
   - `business-economics` + `Business & Economics` → `["Business & Economics"]`
   - sci-fi variants → `["Science Fiction"]`; `general` → dropped
@@ -66,8 +66,9 @@ a free side benefit, no extra work.
 - **D1 — Mechanism:** a deterministic **cleaning pipeline** over the existing `ARRAY(String)` columns,
   parametrised by small curated lookup maps. Genres and moods share the pipeline with different configs.
 - **D2 — Scope:** genres + moods only.
-- **D3 — Combos:** explicit `COMBO_MAP` (`science-fiction-fantasy` → `[Science Fiction, Fantasy]`;
-  `action-adventure` → `[Action, Adventure]`).
+- **D3 — Combos:** explicit `COMBO_MAP` for true multi-genre slugs (`science-fiction-fantasy` →
+  `[Science Fiction, Fantasy]`). Where BISAC keeps terms together as one genre, alias to the single
+  BISAC form instead of splitting (`action-adventure` → `Action & Adventure`, via `ALIAS_MAP`).
 - **D4 — Over-broad terms:** `General` → always drop; `Fiction` → drop **only if** other genres remain
   (sole-genre `Fiction` is kept); `Nonfiction` → kept as-is.
 - **D5 — Maps seeded from data:** the alias/combo/deny maps are curated from a one-time **inventory** of
@@ -75,8 +76,14 @@ a free side benefit, no extra work.
 - **D6 — Graceful degradation:** the cleaner works before maps are complete (unknown tags get
   UUID-strip + Title-Case + junk-reject); maps grow from the inventory.
 - **D7 — Backfill targets LIVE prod**, never a backup/snapshot; guarded by an explicit connection check.
-- **D8 — Coordinate canonical genre names with the design-work "13-genre icons"** so each canonical
-  genre maps to an icon (cross-session; see Rollout notes).
+- **D8 — Genre names ↔ design-work icons (relaxed):** `GenreIcon` resolves via fuzzy
+  `canonicalizeGenre()` (token-contains, case-insensitive) — NOT exact strings — so canonical names need
+  only *contain* the recognizable genre token (`Action & Adventure` → Adventure icon). The 13 icon
+  genres are listed in Rollout notes; anything else degrades to a fallback star. (Confirmed with
+  design-work, 2026-06-22.)
+- **D9 — BISAC is the formatting authority:** canonical genre names follow BISAC spelling/format where a
+  BISAC equivalent exists (`Business & Economics`, `Action & Adventure`); when unsure how to represent a
+  genre, use BISAC for the canonical form.
 
 ## 5. Architecture & Placement
 
@@ -107,11 +114,12 @@ No schema change. `Work.genres`/`Work.moods` stay `ARRAY(String)`.
 2. **Normalize form** — hyphens/underscores → spaces; collapse whitespace; for BISAC paths
    (`A / B / C`) take the most specific meaningful segment (`Fiction / Science Fiction / General` →
    `Science Fiction`); lowercase for lookup.
-3. **Alias lookup** (`ALIAS_MAP`) — snap known variants to one canonical spelling: `fiction`→`Fiction`,
-   `sci-fi`/`scifi`/`science-fiction`→`Science Fiction`, `business-economics`→`Business & Economics`,
-   `epic`→`Epic`.
-4. **Combo split** (`COMBO_MAP`) — `science-fiction-fantasy` → `[Science Fiction, Fantasy]`;
-   `action-adventure` → `[Action, Adventure]`. (Each split member is itself canonical.)
+3. **Alias lookup** (`ALIAS_MAP`) — snap known variants to one canonical (BISAC-formatted) spelling:
+   `fiction`→`Fiction`, `sci-fi`/`scifi`/`science-fiction`→`Science Fiction`,
+   `business-economics`→`Business & Economics`, `action-adventure`→`Action & Adventure`, `epic`→`Epic`.
+4. **Combo split** (`COMBO_MAP`) — only true multi-genre slugs: `science-fiction-fantasy` →
+   `[Science Fiction, Fantasy]`. (Each split member is itself canonical. `action-adventure` is NOT split
+   — BISAC treats it as one genre, so it's an `ALIAS_MAP` entry above.)
 5. **Reject junk** — drop the tag if: on `DENYLIST` (`audiobook`, `ebook`, `paperback`,
    `kindle edition`, format words, `general`, `books`…); contains digits/leftover hex after step 1;
    empty or a single stray char.
@@ -131,6 +139,7 @@ The maps in `tag_maps.py` are built from reality, in three steps:
    from the live DB.
 2. **Curate** — from that inventory we (operator + author) fill `ALIAS_MAP` / `COMBO_MAP` / `DENYLIST` /
    `CONDITIONAL_DROP`. Seeded with the known examples; expanded to cover the actual distinct values.
+   Canonical (RHS) spellings follow **BISAC** where one exists (D9) — it is the formatting authority.
 3. **Review** — operator eyeballs the maps and the dry-run diff before applying.
 
 Map shapes:
@@ -174,7 +183,7 @@ real strings:
 | `["science-fiction-fantasy-<uuid>"]` | `["Science Fiction", "Fantasy"]` |
 | `["audiobook-<uuid>"]` | `[]` |
 | `["epic-<uuid>"]` | `["Epic"]` |
-| `["action-adventure-<uuid>"]` | `["Action", "Adventure"]` |
+| `["action-adventure-<uuid>"]` | `["Action & Adventure"]` |
 | `["fiction", "Fiction", "Fantasy"]` | `["Fantasy"]` |
 | `["fiction"]` | `["Fiction"]` |
 | `["business-economics", "Business & Economics"]` | `["Business & Economics"]` |
@@ -191,8 +200,12 @@ and writes nothing; `--apply` writes cleaned values; second `--apply` is a no-op
 - **Sequence:** ship the cleaner + persist hook + seed maps (go-forward correctness) → operator runs
   `--inventory` on prod → expand the maps from the inventory (review) → `--dry-run` (eyeball) →
   `--apply` against **live** prod.
-- **Cross-session (D8):** the canonical genre names (RHS of the maps) must line up with the
-  **design-work** session's "13-genre line-art icons" so each genre maps to an icon. Coordinate the
-  canonical genre list on the agent coordination board before finalising the maps.
+- **Cross-session (D8, resolved):** design-work's `GenreIcon` resolves genres via fuzzy
+  `canonicalizeGenre()` (regex token-contains, case-insensitive) in `frontend/src/components/genreUtils.ts`
+  — so the cleaning maps do **not** need exact-string parity with the icons; a cleaned canonical name just
+  needs to *contain* the recognizable token. The **13 icon genres**: Fantasy, Science Fiction, Adventure,
+  Mystery, Romance, Horror, Thriller, Literary, Historical, Young Adult, LGBTQ, War, Dystopian — anything
+  else → a graceful fallback star. BISAC formatting (D9) is compatible (e.g. `Action & Adventure` →
+  Adventure icon). Coordinated on the board, 2026-06-22.
 - No migration, no env changes, no deploy gating — the persist-hook change rides a normal deploy; the
   backfill is a one-off operator script.
