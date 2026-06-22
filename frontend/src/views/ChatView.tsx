@@ -8,7 +8,8 @@ import './ChatView.css'
 // and line breaks. Builds React elements (never innerHTML), so there is no injection surface.
 function renderInline(text: string): ReactNode[] {
   const out: ReactNode[] = []
-  const re = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_)/g
+  // `_italic_` only at word boundaries, so snake_case (e.g. search_internal_database) isn't italicised.
+  const re = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|(?<![A-Za-z0-9])_[^_\n]+_(?![A-Za-z0-9]))/g
   let last = 0
   let k = 0
   let m: RegExpExecArray | null

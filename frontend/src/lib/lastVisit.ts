@@ -18,10 +18,12 @@ export function computeNewIds(key: string, ids: string[]): Set<string> {
 /** Record the currently-shown ids as seen (call after rendering, e.g. in an effect). */
 export function markSeen(key: string, ids: string[]): void {
   try {
-    // Cap the stored set so it can't grow unbounded (localStorage quota). Newest ids are appended
-    // last, so keep the last 1000 — well beyond any realistic recommendations/history list.
-    const merged = [...new Set([...read(key), ...ids])].slice(-1000)
-    localStorage.setItem(PREFIX + key, JSON.stringify(merged))
+    const seen = read(key)
+    const before = seen.size
+    for (const id of ids) seen.add(id)
+    if (seen.size === before) return // all already seen — skip the redundant localStorage write
+    // Cap the stored set so it can't grow unbounded (localStorage quota); newest ids are last.
+    localStorage.setItem(PREFIX + key, JSON.stringify([...seen].slice(-1000)))
   } catch {
     /* storage unavailable — degrade to no marker */
   }
