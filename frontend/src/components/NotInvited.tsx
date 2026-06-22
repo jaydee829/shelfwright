@@ -1,16 +1,19 @@
 import { useAuth } from '../auth/AuthContext'
+import './NotInvited.css'
 
 export default function NotInvited() {
   const { user, signOut } = useAuth()
   return (
-    <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', textAlign: 'center', padding: 24 }}>
-      <div>
-        <h1>You're not on the list yet</h1>
-        <p>
+    <div className="notinvited-root">
+      <div className="notinvited-card">
+        <h1 className="notinvited-title">
+          <span className="notinvited-gilt">✦</span> You're not on the list yet
+        </h1>
+        <p className="notinvited-body">
           You're signed in as <strong>{user?.email}</strong>, but this account hasn't been invited.
           Ask the operator for an invite, then sign in again.
         </p>
-        <button onClick={() => void signOut()} style={{ padding: '8px 16px' }}>
+        <button className="btn btn--ghost" onClick={() => void signOut()}>
           Sign out
         </button>
       </div>

@@ -1,0 +1,35 @@
+.signin-root {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-6);
+  background: var(--bg);
+}
+
+.signin-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-7);
+  text-align: center;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: var(--shadow-card);
+}
+
+.signin-title {
+  font-family: var(--font-display);
+  font-size: var(--fs-display);
+  color: var(--text);
+  margin: 0 0 var(--space-3);
+}
+
+.signin-subtitle {
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+  margin: 0 0 var(--space-6);
+}
+
+.signin-gilt {
+  color: var(--gilt);
+}
