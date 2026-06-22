@@ -1,8 +1,40 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { getCurrentConversation, newConversation, streamChat, type ChatMessage } from '../api/client'
 import { labelForActivity, type ActivityStep } from '../api/activityLabels'
 import { CompletedActivityTrail, LiveActivityTrail } from './ActivityTrail'
 import './ChatView.css'
+
+// Minimal, dependency-free inline markdown for assistant replies: **bold**, *italic* / _italic_,
+// and line breaks. Builds React elements (never innerHTML), so there is no injection surface.
+function renderInline(text: string): ReactNode[] {
+  const out: ReactNode[] = []
+  const re = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_)/g
+  let last = 0
+  let k = 0
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index))
+    const tok = m[0]
+    if (tok.startsWith('**')) out.push(<strong key={k++}>{tok.slice(2, -2)}</strong>)
+    else out.push(<em key={k++}>{tok.slice(1, -1)}</em>)
+    last = m.index + tok.length
+  }
+  if (last < text.length) out.push(text.slice(last))
+  return out
+}
+
+function FormattedText({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('\n').map((line, i) => (
+        <span key={i}>
+          {i > 0 && <br />}
+          {renderInline(line)}
+        </span>
+      ))}
+    </>
+  )
+}
 
 export default function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -90,7 +122,11 @@ export default function ChatView() {
         {messages.map((m, i) => (
           <div key={i} className="msg-row">
             {m.role === 'assistant' && m.steps && m.steps.length > 0 && <CompletedActivityTrail steps={m.steps} />}
-            {(m.content || m.role === 'user') && <div className={`bubble ${m.role}`}>{m.content}</div>}
+            {(m.content || m.role === 'user') && (
+              <div className={`bubble ${m.role}`}>
+                {m.role === 'assistant' ? <FormattedText text={m.content} /> : m.content}
+              </div>
+            )}
           </div>
         ))}
         {sending && <LiveActivityTrail steps={liveSteps} />}

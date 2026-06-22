@@ -12,7 +12,8 @@ function ReadBadge({ r }: { r: Recommendation }) {
     const stars = r.rating ? ` · ${'★'.repeat(r.rating)}` : ''
     return <span className="rec-badge reread">{year ? `Re-read · ${year}${stars}` : `Re-read${stars}`}</span>
   }
-  if (r.read_status === 'new') return <span className="rec-badge new">New</span>
+  // Recommendations are new-to-you by assumption, so a "New" (not-a-reread) badge is noise.
+  // Only the meaningful "Re-read" case gets a badge.
   return null
 }
 
