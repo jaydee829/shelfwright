@@ -21,10 +21,21 @@ export default function RecommendationsView() {
   const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
-  const newIds = useMemo(() => (recs ? computeNewIds('recs', recs.map((r) => r.id)) : new Set<string>()), [recs])
+  const [newIds, setNewIds] = useState<Set<string>>(new Set())
 
-  useEffect(() => { void getRecommendations().then(setRecs) }, [])
-  useEffect(() => { if (recs) markSeen('recs', recs.map((r) => r.id)) }, [recs])
+  // Load once: measure "new since last visit" BEFORE marking these ids seen, freeze it in state,
+  // then store the recs. A later dismiss only filters `recs` — `newIds` stays frozen, so the
+  // remaining markers persist and the header count (derived below) simply decrements.
+  useEffect(() => {
+    void getRecommendations().then((data) => {
+      const ids = data.map((r) => r.id)
+      setNewIds(computeNewIds('recs', ids))
+      markSeen('recs', ids)
+      setRecs(data)
+    })
+  }, [])
+
+  const visibleNewCount = useMemo(() => (recs ? recs.filter((r) => newIds.has(r.id)).length : 0), [recs, newIds])
 
   async function dismiss(id: string) {
     setBusy(id)
@@ -44,7 +55,7 @@ export default function RecommendationsView() {
     <div>
       <header className="view-head">
         <h2>Recommendations</h2>
-        {newIds.size > 0 && <span className="view-head__summary">{newIds.size} new</span>}
+        {visibleNewCount > 0 && <span className="view-head__summary">{visibleNewCount} new</span>}
       </header>
       <div className="rec-list">
         {recs.map((r) => (
