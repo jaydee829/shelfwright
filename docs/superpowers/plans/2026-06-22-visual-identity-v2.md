@@ -491,7 +491,7 @@ export function NewMarker({ kind }: { kind: 'new' | 'enriched' }) {
   return (
     <span className={`new-marker new-marker--${kind}`}>
       <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"
-        role="img" aria-label={label} dangerouslySetInnerHTML={{ __html: STAR }} />
+        aria-hidden="true" focusable="false" dangerouslySetInnerHTML={{ __html: STAR }} />
       <span className="new-marker__label">{label}</span>
     </span>
   )
