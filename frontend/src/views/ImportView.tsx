@@ -169,7 +169,7 @@ export default function ImportView() {
             Import {preview.counts.currently_reading} currently-reading as wishlist
           </label>
           <div className="import-actions">
-            <button className="btn--ghost btn" onClick={() => setStep('map')}>Back</button>
+            <button className="btn btn--ghost" onClick={() => setStep('map')}>Back</button>
             <button className="btn" disabled={busy} onClick={onCommit}>Start import</button>
           </div>
         </div>
