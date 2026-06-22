@@ -7,7 +7,7 @@ export default function SignIn() {
     <div className="signin-root">
       <div className="signin-card">
         <h1 className="signin-title">
-          <span className="signin-gilt">✦</span> The Librarian
+          <span className="signin-gilt" aria-hidden="true">✦</span> The Librarian
         </h1>
         <p className="signin-subtitle">Your personal reading companion.</p>
         <button className="btn" onClick={() => void signIn()}>
