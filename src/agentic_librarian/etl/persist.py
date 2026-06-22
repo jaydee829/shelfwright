@@ -22,6 +22,7 @@ from agentic_librarian.db.models import (
     WorkStyle,
     WorkTrope,
 )
+from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
@@ -137,8 +138,8 @@ def persist_enriched_work(
     # DatatypeMismatch (NaN into an Integer/Date column) across the whole persist path.
     original_publication_year = _nan_to_none(row.get("original_publication_year"))
     description = _nan_to_none(row.get("description"))
-    genres = _nan_to_list(row.get("genres"))
-    moods = _nan_to_list(row.get("moods"))
+    genres = clean_genres(_nan_to_list(row.get("genres")))
+    moods = clean_moods(_nan_to_list(row.get("moods")))
     enriched_tropes = _nan_to_list(row.get("enriched_tropes"))
     user_rating = _nan_to_none(row.get("user_rating"))
     user_notes = _nan_to_none(row.get("user_notes"))
