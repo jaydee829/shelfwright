@@ -13,7 +13,7 @@
   --page-edge: repeating-linear-gradient(90deg,#f6eedb 0 2px,#d8c8a0 2px 4px);
   --marker-new: #6d4ed6; --marker-enriched: #1f9e94;
   /* chips & badges */
-  --chip-bg: #e8d29a; --chip-fg: #7a5e2c; --chip-genre-bg: #e0c685;
+  --chip-bg: #e3d6b8; --chip-fg: #6f5a33; --chip-genre-bg: #e0c685;
   --chip-special-bg: #ece6ff; --chip-special-fg: #5b41b8;
   --badge-new-bg: #1f7a6e; --badge-reread-bg: #6d4ed6;
   /* chrome */

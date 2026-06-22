@@ -24,8 +24,8 @@
    trope on recommendations. Genre is the gilt-gold identity (genre == gold, §7), which also keeps
    it distinct from the violet tropes in dark. */
 .history-tropes .history-genre {
-  background: color-mix(in srgb, var(--gilt) 22%, var(--surface));
-  color: color-mix(in srgb, var(--gilt) 58%, var(--text));
+  background: color-mix(in srgb, var(--gilt) 46%, var(--surface));
+  color: color-mix(in srgb, var(--gilt) 62%, var(--text));
   font-weight: 600;
 }
 .history-enriching { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
