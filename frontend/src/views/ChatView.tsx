@@ -84,7 +84,7 @@ export default function ChatView() {
   return (
     <div className="chat">
       <div className="chat-toolbar">
-        <button onClick={() => void startNew()} disabled={sending}>New chat</button>
+        <button className="btn btn--ghost" onClick={() => void startNew()} disabled={sending}>New chat</button>
       </div>
       <div className="chat-thread">
         {messages.map((m, i) => (
@@ -109,7 +109,7 @@ export default function ChatView() {
           placeholder="Ask the Librarian…"
           aria-label="Message"
         />
-        <button type="submit" disabled={sending}>Send</button>
+        <button className="btn" type="submit" disabled={sending}>Send</button>
       </form>
     </div>
   )
