@@ -1,18 +1,4 @@
-const PATTERNS: [string, RegExp][] = [
-  ['fantasy', /fantas|wuxia/],
-  ['dystopian', /dystop/],
-  ['scifi', /sci-?fi|science.?fiction|\bspace\b|alien/],
-  ['horror', /horror|occult|paranormal/],
-  ['mystery', /mystery|crime|detective|noir/],
-  ['thriller', /thriller|suspense/],
-  ['romance', /romance/],
-  ['war', /\bwar\b|military/],
-  ['lgbtq', /lgbtq|queer/],
-  ['young-adult', /young.?adult|\bya\b/],
-  ['historical', /historical|\bhistory\b/],
-  ['literary', /literary|literature|classic/],
-  ['adventure', /adventur|action/],
-]
+import { canonicalizeGenre } from './genreUtils'
 
 const LABELS: Record<string, string> = {
   fantasy: 'Fantasy', scifi: 'Science Fiction', adventure: 'Adventure', mystery: 'Mystery',
@@ -37,17 +23,6 @@ const PATHS: Record<string, string> = {
   war: '<path d="M6 18Q13.5 11 18.5 5.5"/><path d="M4.7 16.7 7.3 19.3"/><path d="M6 18 4.9 19.1"/><circle cx="4.5" cy="19.5" r=".8"/><path d="M18 18Q10.5 11 5.5 5.5"/><path d="M19.3 16.7 16.7 19.3"/><path d="M18 18 19.1 19.1"/><circle cx="19.5" cy="19.5" r=".8"/>',
   dystopian: '<path d="M2 12H22"/><path d="M6 9.5 8 14.5M8 9.5 6 14.5"/><path d="M11 9.5 13 14.5M13 9.5 11 14.5"/><path d="M16 9.5 18 14.5M18 9.5 16 14.5"/>',
   other: '<path d="M12 3 13.7 10.3 21 12 13.7 13.7 12 21 10.3 13.7 3 12 10.3 10.3Z"/>',
-}
-
-function strip(g: string): string {
-  return g.toLowerCase().replace(/-[0-9a-f-]{20,}$/, '').trim()
-}
-
-export function canonicalizeGenre(genres: string[] | undefined): string | null {
-  if (!genres?.length) return null
-  const norm = genres.map(strip)
-  for (const [key, re] of PATTERNS) if (norm.some((g) => re.test(g))) return key
-  return null
 }
 
 export function GenreIcon({ genres, className }: { genres?: string[]; className?: string }) {

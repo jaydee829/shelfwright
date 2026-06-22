@@ -1,6 +1,7 @@
 import { render } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
-import { GenreIcon, canonicalizeGenre } from './GenreIcon'
+import { GenreIcon } from './GenreIcon'
+import { canonicalizeGenre } from './genreUtils'
 
 describe('canonicalizeGenre', () => {
   it('maps urban-fantasy to fantasy', () => expect(canonicalizeGenre(['urban-fantasy'])).toBe('fantasy'))
