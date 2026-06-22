@@ -72,6 +72,7 @@ def get_recommendations(user: AuthenticatedUser = Depends(get_current_user)):  #
                 "context": s.context,
                 "suggested_at": s.suggested_at.isoformat() if s.suggested_at else None,
                 "status": s.status,
+                "genres": s.work.genres or [],
                 **_read_fields(s.work_id),
             }
             for s in rows
