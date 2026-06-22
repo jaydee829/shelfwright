@@ -32,10 +32,14 @@ def plan_changes(session) -> list[Change]:
     return out
 
 
-def apply_changes(session) -> int:
+def apply_changes(session, changes: list[Change] | None = None) -> int:
+    """Apply the given changes (or compute them if not supplied). Passing the list the caller
+    already previewed guarantees applied == previewed."""
+    if changes is None:
+        changes = plan_changes(session)
     n = 0
-    for c in plan_changes(session):
-        w = session.get(Work, c.work_id)
+    for c in changes:
+        w = session.get(Work, c.work_id)  # identity-map hit — plan_changes already loaded it
         w.genres, w.moods = c.genres_after, c.moods_after
         n += 1
     return n

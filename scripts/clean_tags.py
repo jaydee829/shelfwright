@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nREFUSING --apply: '{safe}' is not a live prod DB (sqlite/backup/localhost).")
             return 2
 
-        print(f"\napplied: {tag_backfill.apply_changes(session)} works updated.")
+        print(f"\napplied: {tag_backfill.apply_changes(session, changes)} works updated.")
         return 0
 
 
