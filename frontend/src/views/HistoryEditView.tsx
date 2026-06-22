@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { updateHistory, type HistoryItem } from '../api/client'
-import './AddBookView.css'
+import './HistoryEditView.css'
 
 export default function HistoryEditView() {
   const { id } = useParams()
@@ -34,15 +34,15 @@ export default function HistoryEditView() {
   }
 
   return (
-    <div className="addbook">
+    <div className="history-edit">
       <h2>Edit read</h2>
-      <p className="edit-context">
+      <p className="history-edit-context">
         <strong>{row.title}</strong>
         <br />
         {row.authors.join(', ')}
         {row.format ? ` · ${row.format}` : ''}
       </p>
-      <form onSubmit={onSubmit} className="addbook-form">
+      <form onSubmit={onSubmit} className="history-edit-form">
         <label>
           Rating
           <select value={rating} onChange={(e) => setRating(e.target.value)}>
@@ -66,12 +66,12 @@ export default function HistoryEditView() {
           Notes
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
         </label>
-        <div className="edit-actions">
-          <button type="submit" disabled={busy}>Save changes</button>
-          <button type="button" onClick={() => navigate('/history')} disabled={busy}>Cancel</button>
+        <div className="history-edit-actions">
+          <button type="submit" className="btn" disabled={busy}>Save changes</button>
+          <button type="button" className="btn btn--ghost" onClick={() => navigate('/history')} disabled={busy}>Cancel</button>
         </div>
       </form>
-      {error && <p className="addbook-error">{error}</p>}
+      {error && <p className="history-edit-error">{error}</p>}
     </div>
   )
 }

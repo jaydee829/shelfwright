@@ -1,0 +1,46 @@
+/* ---- HistoryEditView ---- */
+.history-edit { max-width: 28rem; }
+
+.history-edit h2 {
+  font-family: var(--font-display); font-size: var(--fs-display);
+  color: var(--text); margin-bottom: var(--space-2);
+}
+
+.history-edit-context {
+  font-size: var(--fs-sm); color: var(--text-soft);
+  margin-bottom: var(--space-4);
+}
+
+.history-edit-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.history-edit-form label {
+  display: grid;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.history-edit-form select,
+.history-edit-form input[type="date"],
+.history-edit-form textarea {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font: var(--fs-body) / 1.4 var(--font-body);
+  width: 100%;
+}
+
+.history-edit-form textarea {
+  resize: vertical;
+}
+
+/* gilt focus ring is set globally via :focus-visible in index.css */
+
+.history-edit-actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
+
+.history-edit-error { color: var(--danger); font-size: var(--fs-sm); margin-top: var(--space-3); }
