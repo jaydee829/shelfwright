@@ -80,7 +80,8 @@ describe('RecommendationsView', () => {
     ])
     renderWithRouter()
 
-    expect((await screen.findAllByText('New'))[0]).toBeInTheDocument()
+    // Target the read-status badge specifically (NewMarker also renders the text "New").
+    expect(await screen.findByText('New', { selector: '.rec-badge.new' })).toBeInTheDocument()
     expect(screen.getByText(/Re-read/)).toBeInTheDocument()
     expect(screen.getByText(/2019/)).toBeInTheDocument()
   })
