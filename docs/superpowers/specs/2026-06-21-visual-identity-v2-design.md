@@ -96,8 +96,8 @@ churn); values change and new tokens are added. Values are the approved hexes fr
 | `--accent` | `#9a3b2e` (oxblood) | `#e3b85e` (gilt) | Primary action — rotates oxblood→gold |
 | `--on-accent` | `#fff3ec` | `#1a160f` | Text on primary |
 | `--star` | `#c79a3e` | `#e3b85e` | Gilt stars |
-| `--chip-bg` / `--chip-fg` | `#ecdebf` / `#856a3f` | `rgba(124,92,255,.16)` / `#c7b9ff` | Secondary trope chips (tan→violet) |
-| `--chip-genre-bg` | `#e7d9b8` | `#272e3f` | |
+| `--chip-bg` / `--chip-fg` | `#e8d29a` / `#7a5e2c` | `rgba(124,92,255,.16)` / `#c7b9ff` | Secondary trope chips (warm gold-tan by day → violet by night). Light deepened from `#ecdebf` — that was too close to `--surface` to read as a pill. **Non-glowing**; the glow is reserved for the special "why" chip. |
+| `--chip-genre-bg` | `#e0c685` | `#272e3f` | Legacy token. The History **genre chip** instead uses the **gilt identity** (`color-mix(in srgb, var(--gilt) 22%, var(--surface))` bg + gilt text, bold) so genre reads as *gold* in both themes (genre == gold, §7) and stays distinct from the violet dark tropes. |
 | `--badge-new-bg` | `#1f7a6e` (teal) | `#2e8b57` | "New" badge → teal family |
 | `--badge-reread-bg` | `#6d4ed6` (violet) | `#7c6bb0` | "Reread" badge → violet family |
 | `--on-badge` | `#ffffff` | `#ffffff` | |

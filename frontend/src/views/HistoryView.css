@@ -17,19 +17,16 @@
 .history-rating { color: var(--star); }
 .history-format { text-transform: capitalize; }
 
-/* ---- chips row: glowing leaf-cut pills ---- */
+/* ---- chips row ---- */
 .history-tropes { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
-/* tropes glow in the "special" hue — violet by day, teal by night (four-hue rotation) */
-.history-tropes .chip {
-  background: var(--chip-special-bg); color: var(--chip-special-fg);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--glow) 40%, transparent), 0 0 11px -3px var(--glow-soft);
-}
-/* genre is distinct: a gilt-gold glow (different from the trope hue in BOTH modes) */
+/* Tropes use the base .chip "secondary trope" colour (§1.1): warm tan by day, violet by night.
+   No glow here — the violet/teal glow (--chip-special-*) is reserved for the highlighted "why"
+   trope on recommendations. Genre is the gilt-gold identity (genre == gold, §7), which also keeps
+   it distinct from the violet tropes in dark. */
 .history-tropes .history-genre {
-  background: color-mix(in srgb, var(--gilt) 24%, var(--surface));
-  color: color-mix(in srgb, var(--gilt) 55%, var(--text));
+  background: color-mix(in srgb, var(--gilt) 22%, var(--surface));
+  color: color-mix(in srgb, var(--gilt) 58%, var(--text));
   font-weight: 600;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gilt) 58%, transparent), 0 0 11px -3px color-mix(in srgb, var(--gilt) 60%, transparent);
 }
 .history-enriching { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
 
