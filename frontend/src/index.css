@@ -1,73 +1,89 @@
+@import './styles/primitives.css';
+
 :root {
-  --bg: #ffffff;
-  --surface: #f3f4f6;
-  --surface-2: #e5e7eb;
-  --text: #1a1a1a;
-  --text-muted: #6b7280;
-  --text-faint: #9ca3af;
-  --text-soft: #374151;
-  --border: #d1d5db;
-  --accent: #6366f1;
-  --on-accent: #ffffff;
-  --on-danger: #ffffff;
-  --on-badge: #ffffff;
-  --strong-bg: #111827;
-  --strong-fg: #ffffff;
-  --topbar-bg: #111827;
-  --topbar-fg: #f9fafb;
-  --topbar-border: #4b5563;
-  --nav-fg: #4b5563;
-  --chip-bg: #eef2ff;
-  --chip-fg: #3730a3;
-  --chip-genre-bg: #e0e7ff;
-  --badge-new-bg: #1f6f43;
-  --badge-reread-bg: #5a4a8a;
-  --star: #f59e0b;
-  --danger: #c62828;
-  --ok: #2e7d32;
-  --done-mark: #1f6f43;
-  --overlay: rgba(0, 0, 0, 0.4);
-  --menu-shadow: rgba(0, 0, 0, 0.1);
+  /* surfaces & text */
+  --bg: #f3e8d2; --surface: #f9efd9; --surface-2: #ecdebf;
+  --text: #241f1a; --text-soft: #2a231b; --text-muted: #5a4f43; --text-faint: #8a7d6a;
+  --border: #e6d4ad;
+  /* action / accents */
+  --accent: #9a3b2e; --on-accent: #fff3ec; --on-danger: #fff3ec; --on-badge: #ffffff;
+  --gilt: #c79a3e; --star: #c79a3e;
+  --glow: #6d4ed6; --glow-soft: rgba(109,78,214,.55);
+  --spine: linear-gradient(180deg,#1f9e94,#14756d); --spine-glow: rgba(31,158,148,.5);
+  --page-edge: repeating-linear-gradient(90deg,#f6eedb 0 2px,#d8c8a0 2px 4px);
+  --marker-new: #6d4ed6; --marker-enriched: #1f9e94;
+  /* chips & badges */
+  --chip-bg: #ead2be; --chip-fg: #7e2f24; --chip-genre-bg: #e0c685;
+  --chip-special-bg: #ece6ff; --chip-special-fg: #5b41b8;
+  --badge-new-bg: #1f7a6e; --badge-reread-bg: #6d4ed6;
+  /* chrome */
+  --strong-bg: #221409; --strong-fg: #ecd9a6;
+  --topbar-bg: #221409; --topbar-fg: #ecd9a6; --topbar-border: #c79a3e; --nav-fg: #7a6a55;
+  /* semantic */
+  --danger: #b23a2b; --ok: #3f7d4f; --done-mark: #1f7a6e;
+  --overlay: rgba(40,25,15,.45); --menu-shadow: rgba(60,40,20,.18);
+  /* type */
+  --font-display: 'Literata Variable', Georgia, serif;
+  --font-body: 'Inter Variable', system-ui, -apple-system, sans-serif;
+  --fs-display: 1.6rem; --fs-title: 1.3rem; --fs-body: 1rem; --fs-sm: .875rem; --fs-xs: .6875rem;
+  /* space & radius */
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px; --space-6: 24px; --space-7: 32px;
+  --radius-sharp: 3px; --radius: 7px; --radius-lg: 14px; --radius-spine: 16px; --radius-pill: 999px;
+  --radius-leaf: 4px 12px 4px 12px;
+  --shadow-card: 0 10px 22px -16px rgba(80,50,20,.5);
+  /* atmosphere */
+  --paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncA type='linear' slope='0.6'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="dark"] {
-  --bg: #0f1115;
-  --surface: #1b1f27;
-  --surface-2: #272e3f;
-  --text: #e5e7eb;
-  --text-muted: #9ca3af;
-  --text-faint: #6b7280;
-  --text-soft: #cbd5e1;
-  --border: #374151;
-  --accent: #818cf8;
-  --on-accent: #0f1115;
-  --on-danger: #0f1115;
-  --on-badge: #ffffff;
-  --strong-bg: #374151;
-  --strong-fg: #e5e7eb;
-  --topbar-bg: #0b0d12;
-  --topbar-fg: #e5e7eb;
-  --topbar-border: #374151;
-  --nav-fg: #9ca3af;
-  --chip-bg: #272e3f;
-  --chip-fg: #c7d2fe;
-  --chip-genre-bg: #313a52;
-  --badge-new-bg: #2e8b57;
-  --badge-reread-bg: #7c6bb0;
-  --star: #fbbf24;
-  --danger: #f87171;
-  --ok: #66bb6a;
-  --done-mark: #66bb6a;
-  --overlay: rgba(0, 0, 0, 0.6);
-  --menu-shadow: rgba(0, 0, 0, 0.5);
+  --bg: #14121d; --surface: #1d1a28; --surface-2: #2a2440;
+  --text: #f4ecda; --text-soft: #ece3d2; --text-muted: #bcb2a3; --text-faint: #6f6757;
+  --border: #4a3f5e;
+  --accent: #e3b85e; --on-accent: #1a160f; --on-danger: #1a160f; --on-badge: #ffffff;
+  --gilt: #e3b85e; --star: #e3b85e;
+  --glow: #45e0d0; --glow-soft: rgba(69,224,208,.6);
+  --spine: linear-gradient(180deg,#c64a3a,#8f2f24); --spine-glow: rgba(198,74,58,.7);
+  --page-edge: repeating-linear-gradient(90deg,rgba(227,184,94,.55) 0 1px,transparent 1px 4px);
+  --marker-new: #b9a6ff; --marker-enriched: #5fe6d7;
+  --chip-bg: rgba(124,92,255,.16); --chip-fg: #c7b9ff; --chip-genre-bg: #272e3f;
+  --chip-special-bg: rgba(69,224,208,.12); --chip-special-fg: #7af0e3;
+  --badge-new-bg: #2e8b57; --badge-reread-bg: #7c6bb0;
+  --strong-bg: #3a3168; --strong-fg: #ece3d2;
+  --topbar-bg: #1a0f08; --topbar-fg: #ecd9a6; --topbar-border: #b78b3f; --nav-fg: #9a8fb0;
+  --danger: #f08a7e; --ok: #79c089; --done-mark: #66bb6a;
+  --overlay: rgba(0,0,0,.6); --menu-shadow: rgba(0,0,0,.55);
+  --shadow-card: 0 12px 30px -18px rgba(0,0,0,.8);
 }
 
 * { box-sizing: border-box; }
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   background: var(--bg);
   color: var(--text);
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color .15s ease, color .15s ease;
 }
+/* parchment grain on the light ground only (background-only; never under body text directly) */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background-image: var(--paper); mix-blend-mode: multiply; opacity: .62;
+}
+:root[data-theme="dark"] body::before {
+  /* starfield: nebula glow + scattered stars */
+  background-image:
+    radial-gradient(60% 50% at 80% 0%, rgba(124,92,255,.16), transparent 60%),
+    radial-gradient(50% 50% at 5% 100%, rgba(69,224,208,.12), transparent 60%),
+    radial-gradient(1.5px 1.5px at 14% 24%, rgba(255,255,255,.8), transparent),
+    radial-gradient(1.6px 1.6px at 82% 54%, rgba(69,224,208,.8), transparent),
+    radial-gradient(1.5px 1.5px at 92% 30%, rgba(227,184,94,.85), transparent),
+    radial-gradient(1.2px 1.2px at 36% 74%, rgba(255,255,255,.5), transparent),
+    radial-gradient(1.3px 1.3px at 60% 88%, rgba(255,255,255,.45), transparent);
+  mix-blend-mode: normal; opacity: .9;
+}
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; color: var(--text); }
+h2 { font-size: var(--fs-display); }
 button { font: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--gilt); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  body, * { transition: none !important; }
+}

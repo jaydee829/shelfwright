@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -80,8 +80,31 @@ describe('RecommendationsView', () => {
     ])
     renderWithRouter()
 
-    expect(await screen.findByText('New')).toBeInTheDocument()
+    // 'new' (not-a-reread) recs no longer show a read-status badge — only 'reread' does.
+    await screen.findByText(/Re-read/)
+    expect(document.querySelector('.rec-badge.new')).toBeNull()
     expect(screen.getByText(/Re-read/)).toBeInTheDocument()
     expect(screen.getByText(/2019/)).toBeInTheDocument()
+  })
+
+  it('keeps "New" markers on the remaining recs after dismissing one (no mass-clear)', async () => {
+    localStorage.clear()
+    vi.mocked(getRecommendations).mockResolvedValueOnce([
+      { id: 'a', work_id: 'wa', title: 'Alpha', authors: ['A'], justification: null, context: null, suggested_at: null, status: 'Suggested' },
+      { id: 'b', work_id: 'wb', title: 'Beta', authors: ['B'], justification: null, context: null, suggested_at: null, status: 'Suggested' },
+    ])
+    renderWithRouter()
+    await screen.findByText('Alpha')
+    // both are new (localStorage was empty), so two markers + a "2 new" header
+    expect(screen.getAllByText('New')).toHaveLength(2)
+    expect(screen.getByText('2 new')).toBeInTheDocument()
+
+    const alphaCard = screen.getByText('Alpha').closest('article')!
+    await userEvent.click(within(alphaCard).getByRole('button', { name: /not for me/i }))
+    await waitFor(() => expect(screen.queryByText('Alpha')).not.toBeInTheDocument())
+
+    // Beta's marker must persist and the count decrement to 1 — it must NOT mass-clear to 0.
+    expect(screen.getAllByText('New')).toHaveLength(1)
+    expect(screen.getByText('1 new')).toBeInTheDocument()
   })
 })

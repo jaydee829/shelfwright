@@ -1,0 +1,51 @@
+/* ---- book-form card ---- */
+.book-card {
+  position: relative; overflow: hidden;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-spine) var(--radius-sharp) var(--radius-sharp) var(--radius-spine);
+  padding: var(--space-3) 28px var(--space-3) var(--space-4);
+  box-shadow: 0 1px 0 rgba(255,255,255,.6) inset, var(--shadow-card);
+}
+:root[data-theme="dark"] .book-card {
+  background: linear-gradient(180deg,#211d2e,#1b1826);
+  box-shadow: 0 0 0 1px rgba(227,184,94,.14), var(--shadow-card);
+}
+.book-card::before { /* spine */
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+  background: var(--spine); box-shadow: 0 0 10px -2px var(--spine-glow);
+}
+.book-card::after { /* page fore-edge */
+  content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 12px;
+  border-left: 1px solid var(--border); background: var(--page-edge);
+}
+
+/* ---- chips ---- */
+.chip {
+  display: inline-block; font-size: var(--fs-xs); font-weight: 500;
+  padding: 3px 9px; border-radius: var(--radius-leaf);
+  background: var(--chip-bg); color: var(--chip-fg);
+  /* outline ring so the leaf-cut pill reads even when the fill is close to the card surface */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--chip-fg) 32%, transparent);
+}
+.chip--special {
+  font-weight: 600; background: var(--chip-special-bg); color: var(--chip-special-fg);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--glow) 35%, transparent), 0 0 10px -2px var(--glow-soft);
+}
+
+/* ---- buttons ---- */
+.btn {
+  border: none; font: 600 var(--fs-sm)/1 var(--font-body);
+  padding: 8px 16px; border-radius: var(--radius); cursor: pointer;
+  background: var(--accent); color: var(--on-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gilt) 45%, transparent);
+}
+.btn--ghost {
+  background: transparent; color: var(--text);
+  border: 1px solid var(--border); box-shadow: none;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn--danger { background: var(--danger); color: var(--on-danger); box-shadow: none; }
+
+/* ---- view header (title + summary/link row) ---- */
+.view-head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-3); }

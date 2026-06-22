@@ -26,9 +26,9 @@ def client(db_url, monkeypatch):
     yield TestClient(api_main.app)
 
 
-def _seed_suggestion(manager, *, user_id, title, author, status="Suggested", justification="because"):
+def _seed_suggestion(manager, *, user_id, title, author, status="Suggested", justification="because", genres=None):
     with manager.get_session() as s:
-        work = Work(title=title)
+        work = Work(title=title, genres=genres)
         s.add(work)
         s.flush()
         a = Author(name=author)
@@ -43,7 +43,9 @@ def _seed_suggestion(manager, *, user_id, title, author, status="Suggested", jus
 
 def test_lists_only_active_suggestions_for_the_user(client, db_url):
     manager = DatabaseManager(db_url)
-    sid, wid = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Dune", author="Herbert")
+    sid, wid = _seed_suggestion(
+        manager, user_id=DEFAULT_USER_ID, title="Dune", author="Herbert", genres=["science-fiction"]
+    )
     _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Old Pick", author="X", status="Dismissed")
 
     body = client.get("/recommendations").json()
@@ -55,6 +57,7 @@ def test_lists_only_active_suggestions_for_the_user(client, db_url):
     assert row["authors"] == ["Herbert"]
     assert row["justification"] == "because"
     assert row["status"] == "Suggested"
+    assert row["genres"] == ["science-fiction"]
 
 
 def test_does_not_leak_another_users_suggestions(client, db_url):
@@ -109,3 +112,14 @@ def test_mark_read_removes_from_active_list(client, db_url):
     assert resp.status_code == 200
     assert resp.json() == {"id": str(sid), "status": "Read"}
     assert client.get("/recommendations").json() == []  # no longer "Suggested"
+
+
+def test_genres_defaults_to_empty_list_when_not_set(client, db_url):
+    """Work with no genres returns genres=[] (the `or []` fallback in the handler)."""
+    manager = DatabaseManager(db_url)
+    _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Genreless", author="Anon")
+
+    body = client.get("/recommendations").json()
+
+    assert len(body) == 1
+    assert body[0]["genres"] == []

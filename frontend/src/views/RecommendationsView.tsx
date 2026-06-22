@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { getRecommendations, setRecommendationStatus, type Recommendation } from '../api/client'
+import { GenreIcon } from '../components/GenreIcon'
+import { NewMarker } from '../components/NewMarker'
+import { computeNewIds, markSeen } from '../lib/lastVisit'
 import './RecommendationsView.css'
 
 function ReadBadge({ r }: { r: Recommendation }) {
@@ -9,7 +12,8 @@ function ReadBadge({ r }: { r: Recommendation }) {
     const stars = r.rating ? ` · ${'★'.repeat(r.rating)}` : ''
     return <span className="rec-badge reread">{year ? `Re-read · ${year}${stars}` : `Re-read${stars}`}</span>
   }
-  if (r.read_status === 'new') return <span className="rec-badge new">New</span>
+  // Recommendations are new-to-you by assumption, so a "New" (not-a-reread) badge is noise.
+  // Only the meaningful "Re-read" case gets a badge.
   return null
 }
 
@@ -17,23 +21,30 @@ export default function RecommendationsView() {
   const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const [newIds, setNewIds] = useState<Set<string>>(new Set())
 
+  // Load once: measure "new since last visit" BEFORE marking these ids seen, freeze it in state,
+  // then store the recs. A later dismiss only filters `recs` — `newIds` stays frozen, so the
+  // remaining markers persist and the header count (derived below) simply decrements.
   useEffect(() => {
-    void getRecommendations().then(setRecs)
+    void getRecommendations().then((data) => {
+      const ids = data.map((r) => r.id)
+      setNewIds(computeNewIds('recs', ids))
+      markSeen('recs', ids)
+      setRecs(data)
+    })
   }, [])
+
+  const visibleNewCount = useMemo(() => (recs ? recs.filter((r) => newIds.has(r.id)).length : 0), [recs, newIds])
 
   async function dismiss(id: string) {
     setBusy(id)
     try {
       await setRecommendationStatus(id, 'Dismissed')
-      setRecs((current) => (current ? current.filter((r) => r.id !== id) : current))
-    } finally {
-      setBusy(null)
-    }
+      setRecs((cur) => (cur ? cur.filter((r) => r.id !== id) : cur))
+    } finally { setBusy(null) }
   }
-
   function readThis(r: Recommendation) {
-    // Open the add-book form prefilled; on a successful add it marks this suggestion Read.
     navigate('/add', { state: { title: r.title, author: r.authors.join(', '), suggestionId: r.id } })
   }
 
@@ -42,10 +53,15 @@ export default function RecommendationsView() {
 
   return (
     <div>
-      <h2>Recommendations</h2>
+      <header className="view-head">
+        <h2>Recommendations</h2>
+        {visibleNewCount > 0 && <span className="view-head__summary">{visibleNewCount} new</span>}
+      </header>
       <div className="rec-list">
         {recs.map((r) => (
-          <article key={r.id} className="rec-card">
+          <article key={r.id} className="book-card rec-card">
+            <GenreIcon className="rec-genre" genres={r.genres} />
+            {newIds.has(r.id) && <NewMarker kind="new" />}
             <div className="rec-head">
               <span className="rec-title">{r.title}</span>
               <span className="rec-authors">{r.authors.join(', ')}</span>
@@ -53,8 +69,8 @@ export default function RecommendationsView() {
             </div>
             {r.justification && <p className="rec-why">{r.justification}</p>}
             <div className="rec-actions">
-              <button onClick={() => readThis(r)}>✓ I read this</button>
-              <button onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
+              <button className="btn" onClick={() => readThis(r)}>✓ I read this</button>
+              <button className="btn btn--ghost" onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
             </div>
           </article>
         ))}

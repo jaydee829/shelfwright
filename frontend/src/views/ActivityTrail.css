@@ -1,9 +1,71 @@
-.activity-trail { align-self: flex-start; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--text-muted); }
-.activity-trail.done { margin: 2px 0; }
-.trail-step { display: flex; align-items: center; gap: 6px; }
-.trail-step.milestone .trail-text { font-style: italic; }
-.trail-mark { display: inline-block; width: 1em; text-align: center; }
-.trail-mark.running { animation: trail-spin 1s linear infinite; }
-.trail-mark.done { color: var(--done-mark); }
-.trail-toggle { background: none; border: none; padding: 0; color: var(--text-muted); cursor: pointer; font-size: 13px; text-align: left; }
+/* ---- ActivityTrail ---- */
+.activity-trail {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+.activity-trail.done {
+  margin: var(--space-1) 0;
+}
+
+/* separator between consecutive steps (connector line treatment) */
+.activity-trail .trail-step + .trail-step {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-1);
+}
+
+.trail-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* milestone step: italicise label for a distinct cadence */
+.trail-step.milestone .trail-text {
+  font-style: italic;
+}
+
+.trail-mark {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* running marker: accent colour to signal in-progress */
+.trail-mark.running {
+  color: var(--accent);
+  animation: trail-spin 1s linear infinite;
+}
+
+/* done marker: gilt tone as the "found it" signal */
+.trail-mark.done {
+  color: var(--gilt);
+}
+
+.trail-text {
+  color: var(--text-muted);
+}
+
+/* toggle button that reveals a completed trail */
+.trail-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--fs-sm);
+  font-family: var(--font-body);
+  text-align: left;
+  transition: color .12s ease;
+}
+
+.trail-toggle:hover {
+  color: var(--text);
+}
+
 @keyframes trail-spin { to { transform: rotate(360deg); } }

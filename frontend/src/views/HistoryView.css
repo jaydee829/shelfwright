@@ -1,25 +1,71 @@
-.history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
-.history-row {
-  display: flex; justify-content: space-between; align-items: center; gap: 12px;
-  padding: 12px; border: 1px solid var(--surface-2); border-radius: 10px;
+/* ---- layout ---- */
+.history-import-link { font-size: var(--fs-sm); color: var(--text-muted); }
+
+.history-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+
+/* ---- history card (extends .book-card) ---- */
+.history-row { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.history-main { display: flex; flex-direction: column; gap: 2px; }
+.history-title {
+  font-family: var(--font-display); font-weight: 500; font-size: var(--fs-title);
+  color: var(--text);
 }
-.history-main { display: flex; flex-direction: column; }
-.history-title { font-weight: 600; }
-.history-authors { color: var(--text-muted); font-size: 14px; }
-.history-meta { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--text-muted); }
+.history-authors { color: var(--text-muted); font-size: var(--fs-sm); font-style: italic; }
+
+.history-meta { display: flex; gap: var(--space-3); align-items: center; font-size: var(--fs-sm); color: var(--text-muted); }
 .history-rating { color: var(--star); }
-.history-tropes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
-.trope-chip { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--chip-bg); color: var(--chip-fg); }
-.trope-chip.genre { background: var(--chip-genre-bg); font-weight: 600; }
-.trope-chip.enriching { background: transparent; color: var(--text-muted); font-style: italic; padding-left: 0; }
-.history-row { position: relative; }
-.history-actions { position: absolute; top: 6px; right: 6px; }
-.kebab { background: none; border: none; font-size: 18px; line-height: 1; padding: 2px 6px; cursor: pointer; color: var(--text-muted); }
-.row-menu { position: absolute; right: 0; top: 100%; z-index: 5; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 4px 12px var(--menu-shadow); display: flex; flex-direction: column; min-width: 96px; }
-.row-menu button { background: none; border: none; text-align: left; padding: 8px 12px; cursor: pointer; }
-.row-menu button:hover { background: var(--surface); }
-.confirm-backdrop { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; z-index: 50; }
-.confirm-box { background: var(--bg); border-radius: 12px; padding: 20px; max-width: 22rem; }
-.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-.confirm-error { color: var(--danger); font-size: 0.9rem; margin-top: 8px; }
-.confirm-actions .danger { background: var(--danger); color: var(--on-danger); border: none; border-radius: 6px; padding: 6px 12px; }
+.history-format { text-transform: capitalize; }
+
+/* ---- chips row ---- */
+.history-tropes { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+/* Tropes use the base .chip "secondary trope" colour (§1.1): warm tan by day, violet by night.
+   No glow here — the violet/teal glow (--chip-special-*) is reserved for the highlighted "why"
+   trope on recommendations. Genre is the gilt-gold identity (genre == gold, §7), which also keeps
+   it distinct from the violet tropes in dark. */
+.history-tropes .history-genre {
+  background: color-mix(in srgb, var(--gilt) 46%, var(--surface));
+  color: color-mix(in srgb, var(--gilt) 62%, var(--text));
+  font-weight: 600;
+  /* gilt ring (the base .chip ring follows --chip-fg, which is now oxblood for tropes) */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gilt) 48%, transparent);
+}
+.history-enriching { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
+
+/* ---- kebab action menu ---- */
+/* right offset clears the 12px book-card fore-edge decoration */
+.history-actions { position: absolute; top: var(--space-2); right: var(--space-5); }
+.kebab {
+  background: none; border: none; font-size: 18px; line-height: 1;
+  padding: 2px 6px; cursor: pointer; color: var(--text-muted);
+}
+.kebab:hover { color: var(--text); }
+.row-menu {
+  position: absolute; right: 0; top: 100%; z-index: 5;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: 0 4px 12px var(--menu-shadow);
+  display: flex; flex-direction: column; min-width: 96px;
+}
+.row-menu button {
+  background: none; border: none; text-align: left;
+  padding: var(--space-2) var(--space-3); cursor: pointer; color: var(--text);
+  font-size: var(--fs-sm);
+}
+.row-menu button:hover { background: var(--surface-2); }
+
+/* ---- load more ---- */
+.history-load-more { display: block; margin: var(--space-4) auto 0; }
+
+/* ---- confirm dialog ---- */
+.confirm-backdrop {
+  position: fixed; inset: 0; background: var(--overlay);
+  display: grid; place-items: center; z-index: 50;
+}
+.confirm-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: var(--space-5); max-width: 22rem;
+  box-shadow: 0 8px 30px var(--menu-shadow);
+  color: var(--text);
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-3); }
+.confirm-error { color: var(--danger); font-size: var(--fs-sm); margin-top: var(--space-2); }

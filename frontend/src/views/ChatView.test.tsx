@@ -103,4 +103,16 @@ describe('ChatView', () => {
     await waitFor(() => expect(screen.getByText('Try Dune.')).toBeInTheDocument())
     expect(screen.getByRole('button', { name: /how i found these \(1 step\)/i })).toBeInTheDocument()
   })
+
+  it('renders **bold** in assistant replies but leaves snake_case alone', async () => {
+    vi.mocked(getCurrentConversation).mockResolvedValue({
+      id: 'c1',
+      messages: [{ role: 'assistant', content: 'Try **Dune** via search_internal_database.' }],
+    })
+    render(<ChatView />)
+    // bold renders without the asterisks…
+    expect(await screen.findByText('Dune')).toBeInTheDocument()
+    // …and snake_case stays intact (the _internal_ run is NOT italicised/split)
+    expect(screen.getByText(/search_internal_database/)).toBeInTheDocument()
+  })
 })

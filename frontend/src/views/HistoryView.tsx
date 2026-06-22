@@ -54,11 +54,13 @@ export default function HistoryView() {
 
   return (
     <div>
-      <h2>Reading history</h2>
-      <Link to="/import">Import history</Link>
+      <header className="view-head">
+        <h2>Reading history</h2>
+        <Link to="/import" className="history-import-link">Import history</Link>
+      </header>
       <ul className="history-list">
         {items.map((h) => (
-          <li key={h.id} className="history-row">
+          <li key={h.id} className="book-card history-row">
             <div className="history-main">
               <span className="history-title">{h.title}</span>
               <span className="history-authors">{h.authors.join(', ')}</span>
@@ -71,13 +73,13 @@ export default function HistoryView() {
             <div className="history-tropes">
               {h.tropes && h.tropes.length > 0 ? (
                 <>
-                  {h.genre && <span className="trope-chip genre">{h.genre}</span>}
+                  {h.genre && <span className="chip history-genre">{h.genre}</span>}
                   {h.tropes.map((t) => (
-                    <span key={t} className="trope-chip">{t}</span>
+                    <span key={t} className="chip">{t}</span>
                   ))}
                 </>
               ) : (
-                <span className="trope-chip enriching">Enriching…</span>
+                <span className="history-enriching">Enriching…</span>
               )}
             </div>
             <div className="history-actions">
@@ -114,7 +116,7 @@ export default function HistoryView() {
         ))}
       </ul>
       {hasMore && (
-        <button className="history-load-more" onClick={() => void loadMore()} disabled={loadingMore}>
+        <button className="btn btn--ghost history-load-more" onClick={() => void loadMore()} disabled={loadingMore}>
           {loadingMore ? 'Loading…' : 'Load more'}
         </button>
       )}
@@ -128,6 +130,7 @@ export default function HistoryView() {
             {error && <p className="confirm-error">{error}</p>}
             <div className="confirm-actions">
               <button
+                className="btn btn--ghost"
                 onClick={() => {
                   setConfirm(null)
                   setError(null)
@@ -136,7 +139,7 @@ export default function HistoryView() {
               >
                 Cancel
               </button>
-              <button className="danger" onClick={() => void doDelete()} disabled={deleting}>
+              <button className="btn btn--danger" onClick={() => void doDelete()} disabled={deleting}>
                 {deleting ? 'Deleting…' : 'Delete entry'}
               </button>
             </div>

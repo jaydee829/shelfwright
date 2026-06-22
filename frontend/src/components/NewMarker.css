@@ -1,0 +1,12 @@
+.new-marker { display: inline-flex; align-items: center; gap: 6px; }
+.new-marker > svg { filter: drop-shadow(0 0 6px currentColor); }
+.new-marker--new > svg { color: var(--marker-new); }
+.new-marker--enriched > svg { color: var(--marker-enriched); }
+.new-marker__label {
+  font: 600 9px/1 var(--font-body); letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: var(--radius-pill);
+}
+.new-marker--new .new-marker__label { color: var(--chip-special-fg); background: var(--chip-special-bg); }
+.new-marker--enriched .new-marker__label { color: #14756d; background: #dff3f0; }
+:root[data-theme="dark"] .new-marker--enriched .new-marker__label { color: #7af0e3; background: rgba(69,224,208,.14); }
+@media (prefers-reduced-motion: reduce) { .new-marker > svg { filter: none; } }
