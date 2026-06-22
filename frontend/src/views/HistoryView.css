@@ -27,6 +27,8 @@
   background: color-mix(in srgb, var(--gilt) 46%, var(--surface));
   color: color-mix(in srgb, var(--gilt) 62%, var(--text));
   font-weight: 600;
+  /* gilt ring (the base .chip ring follows --chip-fg, which is now oxblood for tropes) */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--gilt) 48%, transparent);
 }
 .history-enriching { font-size: var(--fs-xs); color: var(--text-faint); font-style: italic; }
 
