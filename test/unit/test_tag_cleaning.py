@@ -157,3 +157,24 @@ def test_clean_moods_inventory_curation(raw, expected):
 )
 def test_clean_genres_round2(raw, expected):
     assert tc.clean_genres(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ([f"science-fiction-fantasy-{UUID}"], ["Science Fiction", "Fantasy"]),  # combo split
+        ([f"audiobook-{UUID}"], []),  # denylist drop
+        (["enemies-to-lovers"], ["Enemies To Lovers"]),  # genuine trope: titlecase
+        (["chosen-one"], ["Chosen One"]),
+        ([f"fast-paced-{UUID}"], ["Fast Paced"]),  # mood-slug canonicalizes
+        (["1735855214708"], []),  # numeric junk
+    ],
+)
+def test_clean_trope_name(raw, expected):
+    assert tc.clean_trope_name(raw[0]) == expected
+
+
+def test_clean_trope_name_is_idempotent():
+    for raw in ["science-fiction-fantasy", "enemies-to-lovers", "Chosen One"]:
+        once = tc.clean_trope_name(raw)
+        assert once == [x for v in once for x in tc.clean_trope_name(v)]
