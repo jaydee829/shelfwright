@@ -4,12 +4,15 @@
   gap: 2px; padding: 10px; text-decoration: none; color: var(--nav-fg); flex: 1;
   font-family: var(--font-body);
 }
-.nav-item.active { color: var(--text); font-weight: 600; background: var(--surface-2); }
+.nav-icon { display: flex; color: var(--gilt); }   /* icons carry the gold in both states */
+.nav-icon svg { display: block; }
+.nav-label { font-size: 12px; color: var(--nav-fg); }
+.nav-item.active { background: var(--surface-2); }
+.nav-item.active .nav-label { color: var(--text); font-weight: 600; }
+.nav-item.active .nav-icon svg { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--gilt) 70%, transparent)); }
 .nav-item.active::after { /* spine-style indicator */
   content: ""; position: absolute; background: var(--spine); box-shadow: 0 0 8px -2px var(--spine-glow);
 }
-.nav-icon { font-size: 20px; }
-.nav-label { font-size: 12px; }
 
 /* Mobile-first: fixed bottom bar; indicator across the top of the active item */
 .nav {
