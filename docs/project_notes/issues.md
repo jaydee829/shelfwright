@@ -12,6 +12,21 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-23 - FRONTEND-NEXT: frontend backlog / next directions
+- **Status**: Open (backlog — picked from a "what's next" review; frontend is visually in a good place after Visual Identity v2 + nav/import polish)
+- **Description**: Candidate next frontend work, split by whether it needs the backend bench.
+- **URL**: GitHub issues #13, #57, #68, #56
+- **Notes**:
+  - **Frontend-only (no bench dependency):**
+    - **Analysis viz upgrade (GH #13 "Phase 4: Web Interface and Analysis")** — `/analysis` already returns `top_tropes`/`genres`/`moods`/`formats`/`authors`/`narrators`; build a **Trope Cloud + charted genres/moods/formats** with these. (Adds Recharts, or do it CSS/SVG to stay dependency-light — a design choice.) Recommended starting point.
+    - **"Links to works" MVP (GH #57)** — "Find on Amazon/Libby/Hoopla" buttons on rec/history cards generated from title+author search URLs (no backend). Deep links via ISBN need the bench later.
+    - **GenreIcon regex tightening** — newly unblocked now that the bench standardized genres (tag-cleaning PRs #60/#61/#63/#64); ensure every canonical genre maps to an icon. See memory `genreicon-regex-revisit`.
+    - **Visual Identity v2 small fast-follows** — `NewMarker kind="enriched"` (teal) variant; font `<link rel=preload>` + weight subsetting.
+  - **Frontend + a small bench ask (coordinate):**
+    - **"Why this rec" highlight + trope chips on Recommendations (GH #68)** — the reserved `.chip--special` glow tier (designed in VI v2 PR #59, currently unused) wired to real data; needs `tropes` + a "why"/driver flag in the `GET /recommendations` payload (additive, same precedent as the `genres` field). See memory `visual-identity-v2-design`.
+    - **Author-Style radar (part of GH #13)** — needs `/analysis` to expose author/narrator style attributes (in the DB, not in the payload yet).
+  - **Backend-heavy (NOT frontend):** GH #56 (read a URL in chat → enrich the listed books) — explorer/scout work for the bench.
+
 ### 2026-06-15..17 - BETA-FEEDBACK: ship + deploy operator's beta feedback (A1–E1)
 - **Status**: Completed + deployed
 - **Description**: Triaged the operator's friends-and-family beta feedback into 8 items and shipped each
