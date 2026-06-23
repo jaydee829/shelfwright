@@ -60,21 +60,40 @@ applying — a genuine trope that somehow lacked a justification would be visibl
 
 ---
 
-## Part A — Persist logic fix (`persist.py`, both directions)
+## Part A — Persist logic fix (Shape B: the fast pass writes no throwaway fallbacks)
 
-Make the two-phase passes converge to "real tropes win, fallbacks are the stopgap":
+The pollution is purely the fast pass writing genre/mood fallback tropes that the deep pass always
+supersedes. Rather than write-then-delete, the fast pass **opts out** of fallback tropes and the deep
+pass is the single authoritative trope write — no churn, no "delete NULL links inside persist".
 
-- **Real branch (`if enriched_tropes:`):** *before* adding the scout tropes, delete the work's
-  existing fallback links — `WorkTrope` rows for this work with `justification IS NULL`. (Delete
-  first, then add, so a scout trope that itself happens to lack a justification — added in this same
-  pass — survives.) Net: the deep pass clears the fast pass's fallback layer.
-- **Fallback branch (`else:`):** only write fallbacks if the work has **no** real trope yet — i.e.
-  skip the loop when a `WorkTrope` with `justification IS NOT NULL` already exists for this work. Net:
-  a fast pass can't bolt a fallback layer onto a work that already has real tropes (covers the
-  deep-then-fast order too).
+- **`persist_enriched_work` honours a `write_fallback_tropes` row flag (default `True`).** The `else`
+  (fallback) branch fires only when (a) the caller wants fallbacks **and** (b) the work has no real
+  (`justification IS NOT NULL`) trope yet:
+  ```python
+  else:
+      has_real = (
+          session.query(WorkTrope)
+          .filter(WorkTrope.work_id == work.id, WorkTrope.justification.isnot(None))
+          .first()
+          is not None
+      )
+      if row.get("write_fallback_tropes", True) and not has_real:
+          <write genre/mood fallback tropes, exactly as today>
+  ```
+  The `has_real` guard is cheap defence against re-enrichment ordering — a later tropes-less deep pass
+  can't bolt a fallback layer onto a work that already has real tropes.
+- **`two_phase._scout_and_persist` gains `write_fallback_tropes` (default `True`); `enrich_fast`
+  passes `False`.** The fast pass still writes the work's genres/moods (displayed) but **no** fallback
+  tropes; the deep pass (default `True`) writes real scout tropes — or, only if the deep scout returns
+  none, the genre/mood fallback (the legit stopgap, now produced by the authoritative pass).
+- **Single-pass / non-import callers** (`mcp/server.py:690`, `orchestration/assets.py:117`) don't pass
+  the flag → default `True` → unchanged behaviour (fallback stopgap when a one-shot enrichment yields
+  no tropes; the original 330-book catalog build relied on this).
 
-This keeps the stopgap intact: a work that only ever gets a fast pass (no real tropes) still receives
-its genre/mood fallback layer.
+Result: imported works never accumulate a throwaway fallback layer. The only behaviour change: during
+the fast→deep gap (or if a deep pass *permanently* fails) an imported book shows its genres/moods but
+no tropes — the deferred work-representation refactor is the eventual home for genre/mood matching
+signal on trope-less works.
 
 ## Part B — One-time data prune
 
@@ -108,9 +127,10 @@ distinguisher and waste embedding calls on fallback rows about to be deleted.
 
 - **db_integration** (`test/integration/`): seed a work with real (justified) + fallback (NULL) tropes
   → `apply_fallback_prune` deletes only the NULL ones, keeps the real; a work with **only** fallbacks
-  is untouched; a second apply is a no-op. Persist: a deep pass after a fast pass leaves only real
-  tropes; a fast pass on a work that already has real tropes adds no fallback layer; a fast-pass-only
-  work keeps its fallbacks.
+  is untouched; a second apply is a no-op. Persist (Shape B): a fast pass (`write_fallback_tropes=False`)
+  writes genres/moods but **no** tropes; a following deep pass leaves only real tropes (no fallback
+  layer ever existed). A deep/one-shot pass whose scout returns no tropes writes the genre/mood
+  fallback (default flag); a fallback write is skipped when the work already has a real trope.
 - **Unit** where pure logic is extractable (e.g. the polluted-work selection).
 - `uvx ruff@0.15.16 format` before each commit (CI gate).
 
