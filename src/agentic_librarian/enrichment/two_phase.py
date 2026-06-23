@@ -45,7 +45,9 @@ def _normalized_col(col):
     return func.trim(func.regexp_replace(func.lower(col), r"\s+", " ", "g"))
 
 
-def _scout_and_persist(session, manager, *, title: str, author: str, fmt: str) -> Work | None:
+def _scout_and_persist(
+    session, manager, *, title: str, author: str, fmt: str, write_fallback_tropes: bool = True
+) -> Work | None:
     """Run a scout tier and persist via the shared function. Returns the Work, or None
     if the scouts found nothing / the row had no usable contributors. date_completed=None
     so persist writes NO reading_history (and needs no user context) — the read-event is
@@ -58,6 +60,7 @@ def _scout_and_persist(session, manager, *, title: str, author: str, fmt: str) -
         "Author_1": author,
         "format": fmt,
         "skip_enrichment": False,
+        "write_fallback_tropes": write_fallback_tropes,
         "date_completed": None,
         **enriched,
         "genres": list(enriched.get("genres") or []),
@@ -84,7 +87,14 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
         if existing:
             return existing.id, False
 
-        work = _scout_and_persist(session, create_fast_scout_manager(), title=title, author=author, fmt=fmt)
+        work = _scout_and_persist(
+            session,
+            create_fast_scout_manager(),
+            title=title,
+            author=author,
+            fmt=fmt,
+            write_fallback_tropes=False,
+        )
         if work is None:
             return None
         session.flush()
