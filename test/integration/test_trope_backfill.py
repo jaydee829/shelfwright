@@ -44,3 +44,30 @@ def test_apply_is_idempotent(db_url):
         assert session.query(WorkTrope).filter_by(work_id=w.id).count() == 0
         # second run is a no-op
         assert tb.apply_trope_changes(session, trope_manager=None) == 0
+
+
+def test_split_distributes_links_to_all_canonicals_and_is_idempotent(db_url):
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        dirty = Trope(name=f"science-fiction-fantasy-{UUID}")
+        w1 = Work(title="Split W1")
+        w2 = Work(title="Split W2")
+        session.add_all([dirty, w1, w2])
+        session.flush()
+        session.add(WorkTrope(work_id=w1.id, trope_id=dirty.id, relevance_score=0.8))
+        session.add(WorkTrope(work_id=w2.id, trope_id=dirty.id, relevance_score=0.5))
+        session.flush()
+
+        tb.apply_trope_changes(session, trope_manager=None)
+        session.flush()
+
+        # BOTH works linked to BOTH canonicals
+        for w in (w1, w2):
+            linked = {
+                session.get(Trope, wt.trope_id).name for wt in session.query(WorkTrope).filter_by(work_id=w.id).all()
+            }
+            assert linked == {"Science Fiction", "Fantasy"}
+        assert f"science-fiction-fantasy-{UUID}" not in {t.name for t in session.query(Trope).all()}
+
+        # second apply is a no-op (everything already clean)
+        assert tb.apply_trope_changes(session, trope_manager=None) == 0

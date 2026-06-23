@@ -64,6 +64,8 @@ def embedding_call_estimate(session: Session) -> int:
 
 def _move_links(session: Session, src: Trope, dst: Trope) -> None:
     """Re-point every work_tropes(src) onto dst, folding score/justification on PK collision."""
+    if src.id == dst.id:
+        return
     for wt in session.query(WorkTrope).filter_by(trope_id=src.id).all():
         target = session.query(WorkTrope).filter_by(work_id=wt.work_id, trope_id=dst.id).first()
         if target is not None:
@@ -124,12 +126,29 @@ def apply_trope_changes(session: Session, trope_manager=None, changes: list[Trop
                 src.name = new  # keep embedding
             n += 1
             continue
-        for name in c.names_after:  # material: split/canonicalise
+        # material: split/canonicalise. Snapshot src's links FIRST, then fan them out to every
+        # canonical — otherwise the first canonical would consume them and the rest get none.
+        src_links = session.query(WorkTrope).filter_by(trope_id=src.id).all()
+        for name in c.names_after:
             dst = _get_or_create_trope(session, trope_manager, name)
             if dst.id == src.id:
                 continue
-            _move_links(session, src, dst)
-        _delete_trope(session, src)
+            for wt in src_links:
+                target = session.query(WorkTrope).filter_by(work_id=wt.work_id, trope_id=dst.id).first()
+                if target is not None:
+                    target.relevance_score = max(target.relevance_score, wt.relevance_score)
+                    target.justification = target.justification or wt.justification
+                else:
+                    session.add(
+                        WorkTrope(
+                            work_id=wt.work_id,
+                            trope_id=dst.id,
+                            relevance_score=wt.relevance_score,
+                            justification=wt.justification,
+                        )
+                    )
+            session.flush()
+        _delete_trope(session, src)  # removes src + its now-superseded work_tropes
         n += 1
     return n
 
