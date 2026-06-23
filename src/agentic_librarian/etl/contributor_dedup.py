@@ -59,9 +59,10 @@ def _merge_authors(session: Session) -> list[ContributorChange]:
                     .filter_by(work_id=wc.work_id, author_id=survivor.id, role=wc.role)
                     .first()
                 )
-                session.delete(wc)
-                if target is None:
-                    session.add(WorkContributor(work_id=wc.work_id, author_id=survivor.id, role=wc.role))
+                if target is not None:
+                    session.delete(wc)  # survivor already has this (work, role) — drop the true dup
+                else:
+                    wc.author_id = survivor.id  # re-point the PK in place
             # author_styles: re-point unless (survivor, style, attr) already exists
             for st in session.query(AuthorStyle).filter_by(author_id=loser.id).all():
                 target = (
@@ -69,11 +70,10 @@ def _merge_authors(session: Session) -> list[ContributorChange]:
                     .filter_by(author_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
                     .first()
                 )
-                session.delete(st)
-                if target is None:
-                    session.add(
-                        AuthorStyle(author_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
-                    )
+                if target is not None:
+                    session.delete(st)
+                else:
+                    st.author_id = survivor.id
             session.flush()  # land re-points before deleting the loser row (no dangling FK)
             session.delete(loser)
         session.flush()
@@ -117,11 +117,10 @@ def _merge_narrators(session: Session) -> list[ContributorChange]:
                     .filter_by(narrator_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
                     .first()
                 )
-                session.delete(st)
-                if target is None:
-                    session.add(
-                        NarratorStyle(narrator_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
-                    )
+                if target is not None:
+                    session.delete(st)
+                else:
+                    st.narrator_id = survivor.id
             session.flush()
             session.delete(loser)
         session.flush()

@@ -213,6 +213,9 @@ def persist_enriched_work(
     narrator_names = row.get("narrator_names")
     if not isinstance(narrator_names, list):
         narrator_names = []
+    # Keep only non-empty strings: a malformed/NaN element would crash the norm_name/.lower() calls
+    # below (mirrors the raw_contributors name guard above).
+    narrator_names = [n for n in narrator_names if isinstance(n, str) and n.strip()]
     narrator_styles = row.get("narrator_styles")
     if not isinstance(narrator_styles, dict):
         narrator_styles = {}

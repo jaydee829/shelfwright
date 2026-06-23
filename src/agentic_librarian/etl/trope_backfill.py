@@ -81,20 +81,15 @@ def _move_links(session: Session, src: Trope, dst: Trope) -> None:
             target.justification = target.justification or wt.justification
             session.delete(wt)
         else:
-            session.add(
-                WorkTrope(
-                    work_id=wt.work_id,
-                    trope_id=dst.id,
-                    relevance_score=wt.relevance_score,
-                    justification=wt.justification,
-                )
-            )
-            session.delete(wt)
+            wt.trope_id = dst.id  # re-point the PK in place (no collision)
     session.flush()
 
 
 def _delete_trope(session: Session, t: Trope) -> None:
-    session.query(WorkTrope).filter_by(trope_id=t.id).delete()
+    # Delete links one-by-one (not a bulk query.delete) so the ORM session/identity map stays
+    # consistent — a bulk delete would leave stale WorkTrope instances (e.g. the src_links snapshot).
+    for wt in session.query(WorkTrope).filter_by(trope_id=t.id).all():
+        session.delete(wt)
     session.flush()
     session.delete(t)
     session.flush()
