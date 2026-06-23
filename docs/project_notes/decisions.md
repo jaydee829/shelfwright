@@ -770,3 +770,31 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - No DB migration. Cannot distinguish failed/empty/never-ran from in-flight (perpetual "Enriching…") —
   logged as DEBT-035 for a future timeout sweep. PR #52 (`93c2d8f`).
+
+### ADR-051: Deep-enrichment concurrency + memory tuning (enrich queue=4, Cloud Run=2Gi) (2026-06-23)
+**Context:**
+- The first real new-user bulk import OOM-stormed the deep-enrichment scouts (Trope/Style/Audiobook/
+  DirectKnowledge, run via Cloud Tasks → `POST /internal/enrich/{work_id}`). The `librarian-enrich` queue
+  had `maxConcurrentDispatches=1000` while Cloud Run `librarian-api` was `512Mi / cpu 1 /
+  containerConcurrency=80 / maxScale=2`. Cloud Run only scales out as an instance nears its concurrency
+  target (80), so a burst of deep tasks gets packed onto ONE 512Mi instance and shares it → 54 OOM kills
+  (`Memory limit of 512 MiB exceeded`), 404×503 + 26×500 on `/internal/enrich`.
+- No data was lost — Cloud Tasks `maxAttempts=100` retried every work through (116/116 enrich + 122/122
+  import-row eventually 200, 0 permanent failures), and the fast/import phase is unaffected so the History
+  UI looked complete. But it was wasteful (every 503 = a discarded LLM-scout run = wasted API spend +
+  latency) and fragile (a larger import could exhaust 100 attempts and silently drop a work's enrichment).
+**Decision:**
+- Throttle the `librarian-enrich` queue to `max-concurrent-dispatches=4` / `max-dispatches-per-second=5`,
+  and raise Cloud Run `librarian-api` memory `512Mi → 2Gi` (revision `librarian-api-00014-c87`). Applied
+  2026-06-23 via `gcloud` (no code change). The **queue's concurrency is the tuning knob** — it targets
+  only deep enrichment; budget **~½ GiB instance headroom per concurrent deep scout** (4 ↔ 2Gi).
+**Alternatives Considered:**
+- Lower Cloud Run `containerConcurrency` to force tasks across instances → rejected: it's service-wide and
+  would also throttle the user-facing API on the same service.
+- Serial (`max-concurrent-dispatches=1`) → rejected: too slow to drain. `8 / 4Gi` → deferred: more
+  per-instance cost while active; `4 / 2Gi` is the balanced point (~4× serial throughput).
+**Consequences:**
+- Eliminates the OOM storm + retry waste for future imports; the affected user's data was already fully
+  enriched (no re-run needed). Memory is billed only while enriching (service scales to zero when idle).
+- **On any re-deploy or queue edit these settings must be preserved or the OOM returns** — flagged on the
+  coordination board and in `key_facts.md` (Production). Pure infra (gcloud), no PR/code change; verified live.

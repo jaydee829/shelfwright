@@ -78,6 +78,13 @@ This file tracks important project configuration, constants, and environment det
 - **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
   `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.
+- **Async enrichment scaling** (ADR-051, tuned 2026-06-23 after an OOM storm on the first real bulk
+  import): Cloud Run `librarian-api` memory = **2Gi** (was 512Mi — too small for the deep LLM scouts);
+  Cloud Tasks `librarian-enrich` queue = **max-concurrent-dispatches=4 / max-dispatches-per-second=5**
+  (was 1000/500). `librarian-import` queue stays 5/2. Deep tasks share ONE instance (Cloud Run won't
+  scale out below its concurrency target of 80), so budget **~½ GiB per concurrent deep scout**; the
+  queue's concurrency is the tuning knob (NEVER lower service-wide `containerConcurrency`). **Preserve
+  these on any redeploy/queue edit or the OOM 503-storm returns.**
 - **Cost guardrail**: $25/mo budget, email alerts at 50/90/100% (~$12–16/mo expected).
 
 ## Frontend Theming (light/dark)
