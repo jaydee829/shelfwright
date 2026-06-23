@@ -19,8 +19,16 @@ def norm_name(name: str | None) -> str:
 
 
 def _pick_survivor(rows: list):
-    """Best-cased name wins (any uppercase > all-lowercase); deterministic id tiebreak."""
-    return sorted(rows, key=lambda r: (0 if any(c.isupper() for c in r.name) else 1, str(r.id)))[0]
+    """Cleanest display name wins: no surrounding whitespace first, then any-uppercase over
+    all-lowercase; deterministic id tiebreak (so it never depends on random UUID order)."""
+    return sorted(
+        rows,
+        key=lambda r: (
+            0 if r.name == r.name.strip() else 1,
+            0 if any(c.isupper() for c in r.name) else 1,
+            str(r.id),
+        ),
+    )[0]
 
 
 def _dup_groups(rows: list) -> list[list]:
@@ -41,6 +49,7 @@ def _merge_authors(session: Session) -> list[ContributorChange]:
     changes: list[ContributorChange] = []
     for group in _dup_groups(session.query(Author).all()):
         survivor = _pick_survivor(group)
+        survivor.name = survivor.name.strip()  # store a clean display name (no stray whitespace)
         losers = [a for a in group if a.id != survivor.id]
         for loser in losers:
             # work_contributors: re-point unless (work, survivor, role) already exists (true dup)
@@ -76,6 +85,7 @@ def _merge_narrators(session: Session) -> list[ContributorChange]:
     changes: list[ContributorChange] = []
     for group in _dup_groups(session.query(Narrator).all()):
         survivor = _pick_survivor(group)
+        survivor.name = survivor.name.strip()  # store a clean display name (no stray whitespace)
         losers = [n for n in group if n.id != survivor.id]
         for loser in losers:
             # edition_narrators is a Core association table -> operate via Core statements

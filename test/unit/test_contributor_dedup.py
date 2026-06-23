@@ -26,6 +26,13 @@ def test_pick_survivor_prefers_cased_then_lowest_id():
     assert cd._pick_survivor(rows_lower).id == "a"  # tie -> lowest id
 
 
+def test_pick_survivor_prefers_stripped_over_trailing_whitespace():
+    # both have an uppercase C, so the casing key ties — the stripped name must win
+    # deterministically (not by random UUID order). Higher id on the clean one proves it.
+    rows = [_Row("Casualfarmer ", "a"), _Row("Casualfarmer", "z")]
+    assert cd._pick_survivor(rows).name == "Casualfarmer"
+
+
 def test_dup_groups_only_returns_groups_over_one():
     rows = [_Row("A", "1"), _Row("a", "2"), _Row("B", "3")]
     groups = cd._dup_groups(rows)
