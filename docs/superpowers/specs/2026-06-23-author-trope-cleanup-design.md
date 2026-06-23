@@ -30,7 +30,7 @@ strips signal. So we **clean** them (the same way we cleaned genres/moods) — p
 
 ## Goals
 
-- No duplicate authors on a work; a guard so it can't recur.
+- No duplicate authors or narrators (case/whitespace variants merged); a guard so it can't recur.
 - Trope names cleaned with the **same pipeline as genres/moods**: UUID-strip → combo-split →
   canonicalize (alias) → drop junk → **title-case**. `work_tropes` links migrated, duplicates merged,
   changed names re-embedded. A guard so the fallback path can't write dirty tropes again.
@@ -42,15 +42,21 @@ candidate-search to use genres/moods. (Deferred — separate spec.)
 
 ---
 
-## Part A — Author dedup + guard
+## Part A — Contributor dedup (authors + narrators) + guard
+
+Both contributor tables — `Author` (used by `work_contributors` at any role: Author, Editor, …) and
+`Narrator` (used by `edition_narrators`) — have the same dup-by-name flaw: `persist.py` looks them up
+by exact name (`:111`, `:212`), so case/whitespace variants create distinct rows. Same normalize →
+merge → re-point machinery covers both.
 
 ### A1. Normalization
-`_norm_author(name) = " ".join(name.split()).casefold()` — strip/collapse whitespace, case-insensitive.
-Two authors are "the same" iff their `_norm_author` matches. (Conservative: only collapses true
-case/whitespace variants — never merges distinct names like `J. Smith` vs `John Smith`.)
+`_norm_name(name) = " ".join(name.split()).casefold()` — strip/collapse whitespace, case-insensitive.
+Two rows are "the same" iff their `_norm_name` matches. (Conservative: collapses only true
+case/whitespace variants — never merges distinct names like `J. Smith` vs `John Smith`.) Used for
+**both** authors and narrators.
 
-### A2. Data fix (`etl/author_dedup.py`, session-in/changes-out, mirrors `tag_backfill.py`)
-- **Merge duplicate `Author` rows:** group all authors by `_norm_author`. For each group with >1 row,
+### A2. Data fix (`etl/contributor_dedup.py`, session-in/changes-out, mirrors `tag_backfill.py`)
+- **Merge duplicate `Author` rows:** group all authors by `_norm_name`. For each group with >1 row,
   pick a **survivor** (the best-cased name: prefer one with mixed/Title case over all-lower; tie →
   lowest `id` for determinism). Re-point `work_contributors` and `author_styles` from the losers to
   the survivor, then delete the loser `Author` rows.
@@ -58,24 +64,31 @@ case/whitespace variants — never merges distinct names like `J. Smith` vs `Joh
   `(work_id, author_id, role)`, never on `(work_id, author_id)` alone. So "Casualfarmer" + "Casualfarmer "
   *both as `Author`* collapse to one row (true dup), but the same person as `Author` **and** `Editor`
   keeps **both** rows — a contributor's distinct roles are real data we must not lose.
-- **FK-collision safety = the dedup mechanism:** when re-pointing a loser `WorkContributor`/`AuthorStyle`
-  to the survivor would collide with an existing row on its PK, drop the loser link (the target already
-  covers it); otherwise re-point. Because the `WorkContributor` PK includes `role`, this automatically
-  collapses same-role dupes while preserving different-role contributions.
-- `plan_author_changes(session)` returns a preview (per work: author names before → after).
-  `apply_author_changes(session, changes=None)` performs it. `author_inventory(session)` lists
-  `(name, work_count)` and flags the duplicate groups.
+- **Merge duplicate `Narrator` rows (same machinery):** group narrators by `_norm_name`, pick a
+  survivor the same way, re-point `edition_narrators` (PK `edition_id, narrator_id`) and
+  `narrator_styles` (PK `narrator_id, style_id, attribute_type`) from losers to survivor, delete the
+  loser `Narrator` rows.
+- **FK-collision safety = the dedup mechanism:** when re-pointing any loser link (`WorkContributor`,
+  `AuthorStyle`, `edition_narrators`, `NarratorStyle`) to the survivor would collide with an existing
+  row on its PK, drop the loser link (the target already covers it); otherwise re-point. Because each
+  PK carries its distinguishing column (`role` for contributors, the style keys for styles), this
+  automatically collapses true dupes while preserving distinct roles/styles.
+- `plan_contributor_changes(session)` returns a preview (per work/edition: names before → after, for
+  authors and narrators). `apply_contributor_changes(session, changes=None)` performs it.
+  `contributor_inventory(session)` lists author + narrator `(name, use_count)` and flags the dup groups.
 
 ### A3. Guard (`persist.py`)
-Before building `work_contributors_list`, dedup `raw_contributors` by `(_norm_author(name), role)`
-(first occurrence wins). Net effect: one `WorkContributor` per distinct **author+role** per work —
-true dupes can't be written, but a contributor's legitimate multiple roles are preserved.
+- Contributors: before building `work_contributors_list`, dedup `raw_contributors` by
+  `(_norm_name(name), role)` (first occurrence wins). One `WorkContributor` per distinct **author+role**
+  per work — true dupes blocked, legitimate multiple roles preserved.
+- Narrators: dedup `narrator_names` by `_norm_name` before the lookup loop (`persist.py:211`), so a
+  case/whitespace variant can't spawn a second `Narrator` row.
 
 ### A4. Display (no change needed)
 History (`main.py:248-250`) and the rec card (`main.py:99`) already surface only `c.role == "Author"`
-contributors, so editors/other roles never appear as authors. The role-preserving merge above keeps
-that working: a person who is both author and editor of a work shows once (as author), with the editor
-role retained in the data for future use.
+contributors, so editors/narrators/other roles never appear as authors. The role-preserving merge
+keeps that working: a person who is both author and editor of a work shows once (as author), with the
+editor role retained in the data for future use.
 
 ---
 
@@ -129,9 +142,9 @@ too for title-case consistency — low risk, decide in plan.)
 ## Shared — operator CLI
 
 Extend the proven pattern (`scripts/clean_tags.py`). One script `scripts/clean_catalog.py` with:
-- `--inventory` — print author dup-groups + dirty-trope counts + embedding-call estimate. Read-only.
-- `--authors --dry-run` / `--tropes --dry-run` — preview changes, no writes.
-- `--authors --apply --yes` / `--tropes --apply --yes` — write. Refuses without `--yes`, and refuses
+- `--inventory` — print author + narrator dup-groups + dirty-trope counts + embedding-call estimate. Read-only.
+- `--contributors --dry-run` / `--tropes --dry-run` — preview changes, no writes.
+- `--contributors --apply --yes` / `--tropes --apply --yes` — write. Refuses without `--yes`, and refuses
   unless `is_prod_url(url)` (reuse from `tag_backfill`) — sqlite/backups/localhost are blocked.
 - Always prints the DB target with credentials stripped (`url.split("@")[-1]`) + a recency probe
   (row counts) so the operator confirms it's live prod, not a backup.
@@ -150,6 +163,7 @@ Extend the proven pattern (`scripts/clean_tags.py`). One script `scripts/clean_c
 ## Rollout
 
 1. Merge the PR (deploys both persist guards — future writes stay clean).
-2. Operator: proxy up → `--inventory` (sanity + cost) → `--authors --dry-run` → `--authors --apply --yes`
-   → `--tropes --dry-run` (review the embedding-call count) → `--tropes --apply --yes`, all against
-   live prod via the Cloud SQL proxy. Both convergent, so a retry after a transient blip is safe.
+2. Operator: proxy up → `--inventory` (sanity + cost) → `--contributors --dry-run` →
+   `--contributors --apply --yes` → `--tropes --dry-run` (review the embedding-call count) →
+   `--tropes --apply --yes`, all against live prod via the Cloud SQL proxy. Both convergent, so a
+   retry after a transient blip is safe.
