@@ -7,9 +7,10 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from agentic_librarian.db.models import Author, AuthorStyle, Narrator, WorkContributor
+from agentic_librarian.db.models import Author, AuthorStyle, Narrator, NarratorStyle, WorkContributor, edition_narrators
 
 
 def norm_name(name: str | None) -> str:
@@ -71,6 +72,53 @@ def _merge_authors(session: Session) -> list[ContributorChange]:
     return changes
 
 
+def _merge_narrators(session: Session) -> list[ContributorChange]:
+    changes: list[ContributorChange] = []
+    for group in _dup_groups(session.query(Narrator).all()):
+        survivor = _pick_survivor(group)
+        losers = [n for n in group if n.id != survivor.id]
+        for loser in losers:
+            # edition_narrators is a Core association table -> operate via Core statements
+            edition_ids = (
+                session.execute(
+                    select(edition_narrators.c.edition_id).where(edition_narrators.c.narrator_id == loser.id)
+                )
+                .scalars()
+                .all()
+            )
+            for eid in edition_ids:
+                exists = session.execute(
+                    select(edition_narrators.c.edition_id).where(
+                        edition_narrators.c.edition_id == eid,
+                        edition_narrators.c.narrator_id == survivor.id,
+                    )
+                ).first()
+                session.execute(
+                    delete(edition_narrators).where(
+                        edition_narrators.c.edition_id == eid,
+                        edition_narrators.c.narrator_id == loser.id,
+                    )
+                )
+                if not exists:
+                    session.execute(edition_narrators.insert().values(edition_id=eid, narrator_id=survivor.id))
+            for st in session.query(NarratorStyle).filter_by(narrator_id=loser.id).all():
+                target = (
+                    session.query(NarratorStyle)
+                    .filter_by(narrator_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
+                    .first()
+                )
+                session.delete(st)
+                if target is None:
+                    session.add(
+                        NarratorStyle(narrator_id=survivor.id, style_id=st.style_id, attribute_type=st.attribute_type)
+                    )
+            session.flush()
+            session.delete(loser)
+        session.flush()
+        changes.append(ContributorChange("narrator", survivor.name, [n.name for n in losers]))
+    return changes
+
+
 def plan_contributor_changes(session: Session) -> list[ContributorChange]:
     """Read-only preview of the merges apply would perform (authors + narrators)."""
     out: list[ContributorChange] = []
@@ -83,7 +131,7 @@ def plan_contributor_changes(session: Session) -> list[ContributorChange]:
 
 def apply_contributor_changes(session: Session) -> list[ContributorChange]:
     """Merge author then narrator dup-groups (narrators added in Task 3). Returns what was merged."""
-    return _merge_authors(session)
+    return _merge_authors(session) + _merge_narrators(session)
 
 
 def contributor_inventory(session: Session) -> dict:

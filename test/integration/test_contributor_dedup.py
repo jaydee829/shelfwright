@@ -30,3 +30,27 @@ def test_apply_merges_dup_authors_preserving_distinct_roles(db_url):
         assert survivor.name == "Casualfarmer"  # best-cased survived
         roles = sorted(c.role for c in session.query(WorkContributor).filter_by(work_id=w.id).all())
         assert roles == ["Author", "Editor"]  # one Author (dedup) + Editor (preserved)
+
+
+def test_apply_merges_dup_narrators(db_url):
+    from agentic_librarian.db.models import Edition, Narrator, Work
+
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        n1 = Narrator(name="Travis Baldree")
+        n2 = Narrator(name="travis baldree")  # case dup
+        w = Work(title="Narr Test")
+        session.add_all([n1, n2, w])
+        session.flush()
+        e = Edition(work_id=w.id, format="audiobook", narrators=[n1, n2])
+        session.add(e)
+        session.flush()
+
+        cd.apply_contributor_changes(session)
+        session.flush()
+
+        assert session.query(Narrator).count() == 1
+        survivor = session.query(Narrator).one()
+        assert survivor.name == "Travis Baldree"
+        session.refresh(e)
+        assert [n.id for n in e.narrators] == [survivor.id]  # link folded, no dup
