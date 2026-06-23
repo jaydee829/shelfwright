@@ -9,12 +9,13 @@
 .history-empty-title { font-family: var(--font-display); font-size: var(--fs-title); margin: 0 0 var(--space-2); }
 .history-empty-body { color: var(--text-muted); font-size: var(--fs-sm); margin: 0 auto var(--space-4); }
 .history-empty-cta { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+/* Normal inline-flow paragraph (centered by .history-empty); the Add link below is
+   inline-flex so its icon + text flow inline with the surrounding words and wrap naturally. */
 .history-empty-quiet {
-  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px;
   margin-top: var(--space-4); color: var(--text-faint); font-size: var(--fs-xs);
 }
 .history-empty-add {
-  display: inline-flex; align-items: center; gap: 4px;
+  display: inline-flex; align-items: center; gap: 4px; vertical-align: middle;
   color: var(--text-muted); font-weight: 600; text-decoration: none;
 }
 .history-empty-add svg { color: var(--gilt); }
