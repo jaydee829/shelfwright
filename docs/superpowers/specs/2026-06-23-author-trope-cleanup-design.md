@@ -54,18 +54,28 @@ case/whitespace variants — never merges distinct names like `J. Smith` vs `Joh
   pick a **survivor** (the best-cased name: prefer one with mixed/Title case over all-lower; tie →
   lowest `id` for determinism). Re-point `work_contributors` and `author_styles` from the losers to
   the survivor, then delete the loser `Author` rows.
-- **Collapse multi-role dupes:** after merge, for each `(work_id, author_id)` with multiple
-  `WorkContributor` rows, keep one — prefer role `Author`, else `Primary`, else first — delete the rest.
-- **FK-collision safety:** when re-pointing a `WorkContributor`/`AuthorStyle` to the survivor would
-  collide with an existing row on its PK, drop the loser link instead of re-pointing (the target
-  already covers it).
+- **Preserve roles — collapse only TRUE duplicates.** Dedup `work_contributors` on the **full** PK
+  `(work_id, author_id, role)`, never on `(work_id, author_id)` alone. So "Casualfarmer" + "Casualfarmer "
+  *both as `Author`* collapse to one row (true dup), but the same person as `Author` **and** `Editor`
+  keeps **both** rows — a contributor's distinct roles are real data we must not lose.
+- **FK-collision safety = the dedup mechanism:** when re-pointing a loser `WorkContributor`/`AuthorStyle`
+  to the survivor would collide with an existing row on its PK, drop the loser link (the target already
+  covers it); otherwise re-point. Because the `WorkContributor` PK includes `role`, this automatically
+  collapses same-role dupes while preserving different-role contributions.
 - `plan_author_changes(session)` returns a preview (per work: author names before → after).
   `apply_author_changes(session, changes=None)` performs it. `author_inventory(session)` lists
   `(name, work_count)` and flags the duplicate groups.
 
 ### A3. Guard (`persist.py`)
-Before building `work_contributors_list`, dedup `raw_contributors` by `_norm_author(name)` (first
-occurrence wins, keeps its role). Net effect: one `WorkContributor` per distinct author per work.
+Before building `work_contributors_list`, dedup `raw_contributors` by `(_norm_author(name), role)`
+(first occurrence wins). Net effect: one `WorkContributor` per distinct **author+role** per work —
+true dupes can't be written, but a contributor's legitimate multiple roles are preserved.
+
+### A4. Display (no change needed)
+History (`main.py:248-250`) and the rec card (`main.py:99`) already surface only `c.role == "Author"`
+contributors, so editors/other roles never appear as authors. The role-preserving merge above keeps
+that working: a person who is both author and editor of a work shows once (as author), with the editor
+role retained in the data for future use.
 
 ---
 
