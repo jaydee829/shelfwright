@@ -60,11 +60,12 @@ def _scout_and_persist(
         "Author_1": author,
         "format": fmt,
         "skip_enrichment": False,
-        "write_fallback_tropes": write_fallback_tropes,
         "date_completed": None,
         **enriched,
         "genres": list(enriched.get("genres") or []),
         "moods": list(enriched.get("moods") or []),
+        # after **enriched so a scout payload can never clobber the caller's choice
+        "write_fallback_tropes": write_fallback_tropes,
     }
     return persist_enriched_work(session, row, TropeManager(session=session), StyleManager(session=session))
 

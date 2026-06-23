@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\napplied: {trope_backfill.apply_trope_changes(session, tm, changes)} trope rows cleaned.")
             return 0
 
-        print("Nothing to do. Pass --inventory, --contributors, or --tropes.")
+        print("Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, or --tropes.")
         return 1
 
 
