@@ -12,7 +12,10 @@
 .nav-label { font-size: 12px; }
 
 /* Mobile-first: fixed bottom bar; indicator across the top of the active item */
-.nav { position: fixed; bottom: 0; left: 0; right: 0; border-top: 1px solid var(--border); }
+.nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  border-top: 1px solid var(--border); padding-bottom: env(safe-area-inset-bottom, 0);
+}
 .nav-item.active::after { left: 0; right: 0; top: 0; height: 3px; }
 
 /* Desktop: left icon rail; indicator down the left edge */
@@ -20,6 +23,7 @@
   .nav {
     position: fixed; top: 56px; bottom: 0; left: 0; right: auto;
     flex-direction: column; width: 88px; border-top: none; border-right: 1px solid var(--border);
+    padding-bottom: 0;
   }
   .nav-item { flex: 0; }
   .nav-item.active::after { top: 0; bottom: 0; left: 0; right: auto; width: 3px; height: auto; }
