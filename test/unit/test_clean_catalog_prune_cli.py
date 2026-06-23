@@ -42,6 +42,9 @@ def test_prune_fallbacks_refused_without_yes(monkeypatch, capsys):
     monkeypatch.setattr(
         clean_catalog, "DatabaseManager", lambda url: type("M", (), {"get_session": lambda s: _Sess()})()
     )
+    # plan does real SQLAlchemy query construction (subquery/joins) — stub it; this test is about the
+    # CLI's --apply/--yes guard, not the query.
+    monkeypatch.setattr(clean_catalog.trope_backfill, "plan_fallback_prune", lambda session: [])
     rc = clean_catalog.main(["--prune-fallbacks", "--apply"])  # no --yes
     assert rc == 2
     assert "REFUSING --apply without --yes" in capsys.readouterr().out
