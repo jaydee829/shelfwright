@@ -331,19 +331,28 @@ def persist_enriched_work(
                     existing_link.relevance_score = score
                     existing_link.justification = existing_link.justification or just
         else:
-            # Fallback to simple tags if no enriched tropes found — cleaned the same way as
-            # genres/moods so the fallback can never write a UUID-tailed / unsplit slug (Spec 2026-06-23).
-            for tag in all_fallback_tags:
-                for name in clean_trope_name(tag):
-                    standardized_trope = _safe_standardize(
-                        trope_manager.standardize_trope, name, label=f"trope {name!r}"
-                    )
-                    if standardized_trope is None:
-                        continue
-                    existing_link = (
-                        session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
-                    )
-                    if not existing_link:
-                        session.add(WorkTrope(work=work, trope=standardized_trope))
+            # Fallback genre/mood tropes are a stopgap ONLY for a work with no real (scout) trope, and
+            # only when the caller wants them — the two-phase fast pass opts out (write_fallback_tropes
+            # =False) because its deep pass supplies the real tropes (Spec #65, 2026-06-23). Cleaned the
+            # same way as genres/moods so a fallback can never write a UUID-tailed / unsplit slug.
+            has_real_trope = (
+                session.query(WorkTrope)
+                .filter(WorkTrope.work_id == work.id, WorkTrope.justification.isnot(None))
+                .first()
+                is not None
+            )
+            if row.get("write_fallback_tropes", True) and not has_real_trope:
+                for tag in all_fallback_tags:
+                    for name in clean_trope_name(tag):
+                        standardized_trope = _safe_standardize(
+                            trope_manager.standardize_trope, name, label=f"trope {name!r}"
+                        )
+                        if standardized_trope is None:
+                            continue
+                        existing_link = (
+                            session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
+                        )
+                        if not existing_link:
+                            session.add(WorkTrope(work=work, trope=standardized_trope))
 
     return work
