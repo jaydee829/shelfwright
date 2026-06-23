@@ -108,4 +108,11 @@ describe('HistoryView pagination', () => {
     expect(client.deleteHistory).not.toHaveBeenCalled()
     expect(screen.getByText('Jhereg')).toBeInTheDocument()
   })
+
+  it('shows the header Import history button linking to /import', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Only Book')])
+    renderView()
+    await screen.findByText('Only Book')
+    expect(screen.getByRole('link', { name: /import history/i })).toHaveAttribute('href', '/import')
+  })
 })

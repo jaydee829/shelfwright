@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { deleteHistory, getHistory, type HistoryItem } from '../api/client'
+import LineIcon from '../components/LineIcon'
 import './HistoryView.css'
 
 const PAGE_SIZE = 50
@@ -56,7 +57,10 @@ export default function HistoryView() {
     <div>
       <header className="view-head">
         <h2>Reading history</h2>
-        <Link to="/import" className="history-import-link">Import history</Link>
+        <Link to="/import" className="btn btn--ghost history-import-link">
+          <LineIcon name="import" size={18} className="history-import-icon" />
+          Import history
+        </Link>
       </header>
       <ul className="history-list">
         {items.map((h) => (
