@@ -22,6 +22,7 @@ from agentic_librarian.db.models import (
     WorkStyle,
     WorkTrope,
 )
+from agentic_librarian.etl.contributor_dedup import norm_name
 from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
@@ -102,12 +103,17 @@ def persist_enriched_work(
     work_contributors_list = []
     author_style_data = row.get("author_style", {})
 
+    seen_contributors: set[tuple[str, str]] = set()
     for c_data in raw_contributors:
         name = c_data["name"].strip()
         # A whitespace-only role is truthy and a non-string role would persist as-is; both
         # must fall back to "Author" (PR #30 review). Valid roles keep their stripped value.
         role = c_data.get("role")
         role = role.strip() if isinstance(role, str) and role.strip() else "Author"
+        key = (norm_name(name), role)
+        if key in seen_contributors:  # guard: never write the same author+role twice
+            continue
+        seen_contributors.add(key)
         author = session.query(Author).filter(Author.name == name).first()
         if not author:
             author = Author(name=name)
@@ -208,6 +214,14 @@ def persist_enriched_work(
     if not isinstance(narrator_styles, dict):
         narrator_styles = {}
 
+    seen_narr: set[str] = set()
+    deduped_names = []
+    for n_name in narrator_names:
+        k = norm_name(n_name)
+        if k not in seen_narr:
+            seen_narr.add(k)
+            deduped_names.append(n_name)
+    narrator_names = deduped_names
     for n_name in narrator_names:
         narrator = session.query(Narrator).filter(Narrator.name == n_name).first()
         if not narrator:
