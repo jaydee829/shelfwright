@@ -27,8 +27,8 @@ Q2 = """
 WITH job AS (SELECT id FROM import_jobs ORDER BY created_at DESC LIMIT 1)
 SELECT w.title,
         r.outcome,
-        count(wt.*) FILTER (WHERE wt.justification IS NOT NULL) AS real_tropes,
-        count(wt.*) FILTER (WHERE wt.justification IS NULL)     AS fallback_tropes,
+        count(wt.trope_id) FILTER (WHERE wt.justification IS NOT NULL) AS real_tropes,
+        count(wt.trope_id) FILTER (WHERE wt.justification IS NULL)     AS fallback_tropes,
         coalesce(array_length(w.genres, 1), 0)                  AS genres
 FROM import_rows r
 JOIN works w ON w.id = r.work_id
@@ -69,6 +69,7 @@ def run(label, sql):
             print(" | ".join("" if v is None else str(v) for v in row))
 
 
-run("1) recent import jobs", Q1)
-run("2) per-book real vs fallback tropes (latest job)", Q2)
-run("3) rollup: recent import vs rest of catalog", Q3)
+if __name__ == "__main__":
+    run("1) recent import jobs", Q1)
+    run("2) per-book real vs fallback tropes (latest job)", Q2)
+    run("3) rollup: recent import vs rest of catalog", Q3)
