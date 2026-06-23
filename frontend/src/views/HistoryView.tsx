@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { deleteHistory, getHistory, type HistoryItem } from '../api/client'
+import LineIcon from '../components/LineIcon'
 import './HistoryView.css'
 
 const PAGE_SIZE = 50
@@ -50,13 +51,37 @@ export default function HistoryView() {
   }
 
   if (items === null) return <p>Loading…</p>
-  if (items.length === 0) return <p>Nothing here yet — finish a book and it'll show up.</p>
+  if (items.length === 0)
+    return (
+      <div className="history-empty">
+        <LineIcon name="shelf" size={56} className="history-empty-seal" />
+        <h2 className="history-empty-title">Your shelf is empty</h2>
+        <p className="history-empty-body">
+          Bring your reading history with you — import it in bulk to get personalised picks right away.
+        </p>
+        <Link to="/import" className="btn history-empty-cta">
+          <LineIcon name="import" size={18} />
+          Import your history
+        </Link>
+        <p className="history-empty-quiet">
+          Or just{' '}
+          <Link to="/add" className="history-empty-add">
+            <LineIcon name="add" size={15} />
+            Add a book
+          </Link>{' '}
+          and it'll show up here.
+        </p>
+      </div>
+    )
 
   return (
     <div>
       <header className="view-head">
         <h2>Reading history</h2>
-        <Link to="/import" className="history-import-link">Import history</Link>
+        <Link to="/import" className="btn btn--ghost history-import-link">
+          <LineIcon name="import" size={18} className="history-import-icon" />
+          Import history
+        </Link>
       </header>
       <ul className="history-list">
         {items.map((h) => (

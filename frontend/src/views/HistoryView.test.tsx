@@ -108,4 +108,19 @@ describe('HistoryView pagination', () => {
     expect(client.deleteHistory).not.toHaveBeenCalled()
     expect(screen.getByText('Jhereg')).toBeInTheDocument()
   })
+
+  it('shows the header Import history button linking to /import', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([item('a0', 'Only Book')])
+    renderView()
+    await screen.findByText('Only Book')
+    expect(screen.getByRole('link', { name: /import history/i })).toHaveAttribute('href', '/import')
+  })
+
+  it('shows an onboarding panel with import + add CTAs when history is empty', async () => {
+    vi.mocked(client.getHistory).mockResolvedValueOnce([])
+    renderView()
+    expect(await screen.findByText(/your shelf is empty/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /import your history/i })).toHaveAttribute('href', '/import')
+    expect(screen.getByRole('link', { name: /add a book/i })).toHaveAttribute('href', '/add')
+  })
 })
