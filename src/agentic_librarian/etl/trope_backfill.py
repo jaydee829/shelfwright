@@ -11,7 +11,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from agentic_librarian.db.models import Trope, WorkTrope
+from agentic_librarian.db.models import Trope, Work, WorkTrope
 from agentic_librarian.etl.tag_cleaning import _normalize, clean_trope_name
 
 logger = logging.getLogger(__name__)
@@ -166,3 +166,57 @@ def trope_inventory(session: Session) -> tuple[Counter, list]:
         if cleaned != [t.name]:
             dirty.append((t.name, cleaned, wc))
     return counts, dirty
+
+
+@dataclass
+class FallbackPrune:
+    work_id: UUID
+    title: str
+    deleted: list[str]  # fallback trope names removed from this work
+    real_kept: int
+
+
+def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
+    """Works that carry BOTH a real (justification IS NOT NULL) and a fallback (justification IS NULL)
+    trope — preview the fallback links that would be deleted. Read-only."""
+    real_work_ids = {
+        wid for (wid,) in session.query(WorkTrope.work_id).filter(WorkTrope.justification.isnot(None)).distinct()
+    }
+    if not real_work_ids:
+        return []
+    by_work: dict[UUID, list[WorkTrope]] = {}
+    for wt in (
+        session.query(WorkTrope).filter(WorkTrope.justification.is_(None), WorkTrope.work_id.in_(real_work_ids)).all()
+    ):
+        by_work.setdefault(wt.work_id, []).append(wt)
+    out: list[FallbackPrune] = []
+    for wid, links in by_work.items():
+        work = session.get(Work, wid)
+        names = [session.get(Trope, wt.trope_id).name for wt in links]
+        real_kept = (
+            session.query(WorkTrope).filter(WorkTrope.work_id == wid, WorkTrope.justification.isnot(None)).count()
+        )
+        out.append(FallbackPrune(wid, work.title if work else str(wid), names, real_kept))
+    return out
+
+
+def apply_fallback_prune(session: Session, changes: list[FallbackPrune] | None = None) -> int:
+    """Delete the fallback (NULL-justification) links on each planned work. Link deletion only — no
+    Trope rows, no embeddings. Idempotent (a second run finds no work with both layers)."""
+    if changes is None:
+        changes = plan_fallback_prune(session)
+    n = 0
+    for c in changes:
+        for wt in (
+            session.query(WorkTrope).filter(WorkTrope.work_id == c.work_id, WorkTrope.justification.is_(None)).all()
+        ):
+            session.delete(wt)
+            n += 1
+    session.flush()
+    return n
+
+
+def fallback_prune_inventory(session: Session) -> tuple[int, int]:
+    """(polluted works, total fallback links that would be pruned)."""
+    plan = plan_fallback_prune(session)
+    return len(plan), sum(len(c.deleted) for c in plan)
