@@ -81,3 +81,79 @@ def test_clean_moods(raw, expected):
 def test_clean_moods_no_combo_split():
     # moods never split on the genre COMBO_MAP
     assert tc.clean_moods(["science fiction fantasy"]) == ["Science Fiction Fantasy"]
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        (["lgbtq"], ["LGBTQ"]),  # icon casing (title-case would give "Lgbtq")
+        (["lgbt"], ["LGBTQ"]),
+        (["queer"], ["LGBTQ"]),
+        (["literature-fiction"], ["Literary"]),
+        (["literary-fiction"], ["Literary"]),
+        (["thriller-suspense"], ["Thriller"]),
+        (["fantasy-fiction"], ["Fantasy"]),
+        (["young-adult-fiction"], ["Young Adult"]),
+        (["historical-fiction"], ["Historical"]),
+        (["humour"], ["Humor"]),
+        (["aventure"], ["Adventure"]),
+        (["mystere"], ["Mystery"]),
+        (["guerre"], ["War"]),
+        (["sciense-fiction"], ["Science Fiction"]),  # typo
+        (["fiction-fantasy-epic"], ["Fantasy", "Epic"]),  # drop fiction umbrella, split leaf
+        (["fiction-fantasy-general"], ["Fantasy"]),  # "general" is filler
+        (["fiction-action-adventure"], ["Action & Adventure"]),
+        (["thriller-suspense-science-fiction-fantasy"], ["Thriller", "Science Fiction", "Fantasy"]),
+        (["literature-fiction-science-fiction-fantasy"], ["Literary", "Science Fiction", "Fantasy"]),
+        (["downloadable-e-books"], []),  # denylisted
+        (["novella"], []),  # denylisted
+        (["read-2023"], []),  # digit-rejected (no map entry needed)
+        ([f"egypt-{UUID}"], ["Egypt"]),  # 1-count subject KEPT, title-cased
+        (["adult"], ["Adult"]),  # audience marker KEPT (per operator)
+    ],
+)
+def test_clean_genres_inventory_curation(raw, expected):
+    assert tc.clean_genres(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ([f"fast-paced-{UUID}"], ["Fast Paced"]),  # pace KEPT (per operator)
+        ([f"medium-paced-{UUID}"], ["Medium Paced"]),
+        (["series-cradle"], []),  # mood denylisted (not a mood)
+    ],
+)
+def test_clean_moods_inventory_curation(raw, expected):
+    assert tc.clean_moods(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # generic "fiction-" umbrella: strip + split the leaf (handles unmapped fiction-fantasy-* generically)
+        (["fiction-fantasy-military"], ["Fantasy", "Military"]),
+        (["fiction-fantasy-paranormal"], ["Fantasy", "Paranormal"]),
+        (["fiction-horror"], ["Horror"]),
+        (["fiction-fantasy-general"], ["Fantasy"]),  # "general" self-drops (denylist)
+        # explicit combos still win over the generic rule (multi-token leaves the naive split would break)
+        (["fiction-sci-fi-fantasy"], ["Science Fiction", "Fantasy"]),
+        (["fiction-action-adventure"], ["Action & Adventure"]),
+        # #2: no fiction prefix -> explicit combo
+        (["fantasy-young-adult"], ["Fantasy", "Young Adult"]),
+        (["thrillers"], ["Thriller"]),  # plural alias
+        # entity / tie-in noise dropped
+        ([f"john-fictitious-character-{UUID}"], []),
+        (["death-fictitious-character-pratchett"], []),
+        (["hogfather-motion-picture"], []),
+        (["Hogfather. (Motion picture)"], []),
+        (["dune-imaginary-place"], []),
+        (["geary"], []),
+        (["poirot"], []),
+        # genuine subject tags still KEPT (title-cased)
+        (["anti-racism"], ["Anti Racism"]),
+        (["brigands-and-robbers"], ["Brigands And Robbers"]),
+    ],
+)
+def test_clean_genres_round2(raw, expected):
+    assert tc.clean_genres(raw) == expected
