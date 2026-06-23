@@ -66,27 +66,26 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.contributors:
-            early = _refuse(args, url, safe)
-            if early is not None:
-                return early
             changes = contributor_dedup.plan_contributor_changes(session)
             print(f"\n{len(changes)} contributor groups would merge.")
             for c in changes[:80]:
                 print(f"  [{c.kind}] keep {c.survivor!r}  merge {c.merged}")
+            early = _refuse(args, url, safe)
+            if early is not None:
+                return early
             applied = contributor_dedup.apply_contributor_changes(session)
             print(f"\napplied: merged {len(applied)} groups.")
             return 0
 
         if args.tropes:
-            early = _refuse(args, url, safe)
-            if early is not None:
-                return early
             changes = trope_backfill.plan_trope_changes(session)
             calls = trope_backfill.embedding_call_estimate(session)
             print(f"\n{len(changes)} trope rows would change ({calls} embedding calls).")
             for c in changes[:80]:
                 print(f"  {c.works_affected:4d}  {c.name_before!r} -> {c.names_after}")
-
+            early = _refuse(args, url, safe)
+            if early is not None:
+                return early
             from agentic_librarian.scouts.trope_manager import TropeManager
 
             tm = TropeManager(session)

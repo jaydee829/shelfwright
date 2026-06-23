@@ -21,8 +21,14 @@ def test_apply_refused_without_yes(monkeypatch, capsys):
         def query(self, *a, **k):
             return self
 
+        def filter_by(self, *a, **k):
+            return self
+
+        def all(self):
+            return []
+
         def count(self):
-            return 1
+            return 0
 
     monkeypatch.setattr(
         clean_catalog, "DatabaseManager", lambda url: type("M", (), {"get_session": lambda s: _Sess()})()
