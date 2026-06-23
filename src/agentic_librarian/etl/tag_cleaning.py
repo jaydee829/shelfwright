@@ -94,10 +94,34 @@ def clean_moods(raw: list[str] | None) -> list[str]:
 
 
 def clean_trope_name(name: str) -> list[str]:
-    """Clean one Trope.name with the UNION of the genre + mood maps: UUID-strip + combo-split +
-    canonicalize + denylist drop + title-case. A genuine narrative trope (no map hit) just gets
-    UUID-stripped + title-cased (e.g. 'enemies-to-lovers' -> 'Enemies To Lovers'). Returns 0..N
-    canonical names, de-duped, order-preserving."""
+    """Clean one Trope.name. The table mixes genuine narrative tropes (free text from the LLM, e.g.
+    'The Chosen One (Subverted)', 'Mirror / Shadow Self') with genre/mood-slug fallbacks
+    ('science-fiction-fantasy-<uuid>', 'literary-fiction', 'tense'). The two are told apart by
+    casing: a real trope always has an uppercase letter; the slugs are all-lowercase.
+
+    - KNOWN genre/mood tag (combo/alias match after normalising) -> split / canonicalise, regardless
+      of casing (so 'science-fiction-fantasy-<uuid>' -> ['Science Fiction', 'Fantasy']).
+    - Has an uppercase letter -> a genuine trope: keep it VERBATIM (only the UUID tail stripped), so
+      '/', 'vs.', '(...)', em-dashes and original capitalisation all survive intact.
+    - Otherwise a bare lowercase slug -> drop if junk/numeric/denylisted/entity-noise, else title-case.
+
+    Returns 0..N names, de-duped."""
+    if not isinstance(name, str):
+        return []
+    stripped = _strip_uuid(name).strip()
+    norm = _normalize(stripped)
+    if not norm:
+        return []
     alias = {**tag_maps.ALIAS_MAP, **tag_maps.MOOD_ALIAS_MAP}
     denylist = tag_maps.DENYLIST | tag_maps.MOOD_DENYLIST
-    return _dedup(_clean_one(name, alias=alias, combo=tag_maps.COMBO_MAP, denylist=denylist))
+    if norm in tag_maps.COMBO_MAP:
+        return _dedup(list(tag_maps.COMBO_MAP[norm]))
+    if norm in alias:
+        return [alias[norm]]
+    if any(c.isupper() for c in stripped):  # genuine free-text trope -> preserve verbatim
+        return [stripped]
+    if norm in denylist or _HAS_DIGIT_RE.search(norm) or len(norm) <= 1:
+        return []
+    if any(j in norm for j in _JUNK_SUBSTRINGS):  # entity/tie-in noise
+        return []
+    return [_titlecase(norm)]  # bare lowercase slug

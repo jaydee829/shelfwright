@@ -174,7 +174,31 @@ def test_clean_trope_name(raw, expected):
     assert tc.clean_trope_name(raw[0]) == expected
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # genuine free-text tropes (have an uppercase letter) -> preserved VERBATIM
+        (["Mirror / Shadow Self"], ["Mirror / Shadow Self"]),  # keep the slash pairing
+        (["The Trickster/Loyal Rogue"], ["The Trickster/Loyal Rogue"]),
+        (["The Chosen One (Subverted)"], ["The Chosen One (Subverted)"]),  # keep caps + parens
+        (["Fish Out of Water"], ["Fish Out of Water"]),  # keep lowercase 'of'
+        (["Free Will vs. Fate"], ["Free Will vs. Fate"]),
+        (["Legacy and Father–Son Dynamic"], ["Legacy and Father–Son Dynamic"]),  # keep em-dash + caps
+        ([f"Latent Power-{UUID}"], ["Latent Power"]),  # UUID stripped, rest verbatim
+        # known genre/mood slugs still canonicalize/split even with mixed source casing
+        (["literary-fiction"], ["Literary"]),
+        (["policier"], ["Crime"]),
+        (["general"], []),  # denylist
+        (["movie"], []),
+        ([f"occult-{UUID}"], ["Occult"]),  # bare slug title-cased
+        (["fic028010"], []),  # has digit
+    ],
+)
+def test_clean_trope_name_preserves_genuine_and_cleans_slugs(raw, expected):
+    assert tc.clean_trope_name(raw[0]) == expected
+
+
 def test_clean_trope_name_is_idempotent():
-    for raw in ["science-fiction-fantasy", "enemies-to-lovers", "Chosen One"]:
+    for raw in ["science-fiction-fantasy", "enemies-to-lovers", "Chosen One", "Mirror / Shadow Self"]:
         once = tc.clean_trope_name(raw)
         assert once == [x for v in once for x in tc.clean_trope_name(v)]
