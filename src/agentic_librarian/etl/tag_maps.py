@@ -14,16 +14,52 @@ ALIAS_MAP: dict[str, str] = {
     "scifi": "Science Fiction",
     "sf": "Science Fiction",
     "science fiction": "Science Fiction",
+    "sciencefiction": "Science Fiction",
+    "sciense fiction": "Science Fiction",
     "action adventure": "Action & Adventure",
     "business economics": "Business & Economics",
     "business & economics": "Business & Economics",
     "epic": "Epic",
     "fantasy": "Fantasy",
+    "lgbtq": "LGBTQ",
+    "lgbt": "LGBTQ",
+    "queer": "LGBTQ",
+    "gay": "LGBTQ",
+    "lesbian": "LGBTQ",
+    "literary fiction": "Literary",
+    "literature fiction": "Literary",
+    "literary": "Literary",
+    "literature": "Literary",
+    "thriller suspense": "Thriller",
+    "suspense": "Thriller",
+    "fantasy fiction": "Fantasy",
+    "young adult fiction": "Young Adult",
+    "teen young adult": "Young Adult",
+    "historical fiction": "Historical",
+    "humour": "Humor",
+    "humorous": "Humor",
+    "comedy humor": "Humor",
+    "aventure": "Adventure",
+    "mystere": "Mystery",
+    "guerre": "War",
+    "classique": "Classics",
+    "adulte": "Adult",
+    "policier": "Crime",
 }
 
 # normalized true-combo slug -> list of canonical genres (split)
 COMBO_MAP: dict[str, list[str]] = {
     "science fiction fantasy": ["Science Fiction", "Fantasy"],
+    "fiction sci fi fantasy": ["Science Fiction", "Fantasy"],
+    "science fiction et fantasy": ["Science Fiction", "Fantasy"],
+    "thriller suspense science fiction fantasy": ["Thriller", "Science Fiction", "Fantasy"],
+    "literature fiction science fiction fantasy": ["Literary", "Science Fiction", "Fantasy"],
+    "literature fiction mystery": ["Literary", "Mystery"],
+    "fiction fantasy epic": ["Fantasy", "Epic"],
+    "fiction fantasy general": ["Fantasy"],
+    "fiction fantasy action adventure": ["Fantasy", "Action & Adventure"],
+    "fiction fantasy urban": ["Fantasy"],
+    "fiction action adventure": ["Action & Adventure"],
 }
 
 # normalized tags dropped always (non-genres: formats, fillers)
@@ -43,6 +79,12 @@ DENYLIST: set[str] = {
     "miscellaneous",
     "uncategorized",
     "other",
+    "downloadable e books",
+    "etc",
+    "novels",
+    "novella",
+    "genre fiction",
+    "movie",
 }
 
 # canonical genres dropped iff other genres remain in the list
@@ -53,4 +95,4 @@ MOOD_ALIAS_MAP: dict[str, str] = {
     "lighthearted": "Lighthearted",
     "light hearted": "Lighthearted",
 }
-MOOD_DENYLIST: set[str] = {"audiobook", "ebook", "general", "n a", "na"}
+MOOD_DENYLIST: set[str] = {"audiobook", "ebook", "general", "n a", "na", "series cradle"}
