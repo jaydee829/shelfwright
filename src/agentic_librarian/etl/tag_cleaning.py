@@ -91,3 +91,13 @@ def clean_moods(raw: list[str] | None) -> list[str]:
     for tag in raw or []:
         out.extend(_clean_one(tag, alias=tag_maps.MOOD_ALIAS_MAP, combo={}, denylist=tag_maps.MOOD_DENYLIST))
     return _dedup(out)
+
+
+def clean_trope_name(name: str) -> list[str]:
+    """Clean one Trope.name with the UNION of the genre + mood maps: UUID-strip + combo-split +
+    canonicalize + denylist drop + title-case. A genuine narrative trope (no map hit) just gets
+    UUID-stripped + title-cased (e.g. 'enemies-to-lovers' -> 'Enemies To Lovers'). Returns 0..N
+    canonical names, de-duped, order-preserving."""
+    alias = {**tag_maps.ALIAS_MAP, **tag_maps.MOOD_ALIAS_MAP}
+    denylist = tag_maps.DENYLIST | tag_maps.MOOD_DENYLIST
+    return _dedup(_clean_one(name, alias=alias, combo=tag_maps.COMBO_MAP, denylist=denylist))

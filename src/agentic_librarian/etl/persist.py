@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agentic_librarian.core.user_context import get_required_user_id
@@ -22,7 +23,8 @@ from agentic_librarian.db.models import (
     WorkStyle,
     WorkTrope,
 )
-from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods
+from agentic_librarian.etl.contributor_dedup import norm_name
+from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods, clean_trope_name
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
@@ -102,13 +104,20 @@ def persist_enriched_work(
     work_contributors_list = []
     author_style_data = row.get("author_style", {})
 
+    seen_contributors: set[tuple[str, str]] = set()
     for c_data in raw_contributors:
         name = c_data["name"].strip()
         # A whitespace-only role is truthy and a non-string role would persist as-is; both
         # must fall back to "Author" (PR #30 review). Valid roles keep their stripped value.
         role = c_data.get("role")
         role = role.strip() if isinstance(role, str) and role.strip() else "Author"
-        author = session.query(Author).filter(Author.name == name).first()
+        key = (norm_name(name), role)
+        if key in seen_contributors:  # guard: never write the same author+role twice
+            continue
+        seen_contributors.add(key)
+        # Case-insensitive lookup so a casing variant ("casualfarmer" vs "Casualfarmer") reuses the
+        # existing row instead of creating a duplicate Author (complements the dedup backfill).
+        author = session.query(Author).filter(func.lower(Author.name) == name.lower()).first()
         if not author:
             author = Author(name=name)
             session.add(author)
@@ -204,12 +213,24 @@ def persist_enriched_work(
     narrator_names = row.get("narrator_names")
     if not isinstance(narrator_names, list):
         narrator_names = []
+    # Keep only non-empty strings: a malformed/NaN element would crash the norm_name/.lower() calls
+    # below (mirrors the raw_contributors name guard above).
+    narrator_names = [n for n in narrator_names if isinstance(n, str) and n.strip()]
     narrator_styles = row.get("narrator_styles")
     if not isinstance(narrator_styles, dict):
         narrator_styles = {}
 
+    seen_narr: set[str] = set()
+    deduped_names = []
     for n_name in narrator_names:
-        narrator = session.query(Narrator).filter(Narrator.name == n_name).first()
+        k = norm_name(n_name)
+        if k not in seen_narr:
+            seen_narr.add(k)
+            deduped_names.append(n_name)
+    narrator_names = deduped_names
+    for n_name in narrator_names:
+        # Case-insensitive lookup so a casing variant reuses the existing Narrator row (see above).
+        narrator = session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
         if not narrator:
             narrator = Narrator(name=n_name)
             session.add(narrator)
@@ -310,16 +331,19 @@ def persist_enriched_work(
                     existing_link.relevance_score = score
                     existing_link.justification = existing_link.justification or just
         else:
-            # Fallback to simple tags if no enriched tropes found
+            # Fallback to simple tags if no enriched tropes found — cleaned the same way as
+            # genres/moods so the fallback can never write a UUID-tailed / unsplit slug (Spec 2026-06-23).
             for tag in all_fallback_tags:
-                standardized_trope = _safe_standardize(trope_manager.standardize_trope, tag, label=f"trope {tag!r}")
-                if standardized_trope is None:
-                    continue
-                existing_link = (
-                    session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
-                )
-                if not existing_link:
-                    work_trope = WorkTrope(work=work, trope=standardized_trope)
-                    session.add(work_trope)
+                for name in clean_trope_name(tag):
+                    standardized_trope = _safe_standardize(
+                        trope_manager.standardize_trope, name, label=f"trope {name!r}"
+                    )
+                    if standardized_trope is None:
+                        continue
+                    existing_link = (
+                        session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
+                    )
+                    if not existing_link:
+                        session.add(WorkTrope(work=work, trope=standardized_trope))
 
     return work
