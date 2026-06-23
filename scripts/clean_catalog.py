@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--inventory", action="store_true")
     ap.add_argument("--contributors", action="store_true")
     ap.add_argument("--tropes", action="store_true")
+    ap.add_argument("--prune-fallbacks", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
@@ -63,6 +64,10 @@ def main(argv: list[str] | None = None) -> int:
             for before, after, wc in dirty:
                 print(f"  {wc:4d}  {before!r} -> {after}")
             print(f"\nembedding calls a --tropes --apply would make: {trope_backfill.embedding_call_estimate(session)}")
+            pw, pl = trope_backfill.fallback_prune_inventory(session)
+            print(
+                f"\n=== fallback-trope POLLUTION ===\n  {pw} works with real+fallback layers, {pl} fallback links prunable"
+            )
             return 0
 
         if args.contributors:
@@ -75,6 +80,18 @@ def main(argv: list[str] | None = None) -> int:
                 return early
             applied = contributor_dedup.apply_contributor_changes(session)
             print(f"\napplied: merged {len(applied)} groups.")
+            return 0
+
+        if args.prune_fallbacks:
+            changes = trope_backfill.plan_fallback_prune(session)
+            total = sum(len(c.deleted) for c in changes)
+            print(f"\n{len(changes)} works would have {total} fallback tropes pruned.")
+            for c in changes[:80]:
+                print(f"  [{c.title[:40]:40}] -{len(c.deleted)} fallback (keep {c.real_kept} real): {c.deleted}")
+            early = _refuse(args, url, safe)
+            if early is not None:
+                return early
+            print(f"\napplied: pruned {trope_backfill.apply_fallback_prune(session, changes)} fallback links.")
             return 0
 
         if args.tropes:
