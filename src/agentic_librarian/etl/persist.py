@@ -23,7 +23,7 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.etl.contributor_dedup import norm_name
-from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods
+from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods, clean_trope_name
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
@@ -324,16 +324,19 @@ def persist_enriched_work(
                     existing_link.relevance_score = score
                     existing_link.justification = existing_link.justification or just
         else:
-            # Fallback to simple tags if no enriched tropes found
+            # Fallback to simple tags if no enriched tropes found — cleaned the same way as
+            # genres/moods so the fallback can never write a UUID-tailed / unsplit slug (Spec 2026-06-23).
             for tag in all_fallback_tags:
-                standardized_trope = _safe_standardize(trope_manager.standardize_trope, tag, label=f"trope {tag!r}")
-                if standardized_trope is None:
-                    continue
-                existing_link = (
-                    session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
-                )
-                if not existing_link:
-                    work_trope = WorkTrope(work=work, trope=standardized_trope)
-                    session.add(work_trope)
+                for name in clean_trope_name(tag):
+                    standardized_trope = _safe_standardize(
+                        trope_manager.standardize_trope, name, label=f"trope {name!r}"
+                    )
+                    if standardized_trope is None:
+                        continue
+                    existing_link = (
+                        session.query(WorkTrope).filter_by(work_id=work.id, trope_id=standardized_trope.id).first()
+                    )
+                    if not existing_link:
+                        session.add(WorkTrope(work=work, trope=standardized_trope))
 
     return work
