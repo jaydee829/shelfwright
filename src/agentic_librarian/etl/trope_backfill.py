@@ -62,6 +62,14 @@ def embedding_call_estimate(session: Session) -> int:
     return len(names)
 
 
+def _fold_score(a: float | None, b: float | None) -> float:
+    """Higher of two relevance scores, ignoring None. relevance_score is nullable=False with a
+    1.0 default, so a None (e.g. an unflushed fallback WorkTrope) folds to the surviving value or
+    the column default — never None (which would break the NOT NULL constraint)."""
+    scores = [s for s in (a, b) if s is not None]
+    return max(scores) if scores else 1.0
+
+
 def _move_links(session: Session, src: Trope, dst: Trope) -> None:
     """Re-point every work_tropes(src) onto dst, folding score/justification on PK collision."""
     if src.id == dst.id:
@@ -69,7 +77,7 @@ def _move_links(session: Session, src: Trope, dst: Trope) -> None:
     for wt in session.query(WorkTrope).filter_by(trope_id=src.id).all():
         target = session.query(WorkTrope).filter_by(work_id=wt.work_id, trope_id=dst.id).first()
         if target is not None:
-            target.relevance_score = max(target.relevance_score, wt.relevance_score)
+            target.relevance_score = _fold_score(target.relevance_score, wt.relevance_score)
             target.justification = target.justification or wt.justification
             session.delete(wt)
         else:
@@ -136,7 +144,7 @@ def apply_trope_changes(session: Session, trope_manager=None, changes: list[Trop
             for wt in src_links:
                 target = session.query(WorkTrope).filter_by(work_id=wt.work_id, trope_id=dst.id).first()
                 if target is not None:
-                    target.relevance_score = max(target.relevance_score, wt.relevance_score)
+                    target.relevance_score = _fold_score(target.relevance_score, wt.relevance_score)
                     target.justification = target.justification or wt.justification
                 else:
                     session.add(

@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agentic_librarian.core.user_context import get_required_user_id
@@ -114,7 +115,9 @@ def persist_enriched_work(
         if key in seen_contributors:  # guard: never write the same author+role twice
             continue
         seen_contributors.add(key)
-        author = session.query(Author).filter(Author.name == name).first()
+        # Case-insensitive lookup so a casing variant ("casualfarmer" vs "Casualfarmer") reuses the
+        # existing row instead of creating a duplicate Author (complements the dedup backfill).
+        author = session.query(Author).filter(func.lower(Author.name) == name.lower()).first()
         if not author:
             author = Author(name=name)
             session.add(author)
@@ -223,7 +226,8 @@ def persist_enriched_work(
             deduped_names.append(n_name)
     narrator_names = deduped_names
     for n_name in narrator_names:
-        narrator = session.query(Narrator).filter(Narrator.name == n_name).first()
+        # Case-insensitive lookup so a casing variant reuses the existing Narrator row (see above).
+        narrator = session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
         if not narrator:
             narrator = Narrator(name=n_name)
             session.add(narrator)
