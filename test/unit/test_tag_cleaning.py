@@ -126,3 +126,34 @@ def test_clean_genres_inventory_curation(raw, expected):
 )
 def test_clean_moods_inventory_curation(raw, expected):
     assert tc.clean_moods(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # generic "fiction-" umbrella: strip + split the leaf (handles unmapped fiction-fantasy-* generically)
+        (["fiction-fantasy-military"], ["Fantasy", "Military"]),
+        (["fiction-fantasy-paranormal"], ["Fantasy", "Paranormal"]),
+        (["fiction-horror"], ["Horror"]),
+        (["fiction-fantasy-general"], ["Fantasy"]),  # "general" self-drops (denylist)
+        # explicit combos still win over the generic rule (multi-token leaves the naive split would break)
+        (["fiction-sci-fi-fantasy"], ["Science Fiction", "Fantasy"]),
+        (["fiction-action-adventure"], ["Action & Adventure"]),
+        # #2: no fiction prefix -> explicit combo
+        (["fantasy-young-adult"], ["Fantasy", "Young Adult"]),
+        (["thrillers"], ["Thriller"]),  # plural alias
+        # entity / tie-in noise dropped
+        ([f"john-fictitious-character-{UUID}"], []),
+        (["death-fictitious-character-pratchett"], []),
+        (["hogfather-motion-picture"], []),
+        (["Hogfather. (Motion picture)"], []),
+        (["dune-imaginary-place"], []),
+        (["geary"], []),
+        (["poirot"], []),
+        # genuine subject tags still KEPT (title-cased)
+        (["anti-racism"], ["Anti Racism"]),
+        (["brigands-and-robbers"], ["Brigands And Robbers"]),
+    ],
+)
+def test_clean_genres_round2(raw, expected):
+    assert tc.clean_genres(raw) == expected

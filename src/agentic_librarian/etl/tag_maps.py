@@ -45,6 +45,7 @@ ALIAS_MAP: dict[str, str] = {
     "classique": "Classics",
     "adulte": "Adult",
     "policier": "Crime",
+    "thrillers": "Thriller",
 }
 
 # normalized true-combo slug -> list of canonical genres (split)
@@ -60,6 +61,7 @@ COMBO_MAP: dict[str, list[str]] = {
     "fiction fantasy action adventure": ["Fantasy", "Action & Adventure"],
     "fiction fantasy urban": ["Fantasy"],
     "fiction action adventure": ["Action & Adventure"],
+    "fantasy young adult": ["Fantasy", "Young Adult"],
 }
 
 # normalized tags dropped always (non-genres: formats, fillers)
@@ -85,6 +87,10 @@ DENYLIST: set[str] = {
     "novella",
     "genre fiction",
     "movie",
+    "geary",
+    "poirot",
+    "christopher",
+    "dresden",
 }
 
 # canonical genres dropped iff other genres remain in the list

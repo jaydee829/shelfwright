@@ -10,6 +10,7 @@ from agentic_librarian.etl import tag_maps
 _UUID_RE = re.compile(r"-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _HAS_DIGIT_RE = re.compile(r"\d")
 _BISAC_FILLER = {"general", "fiction", "nonfiction", "non fiction", "books", "miscellaneous"}
+_JUNK_SUBSTRINGS = ("fictitious character", "imaginary place", "motion picture")
 
 
 def _strip_uuid(tag: object) -> str:
@@ -38,16 +39,28 @@ def _titlecase(norm: str) -> str:
     return " ".join(w.capitalize() for w in norm.split())
 
 
-def _clean_one(tag: str, *, alias: dict[str, str], combo: dict[str, list[str]], denylist: set[str]) -> list[str]:
+def _clean_one(
+    tag: str, *, alias: dict[str, str], combo: dict[str, list[str]], denylist: set[str], _depth: int = 0
+) -> list[str]:
     n = _normalize(_bisac_reduce(_strip_uuid(tag)))
     if not n:
         return []
     if n in combo:
-        return list(combo[n])  # already canonical
+        return list(combo[n])  # explicit combo wins (e.g. multi-token leaves)
     if n in alias:
         return [alias[n]]
     if n in denylist or _HAS_DIGIT_RE.search(n) or len(n) <= 1:
         return []
+    if any(j in n for j in _JUNK_SUBSTRINGS):  # entity/tie-in noise, e.g. "* fictitious character"
+        return []
+    if n.startswith("fiction ") and _depth < 4:
+        # BISAC "fiction" umbrella: drop it, split the leaf on the first token, canonicalise each
+        # piece recursively (so e.g. "fiction fantasy military" -> [Fantasy, Military]).
+        first, _, tail = n[len("fiction ") :].partition(" ")
+        out = _clean_one(first, alias=alias, combo=combo, denylist=denylist, _depth=_depth + 1)
+        if tail:
+            out += _clean_one(tail, alias=alias, combo=combo, denylist=denylist, _depth=_depth + 1)
+        return out
     return [_titlecase(n)]  # unknown-but-valid: keep, cleaned
 
 
