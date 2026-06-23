@@ -9,6 +9,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import Trope, Work, WorkTrope
@@ -178,26 +179,32 @@ class FallbackPrune:
 
 def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
     """Works that carry BOTH a real (justification IS NOT NULL) and a fallback (justification IS NULL)
-    trope — preview the fallback links that would be deleted. Read-only."""
-    real_work_ids = {
-        wid for (wid,) in session.query(WorkTrope.work_id).filter(WorkTrope.justification.isnot(None)).distinct()
-    }
-    if not real_work_ids:
+    trope — preview the fallback links that would be deleted. Read-only. Two queries (no N+1)."""
+    real_works = session.query(WorkTrope.work_id).filter(WorkTrope.justification.isnot(None)).distinct().subquery()
+    # All fallback links on real-trope works, joined to the Work title + Trope name in one query.
+    rows = (
+        session.query(WorkTrope.work_id, Work.title, Trope.name)
+        .join(Work, Work.id == WorkTrope.work_id)
+        .join(Trope, Trope.id == WorkTrope.trope_id)
+        .join(real_works, real_works.c.work_id == WorkTrope.work_id)
+        .filter(WorkTrope.justification.is_(None))
+        .all()
+    )
+    if not rows:
         return []
-    by_work: dict[UUID, list[WorkTrope]] = {}
-    for wt in (
-        session.query(WorkTrope).filter(WorkTrope.justification.is_(None), WorkTrope.work_id.in_(real_work_ids)).all()
-    ):
-        by_work.setdefault(wt.work_id, []).append(wt)
-    out: list[FallbackPrune] = []
-    for wid, links in by_work.items():
-        work = session.get(Work, wid)
-        names = [session.get(Trope, wt.trope_id).name for wt in links]
-        real_kept = (
-            session.query(WorkTrope).filter(WorkTrope.work_id == wid, WorkTrope.justification.isnot(None)).count()
-        )
-        out.append(FallbackPrune(wid, work.title if work else str(wid), names, real_kept))
-    return out
+    # Real-trope counts for every affected work in one grouped query.
+    real_counts = dict(
+        session.query(WorkTrope.work_id, func.count())
+        .filter(WorkTrope.justification.isnot(None))
+        .group_by(WorkTrope.work_id)
+        .all()
+    )
+    names: dict[UUID, list[str]] = {}
+    titles: dict[UUID, str] = {}
+    for wid, title, tname in rows:
+        names.setdefault(wid, []).append(tname)
+        titles[wid] = title
+    return [FallbackPrune(wid, titles[wid], n, real_counts.get(wid, 0)) for wid, n in names.items()]
 
 
 def apply_fallback_prune(session: Session, changes: list[FallbackPrune] | None = None) -> int:
@@ -205,15 +212,14 @@ def apply_fallback_prune(session: Session, changes: list[FallbackPrune] | None =
     Trope rows, no embeddings. Idempotent (a second run finds no work with both layers)."""
     if changes is None:
         changes = plan_fallback_prune(session)
-    n = 0
-    for c in changes:
-        for wt in (
-            session.query(WorkTrope).filter(WorkTrope.work_id == c.work_id, WorkTrope.justification.is_(None)).all()
-        ):
-            session.delete(wt)
-            n += 1
+    work_ids = [c.work_id for c in changes]
+    if not work_ids:
+        return 0
+    links = session.query(WorkTrope).filter(WorkTrope.justification.is_(None), WorkTrope.work_id.in_(work_ids)).all()
+    for wt in links:
+        session.delete(wt)
     session.flush()
-    return n
+    return len(links)
 
 
 def fallback_prune_inventory(session: Session) -> tuple[int, int]:
