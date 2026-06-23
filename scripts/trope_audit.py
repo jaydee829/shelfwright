@@ -1,7 +1,9 @@
 """Read-only trope audit: real (scout) vs fallback (genre/mood) tropes for the most
 recent import vs the rest of the catalog. Distinguisher: work_tropes.justification
 (scout tropes carry one; genre/mood fallbacks don't)."""
+
 from sqlalchemy import text
+
 from agentic_librarian.db.session import DatabaseManager
 
 dbm = DatabaseManager()
@@ -55,6 +57,7 @@ GROUP BY 1
 ORDER BY 1
 """
 
+
 def run(label, sql):
     print(f"\n===== {label} =====")
     with dbm.get_session() as s:
@@ -64,6 +67,7 @@ def run(label, sql):
         print("-" * 60)
         for row in res:
             print(" | ".join("" if v is None else str(v) for v in row))
+
 
 run("1) recent import jobs", Q1)
 run("2) per-book real vs fallback tropes (latest job)", Q2)
