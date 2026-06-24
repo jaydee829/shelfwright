@@ -9,7 +9,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import Trope, Work, WorkTrope
@@ -173,49 +173,60 @@ def trope_inventory(session: Session) -> tuple[Counter, list]:
 class FallbackPrune:
     work_id: UUID
     title: str
-    deleted: list[str]  # fallback trope names removed from this work
-    real_kept: int
+    deleted: list[str]  # genre/mood-fallback trope names removed from this work
+    deleted_trope_ids: list[UUID]  # the WorkTrope.trope_id values to delete (this work)
+    real_kept: int  # genuine narrative tropes retained
 
 
 def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
-    """Works that carry BOTH a real (justification IS NOT NULL) and a fallback (justification IS NULL)
-    trope — preview the fallback links that would be deleted. Read-only. Two queries (no N+1)."""
-    real_works = session.query(WorkTrope.work_id).filter(WorkTrope.justification.isnot(None)).distinct().subquery()
-    # All fallback links on real-trope works, joined to the Work title + Trope name in one query.
+    """A genre/mood "fallback" trope is one whose CLEANED name IS (a subset of) the work's own
+    cleaned genres+moods — i.e. the two-phase fast pass re-encoded one of the work's genres/moods as
+    a trope. Prune those, but ONLY on works that keep >=1 genuine narrative trope (one that cleans to
+    something NOT in the work's genres/moods, e.g. 'The Dark Night of the Soul'); junk-named tropes
+    (clean -> []) are left for the --tropes pass to drop.
+
+    The justification column is deliberately NOT used: it is unreliable — many real scout tropes have
+    NULL justification (semantic-collapse "attractor" tropes shared across books), so it conflates
+    real tropes with fallbacks. We match by name/genre membership instead. Read-only."""
     rows = (
-        session.query(WorkTrope.work_id, Work.title, Trope.name)
-        .join(Work, Work.id == WorkTrope.work_id)
+        session.query(WorkTrope.work_id, WorkTrope.trope_id, Trope.name, Work.title, Work.genres, Work.moods)
         .join(Trope, Trope.id == WorkTrope.trope_id)
-        .join(real_works, real_works.c.work_id == WorkTrope.work_id)
-        .filter(WorkTrope.justification.is_(None))
+        .join(Work, Work.id == WorkTrope.work_id)
         .all()
     )
-    if not rows:
-        return []
-    # Real-trope counts for every affected work in one grouped query.
-    real_counts = dict(
-        session.query(WorkTrope.work_id, func.count())
-        .filter(WorkTrope.justification.isnot(None))
-        .group_by(WorkTrope.work_id)
-        .all()
-    )
-    names: dict[UUID, list[str]] = {}
-    titles: dict[UUID, str] = {}
-    for wid, title, tname in rows:
-        names.setdefault(wid, []).append(tname)
-        titles[wid] = title
-    return [FallbackPrune(wid, titles[wid], n, real_counts.get(wid, 0)) for wid, n in names.items()]
+    by_work: dict[UUID, dict] = {}
+    for work_id, trope_id, name, title, genres, moods in rows:
+        # case-fold the genre/mood set so the subset test is robust to casing drift (legacy/manual edits)
+        gm = {s.lower() for s in (set(genres or []) | set(moods or []))}
+        w = by_work.setdefault(work_id, {"title": title, "gm": gm, "links": []})
+        w["links"].append((trope_id, name))
+    out: list[FallbackPrune] = []
+    for work_id, w in by_work.items():
+        gm = w["gm"]
+        fallback: list[tuple[UUID, str]] = []
+        real = 0
+        for trope_id, name in w["links"]:
+            cleaned = clean_trope_name(name)
+            cleaned_lower = {c.lower() for c in cleaned}
+            if cleaned and cleaned_lower <= gm:  # the trope is (a clean of) one of this work's genres/moods
+                fallback.append((trope_id, name))
+            elif cleaned:  # cleans to something outside genres/moods -> a genuine narrative trope
+                real += 1
+            # else: cleans to [] (junk) -> leave it; the --tropes pass deletes junk-named tropes
+        if fallback and real:  # never strip a work below its genuine tropes
+            out.append(FallbackPrune(work_id, w["title"], [n for _, n in fallback], [tid for tid, _ in fallback], real))
+    return out
 
 
 def apply_fallback_prune(session: Session, changes: list[FallbackPrune] | None = None) -> int:
-    """Delete the fallback (NULL-justification) links on each planned work. Link deletion only — no
-    Trope rows, no embeddings. Idempotent (a second run finds no work with both layers)."""
+    """Delete the identified genre/mood-fallback links in one batch. Link deletion only — no Trope
+    rows, no embeddings. Idempotent (a second run finds nothing left to prune)."""
     if changes is None:
         changes = plan_fallback_prune(session)
-    work_ids = [c.work_id for c in changes]
-    if not work_ids:
+    pairs = [(c.work_id, tid) for c in changes for tid in c.deleted_trope_ids]
+    if not pairs:
         return 0
-    links = session.query(WorkTrope).filter(WorkTrope.justification.is_(None), WorkTrope.work_id.in_(work_ids)).all()
+    links = session.query(WorkTrope).filter(tuple_(WorkTrope.work_id, WorkTrope.trope_id).in_(pairs)).all()
     for wt in links:
         session.delete(wt)
     session.flush()

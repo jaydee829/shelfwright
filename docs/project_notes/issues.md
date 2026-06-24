@@ -12,6 +12,17 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-24 - Catalog QC: contributor dedup + trope-name cleaning + fallback prune
+- **Status**: Code merged; operator backfills partially applied (see Notes)
+- **Description**: A run of backend catalog-quality cleanups on the bench (off `main`), all subagent-driven + Gemini-reviewed.
+- **URL**: PRs #63, #64, #67, #69; enhancement #70
+- **Notes**:
+  - **#63** (`fix/author-trope-cleanup`) — dedup duplicate `Author`/`Narrator` rows (case/whitespace variants, role-preserving) + `clean_trope_name` + 3 persist guards + `scripts/clean_catalog.py` (`--contributors`/`--tropes` + `is_prod_url`/`--yes`). In-flight fixes: trope-split link fan-out P0, CLI dry-run ordering, deterministic survivor (CI flake), in-place re-points. **Operator applied `--contributors` on prod.**
+  - **#64** (`ae0bc45`) — `clean_trope_name` preserves genuine free-text tropes **verbatim** (only genre/mood slugs are canonicalized/dropped); the genre pipeline was mangling real tropes (`/` split, casing). Dirty-trope set dropped 506→35, embedding calls 308→16. Perf nit: merged maps hoisted to module constants.
+  - **#67** — two-phase fallback layer fix, "Shape B" + `--prune-fallbacks` (bugs.md 2026-06-23 / ADR-052).
+  - **#69** (OPEN, dry-run validated) — corrected the prune distinguisher to genre/mood membership after a prod dry-run caught it deleting real tropes (bugs.md 2026-06-24). **✅ Operator APPLIED `--prune-fallbacks` + `--tropes` on prod 2026-06-24 (run from the #69 branch). ⚠️ Still MERGE #69 — `main`'s prune is still #67's unsafe `justification IS NULL` version until it lands.**
+  - **#70** — enhancement: semantic over-collapse of tropes (the ~14 attractor canonicals). The real recommendation-quality lever; deferred.
+
 ### 2026-06-23 - FRONTEND-NEXT: frontend backlog / next directions
 - **Status**: Open (backlog — picked from a "what's next" review; frontend is visually in a good place after Visual Identity v2 + nav/import polish)
 - **Description**: Candidate next frontend work, split by whether it needs the backend bench.

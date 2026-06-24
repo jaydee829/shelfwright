@@ -52,11 +52,23 @@ keep their fallbacks as the stopgap. This fix is **not** the deferred refactor.
 
 ## Distinguisher
 
-`work_tropes.justification`: scout (real) tropes set it (`persist.py:327`); genre/mood fallbacks
-leave it `NULL` (`persist.py:347`, no justification arg). The `trope_audit.py` rollup validates this
-holds in prod (real tropes consistently carry justification). **Safety net:** the data prune is
-dry-run-previewable per work, so the operator eyeballs the exact trope names being deleted before
-applying — a genuine trope that somehow lacked a justification would be visible in the preview.
+**⚠️ Superseded (2026-06-23, after a prod dry-run).** The original design distinguished fallbacks by
+`work_tropes.justification IS NULL`. **That is unreliable** — a dry-run showed it flagging genuine
+narrative tropes (`The Dark Night of the Soul`, `Mirror / Shadow Self`, `Unknown Heritage / Mysterious
+Origins`) for deletion. Many *real* scout tropes have NULL justification (they are semantic-collapse
+"attractor" canonicals — `standardize_trope`'s 0.85 cosine match funnels many books' distinct tropes
+onto a few shared rows whose links carry no per-book justification). The `trope_audit.py` rollup that
+reported "7.58 fallback/work" **over-counted**: it labelled those null-justification real tropes as
+fallbacks. Do not use justification to identify fallbacks.
+
+**Corrected distinguisher — genre/mood membership by name.** A fallback trope is, by construction
+(`persist.py` `else` branch), one of the work's own genres/moods re-encoded as a trope. So a
+`work_tropes` link is a fallback **iff `clean_trope_name(trope.name)` is non-empty and a subset of
+the work's cleaned `{genres ∪ moods}`** — i.e. the trope, cleaned, *is* one of the work's genres/moods.
+A genuine narrative trope cleans to something **outside** that set (it is never a genre/mood), so it is
+never matched. `clean_trope_name` bridges the raw fallback slug (`science-fiction-fantasy-<uuid>`) to
+the work's cleaned genre (`Science Fiction`/`Fantasy`). **Safety net:** still dry-run-previewable per
+work, and the prune fires only on works that retain ≥1 genuine trope.
 
 ---
 
@@ -99,13 +111,17 @@ signal on trope-less works.
 
 New backfill logic (mirrors `etl/tag_backfill.py` / `etl/trope_backfill.py`; session-in, summary-out):
 
-- **Criterion:** delete `work_tropes` rows where `justification IS NULL` **and** the same `work_id`
-  has ≥1 `work_tropes` row with `justification IS NOT NULL`. Pure link deletion — no `Trope` rows, no
-  embeddings touched.
-- `plan_fallback_prune(session)` → preview: per polluted work, `(title, [fallback trope names being
-  deleted], #real_kept)`. Read-only. `apply_fallback_prune(session, changes=None)` → deletes the
-  links individually (`session.delete`, keeping the identity map consistent), returns the count.
-- Idempotent/convergent: after a run, no work has both a real and a NULL trope → a second run is a no-op.
+- **Criterion (genre/mood membership — see Distinguisher):** per work, classify each `work_tropes`
+  link by `cleaned = set(clean_trope_name(trope.name))` against the work's `gm = {genres ∪ moods}`:
+  **fallback** if `cleaned` non-empty and `cleaned ⊆ gm`; **real** if `cleaned` non-empty and not a
+  subset; **junk** if `cleaned == ∅` (left untouched — the `--tropes` pass drops junk-named tropes).
+  Delete the fallback links **only on works that retain ≥1 real** trope (never strip a work below its
+  genuine tropes; fallback-only works keep their stopgap). Pure link deletion — no `Trope` rows, no
+  embeddings touched. `justification` is **not** used.
+- `plan_fallback_prune(session)` → preview: per work, `(title, [fallback names], [trope_ids], #real_kept)`.
+  Read-only, one join query. `apply_fallback_prune(session, changes=None)` → deletes the identified
+  `(work_id, trope_id)` links individually (`session.delete`), returns the count.
+- Idempotent/convergent: after a run, pruned works retain only real/junk tropes → a second run is a no-op.
 - **CLI:** add a `--prune-fallbacks` mode to `scripts/clean_catalog.py` — `--inventory` reports the
   count of polluted works + total fallback links; `--prune-fallbacks --dry-run` previews; `--apply
   --yes` writes. Reuses the `is_prod_url` guard, `--yes` gate, and credential-stripped target print.
