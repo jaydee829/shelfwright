@@ -9,6 +9,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from uuid import UUID
 
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import Trope, Work, WorkTrope
@@ -195,7 +196,9 @@ def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
     )
     by_work: dict[UUID, dict] = {}
     for work_id, trope_id, name, title, genres, moods in rows:
-        w = by_work.setdefault(work_id, {"title": title, "gm": set(genres or []) | set(moods or []), "links": []})
+        # case-fold the genre/mood set so the subset test is robust to casing drift (legacy/manual edits)
+        gm = {s.lower() for s in (set(genres or []) | set(moods or []))}
+        w = by_work.setdefault(work_id, {"title": title, "gm": gm, "links": []})
         w["links"].append((trope_id, name))
     out: list[FallbackPrune] = []
     for work_id, w in by_work.items():
@@ -203,8 +206,9 @@ def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
         fallback: list[tuple[UUID, str]] = []
         real = 0
         for trope_id, name in w["links"]:
-            cleaned = set(clean_trope_name(name))
-            if cleaned and cleaned <= gm:  # the trope is (a clean of) one of this work's own genres/moods
+            cleaned = clean_trope_name(name)
+            cleaned_lower = {c.lower() for c in cleaned}
+            if cleaned and cleaned_lower <= gm:  # the trope is (a clean of) one of this work's genres/moods
                 fallback.append((trope_id, name))
             elif cleaned:  # cleans to something outside genres/moods -> a genuine narrative trope
                 real += 1
@@ -215,23 +219,18 @@ def plan_fallback_prune(session: Session) -> list[FallbackPrune]:
 
 
 def apply_fallback_prune(session: Session, changes: list[FallbackPrune] | None = None) -> int:
-    """Delete the identified genre/mood-fallback links. Link deletion only — no Trope rows, no
-    embeddings. Idempotent (a second run finds nothing left to prune)."""
+    """Delete the identified genre/mood-fallback links in one batch. Link deletion only — no Trope
+    rows, no embeddings. Idempotent (a second run finds nothing left to prune)."""
     if changes is None:
         changes = plan_fallback_prune(session)
-    n = 0
-    for c in changes:
-        if not c.deleted_trope_ids:
-            continue
-        for wt in (
-            session.query(WorkTrope)
-            .filter(WorkTrope.work_id == c.work_id, WorkTrope.trope_id.in_(c.deleted_trope_ids))
-            .all()
-        ):
-            session.delete(wt)
-            n += 1
+    pairs = [(c.work_id, tid) for c in changes for tid in c.deleted_trope_ids]
+    if not pairs:
+        return 0
+    links = session.query(WorkTrope).filter(tuple_(WorkTrope.work_id, WorkTrope.trope_id).in_(pairs)).all()
+    for wt in links:
+        session.delete(wt)
     session.flush()
-    return n
+    return len(links)
 
 
 def fallback_prune_inventory(session: Session) -> tuple[int, int]:
