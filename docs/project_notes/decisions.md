@@ -798,3 +798,33 @@ This file documents key architectural decisions, their context, and trade-offs.
   enriched (no re-run needed). Memory is billed only while enriching (service scales to zero when idle).
 - **On any re-deploy or queue edit these settings must be preserved or the OOM returns** — flagged on the
   coordination board and in `key_facts.md` (Production). Pure infra (gcloud), no PR/code change; verified live.
+
+### ADR-052: Genre/mood-as-trope fallback strategy — fast-pass opt-out + membership-based prune (2026-06-24)
+**Context:**
+- Two-phase import double-layered genre/mood "fallback" tropes onto works that also have real scout tropes
+  (see bugs.md 2026-06-23). Needed (a) a persist fix so it can't recur and (b) a one-time prune of the
+  existing pollution — without stripping the genre/mood matching signal from works that have NO real tropes
+  (works have no embedding; matching = trope+style vectors only — memory `work-representation-embedding-gap`).
+**Decision:**
+- **Persist (Shape B, PR #67):** the FAST pass *opts out* of writing fallback tropes (`write_fallback_tropes`
+  row flag, default True; `enrich_fast` passes False) rather than write-then-delete. The deep pass is the
+  single authoritative trope write — real tropes, or the genre/mood fallback only if the deep scout returns
+  none. Single-pass/one-shot callers keep the default (stopgap preserved).
+- **Prune distinguisher (PR #69, supersedes #67's):** a fallback is identified by **genre/mood membership by
+  name**, NOT by `justification`. A `work_tropes` link is a fallback iff `clean_trope_name(name)` is a
+  non-empty subset of the work's case-folded `{genres ∪ moods}`; delete only on works that retain ≥1 genuine
+  trope (cleans to something outside genres/moods). This *guarantees* no narrative trope is deleted.
+- **Non-goal (deferred):** the work-representation refactor (give `Work` its own genre/mood embedding) — only
+  then delete genre-as-trope fallbacks on *trope-less* works. Until then they keep their fallbacks.
+**Alternatives Considered:**
+- Persist "delete-on-deep-pass" (write fallbacks, deep pass deletes NULL ones) → rejected: write-then-delete
+  churn + a fragile "delete NULL inside persist" contract.
+- Prune by `justification IS NULL` (the original #67 design) → **rejected after a prod dry-run flagged real
+  tropes for deletion** (see the 2026-06-24 bug entry): many real scout tropes have NULL justification
+  (semantic-collapse "attractor" canonicals), so justification conflates real tropes with fallbacks.
+**Consequences:**
+- Imports no longer accumulate a throwaway fallback layer; the corrected prune removes ~394 genre/mood links
+  across 123 works while keeping every narrative trope. Trade-off: during the fast→deep gap (or a permanently
+  failed deep pass) an imported book shows genres/moods but no tropes until deep enrichment lands.
+- Surfaced a separate, larger trope-quality issue: **semantic over-collapse** (the attractor canonicals) —
+  filed as GH #70 (enhancement). That, not the fallback layer, is the main lever on recommendation quality.
