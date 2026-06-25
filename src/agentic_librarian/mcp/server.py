@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import UUID
 
@@ -29,6 +30,8 @@ from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("agentic_librarian")
@@ -341,7 +344,14 @@ def check_availability(title: str, author: str) -> dict:
         for lib in libs:
             try:
                 formats = availability_service.availability_for(session, lib, title, author)
-            except Exception:  # noqa: BLE001 - never throw into the agent loop
+            except Exception as exc:  # noqa: BLE001 - never throw into the agent loop
+                logger.warning(
+                    "check_availability lookup failed for %r by %r at %r: %s",
+                    title,
+                    author,
+                    lib.get("name"),
+                    exc,
+                )
                 formats = None
             if formats:
                 libraries.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})

@@ -5,9 +5,12 @@ swapped for the official partner API later, and so every caller degrades on Thun
 
 from __future__ import annotations
 
+import logging
 from urllib.parse import quote_plus
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 _THUNDER = "https://thunder.api.overdrive.com"
 _CLIENT = "dewey"
@@ -38,6 +41,7 @@ def search_libraries(query: str) -> list[dict]:
                 out.append({"slug": slug, "name": name})
         return out
     except Exception as exc:  # noqa: BLE001 - normalize every failure to ThunderError
+        logger.warning("Thunder search_libraries failed for query %r: %s", query, exc)
         raise ThunderError(str(exc)) from exc
 
 
@@ -53,4 +57,5 @@ def fetch_media(slug: str, title: str) -> list[dict]:
         data = _http_get_json(url)
         return data.get("items", [])
     except Exception as exc:  # noqa: BLE001
+        logger.warning("Thunder fetch_media failed for slug %r title %r: %s", slug, title, exc)
         raise ThunderError(str(exc)) from exc

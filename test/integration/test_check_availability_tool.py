@@ -33,6 +33,7 @@ def test_check_availability_returns_links_and_badge(db_url, monkeypatch):
 
     with test_db_manager.get_session() as session:
         user = _user_with_library(session)
+        user_id = user.id  # capture before commit/close detaches the instance (expire_on_commit)
         session.commit()
 
     monkeypatch.setattr(
@@ -40,7 +41,7 @@ def test_check_availability_returns_links_and_badge(db_url, monkeypatch):
         "availability_for",
         lambda *a, **k: [{"format": "Audiobook", "available": True}],
     )
-    with as_user(user.id):
+    with as_user(user_id):
         out = server.check_availability("Project Hail Mary", "Andy Weir")
 
     assert out["libraries"][0]["formats"][0]["available"] is True
@@ -62,9 +63,10 @@ def test_check_availability_no_libraries_note(db_url):
     with test_db_manager.get_session() as session:
         user = User(id=uuid4(), email="nolibrary@example.com")
         session.add(user)
+        user_id = user.id  # capture before commit/close detaches the instance (expire_on_commit)
         session.commit()
 
-    with as_user(user.id):
+    with as_user(user_id):
         out = server.check_availability("Dune", "Frank Herbert")
 
     assert out["libraries"] == []
