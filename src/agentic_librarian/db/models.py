@@ -3,6 +3,7 @@ from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -265,6 +266,36 @@ class UserCredential(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
     )
+
+
+class UserLibrary(Base):
+    """A library system the user holds a card at (public OverDrive slug — NOT a secret,
+    so this is plain prefs, not the UserCredential/keyring). Ordered by sort_order = the
+    user's priority. provider is 'libby' in cut #1 (Hoopla has no availability signal)."""
+
+    __tablename__ = "user_libraries"
+
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    provider: Mapped[str] = mapped_column(String, primary_key=True, default="libby")
+    library_slug: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+
+
+class AvailabilityCache(Base):
+    """Read-through cache for a (library, title, author) availability lookup. Keyed on
+    NORMALIZED title+author so the recs consumer (has work_id) and the chat tool (has raw
+    title/author) share rows. Freshness = now - fetched_at < TTL (default 4h)."""
+
+    __tablename__ = "availability_cache"
+
+    provider: Mapped[str] = mapped_column(String, primary_key=True)
+    library_slug: Mapped[str] = mapped_column(String, primary_key=True)
+    norm_title: Mapped[str] = mapped_column(String, primary_key=True)
+    norm_author: Mapped[str] = mapped_column(String, primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class ImportJob(Base):
