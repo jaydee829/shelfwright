@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -16,6 +17,9 @@ describe('design tokens', () => {
   })
 
   it('defines the categorical palette in both themes', () => {
+    // vitest runs in Node (css:false stubs CSS imports to empty, so we read the
+    // source directly); the file-scoped node reference above keeps `tsc -b` happy
+    // without adding node types to the app build.
     const css = readFileSync(resolve(import.meta.dirname, 'index.css'), 'utf8')
     for (let i = 1; i <= 6; i++) expect(css).toContain(`--cat-${i}:`)
     expect(css.match(/--cat-1:/g)?.length).toBe(2)
