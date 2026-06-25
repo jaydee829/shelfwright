@@ -1,34 +1,5 @@
 /* ---- AnalysisView ---- */
 
-/* ---- tab strip ---- */
-.tabs {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-4);
-}
-
-.tab {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font: var(--fs-sm) / 1 var(--font-body);
-  color: var(--text-muted);
-  transition: background-color .12s ease, color .12s ease, border-color .12s ease;
-}
-
-.tab:hover {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.tab.active {
-  background: var(--strong-bg);
-  color: var(--strong-fg);
-  border-color: var(--strong-bg);
-}
-
 /* ---- snapshot grid ---- */
 .snapshot-grid {
   display: grid;
@@ -114,6 +85,10 @@
   font-size: var(--fs-sm);
   font-style: italic;
 }
+
+/* ---- analysis sections ---- */
+.analysis-section { margin-top: var(--space-7); }
+.analysis-section .section-title { font-size: var(--fs-title); margin: 0 0 var(--space-4); }
 
 @media (min-width: 768px) {
   .snapshot-grid { grid-template-columns: repeat(4, 1fr); }
