@@ -23,6 +23,7 @@ vi.mock('./views/AnalysisView', () => ({ default: () => <div>analysis-view</div>
 vi.mock('./views/AddBookView', () => ({ default: () => <div>add-view</div> }))
 vi.mock('./views/HistoryEditView', () => ({ default: () => <div>history-edit-view</div> }))
 vi.mock('./views/ImportView', () => ({ default: () => <div>ImportView</div> }))
+vi.mock('./views/SettingsView', () => ({ default: () => <div>settings-view</div> }))
 
 import App from './App'
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date
 from uuid import UUID
 
@@ -7,6 +8,8 @@ import numpy as np
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload, selectinload
 
+from agentic_librarian.availability import service as availability_service
+from agentic_librarian.availability.links import build_links
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import (
     Author,
@@ -16,6 +19,7 @@ from agentic_librarian.db.models import (
     Style,
     Suggestions,
     Trope,
+    UserLibrary,
     Work,
     WorkContributor,
     WorkStyle,
@@ -26,6 +30,8 @@ from agentic_librarian.etl.persist import persist_enriched_work
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from mcp.server.fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
 mcp = FastMCP("agentic_librarian")
@@ -304,6 +310,55 @@ def check_reading_history(title: str, author: str) -> dict:
                 "rating": entry.user_rating,
             }
         return {"status": "Unread", "is_re_read_candidate": True}
+
+
+@mcp.tool()
+def check_availability(title: str, author: str) -> dict:
+    """Check library + retail availability for a book and return where to get it. Use when
+    recommending a title or when the user asks where/how to read it. Returns {title, author,
+    libraries: [{library, slug, formats:[{format, available, copies_available, copies_owned,
+    holds_ratio, wait_days}]}], links:[{kind,label,url}], note}. 'libraries' is the user's
+    saved Libby systems with live availability; 'links' (Libby/Hoopla/Bookshop/Amazon) is
+    always present. Narrate it naturally; never paste the raw dict."""
+    if not _valid_name(title) or not _valid_name(author):
+        return {
+            "title": title,
+            "author": author,
+            "libraries": [],
+            "links": [],
+            "note": "Error: title and author must be non-empty strings.",
+        }
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
+    libraries: list[dict] = []
+    note = ""
+    with db_manager.get_session() as session:
+        libs = [
+            {"slug": r.library_slug, "name": r.display_name}
+            for r in session.query(UserLibrary)
+            .filter(UserLibrary.user_id == user_id, UserLibrary.provider == "libby")
+            .order_by(UserLibrary.sort_order)
+            .all()
+        ]
+        if not libs:
+            note = "No libraries saved — the reader can add theirs in Settings."
+        for lib in libs:
+            try:
+                formats = availability_service.availability_for(session, lib, title, author)
+            except Exception as exc:  # noqa: BLE001 - never throw into the agent loop
+                logger.warning(
+                    "check_availability lookup failed for %r by %r at %r: %s",
+                    title,
+                    author,
+                    lib.get("name"),
+                    exc,
+                )
+                formats = None
+            if formats:
+                libraries.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})
+        links = build_links(title, author, libraries=libs)
+    if libs and not libraries and not note:
+        note = "Couldn't confirm live availability — offer the search links."
+    return {"title": title, "author": author, "libraries": libraries, "links": links, "note": note}
 
 
 @mcp.tool()
