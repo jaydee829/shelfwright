@@ -1,0 +1,8 @@
+.settings { display: flex; flex-direction: column; gap: 0.75rem; }
+.settings__hint { opacity: 0.8; font-size: 0.9rem; }
+.settings__saved, .settings__results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.settings__saved-row, .settings__result-row { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.settings__controls { display: flex; gap: 0.3rem; }
+.settings__search { padding: 0.5rem; }
+.settings__actions { display: flex; gap: 0.5rem; align-items: center; }
+.settings__status { opacity: 0.8; font-size: 0.9rem; }
