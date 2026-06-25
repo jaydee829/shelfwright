@@ -79,7 +79,7 @@ Why this shape:
 **Backend — data model (`src/agentic_librarian/db/models.py` + Alembic)**
 
 - `UserLibrary` → table `user_libraries`: `user_id` (FK users.id), `provider` (str, `'libby'` in cut #1), `library_slug` (str), `display_name` (str), `sort_order` (int), `created_at`. PK `(user_id, provider, library_slug)`. Holds **no secret** — slugs are public — so it does not touch `UserCredential`/the keyring.
-- `AvailabilityCache` → table `availability_cache`: `provider` (str), `library_slug` (str), `norm_title` (str), `norm_author` (str), `payload` (JSONB), `fetched_at` (datetime). PK `(provider, library_slug, norm_title, norm_author)`. Keyed on **normalized title+author** (not `work_id`) so the recs consumer (has `work_id` → title/author) and the chat consumer (has title/author directly, incl. web-discovered books) **share rows**. Freshness = `now - fetched_at < TTL` (default 6h, configurable).
+- `AvailabilityCache` → table `availability_cache`: `provider` (str), `library_slug` (str), `norm_title` (str), `norm_author` (str), `payload` (JSONB), `fetched_at` (datetime). PK `(provider, library_slug, norm_title, norm_author)`. Keyed on **normalized title+author** (not `work_id`) so the recs consumer (has `work_id` → title/author) and the chat consumer (has title/author directly, incl. web-discovered books) **share rows**. Freshness = `now - fetched_at < TTL` (default 4h, configurable — back it off if we see upstream errors/rate-limiting).
 - One Alembic migration adds both tables (follow the existing `alembic/versions/` pattern).
 
 **Frontend (`frontend/src/`)**
@@ -143,7 +143,7 @@ The Librarian calls `check_availability(title, author)` when relevant. It hits t
 ## Open verification items (resolve in the first implementation task)
 
 - **Exact Libby search deep-link path.** Candidate: `https://libbyapp.com/search/{slug}/search/query-{encoded}`. Confirm the precise segment names against a live Libby session; if brittle, fall back to the per-library OverDrive search URL. Stable, well-known format — just needs the precise path pinned before the link builder is finalized.
-- **TTL value.** Default 6h; confirm it feels right against real hold-queue movement during testing.
+- **TTL value.** Default 4h; confirm it feels right against real hold-queue movement during testing, and back it off (longer TTL = fewer upstream calls) if Thunder shows errors or rate-limiting.
 
 ## Issue split
 
