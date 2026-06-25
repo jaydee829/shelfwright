@@ -39,6 +39,9 @@ RADAR_ATTR_TO_AXIS: dict[str, str] = {
     "thematic_depth": "depth",
     "interiority": "inner_focus",
     "humor": "humor",
+    # NOTE: deliberate inversion — the scout attribute is "emotional_distance"
+    # (high = cold/detached) but the axis is "warmth" (high = intimate/warm). The
+    # warmth anchors below are warmth-oriented, so an "intimate" style scores ~1.
     "emotional_distance": "warmth",
     "lexicon": "lexicon",
     "world_building": "world_building",
@@ -88,7 +91,7 @@ class _StyleLike(Protocol):
 
 # Module-level anchor cache: axis -> (low_vec, high_vec). Filled once per process.
 _anchor_cache: dict[str, tuple[list[float], list[float]]] = {}
-_genai_client = None
+_genai_client: object | None = None  # genai.Client; typed as object to avoid an import-time genai dependency
 
 
 def get_anchor_vectors(embed: Callable[[str], list[float]]) -> dict[str, tuple[list[float], list[float]]]:
