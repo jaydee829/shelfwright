@@ -57,6 +57,9 @@ def put_my_libraries(
     body: LibrariesIn = Body(...),  # noqa: B008
     user: AuthenticatedUser = Depends(get_current_user),  # noqa: B008
 ):
+    seen = {lib.slug for lib in body.libraries}
+    if len(seen) < len(body.libraries):
+        raise HTTPException(status_code=422, detail="duplicate library slugs")
     with db_manager.get_session() as session:
         session.query(UserLibrary).filter(UserLibrary.user_id == user.id, UserLibrary.provider == "libby").delete()
         for i, lib in enumerate(body.libraries):

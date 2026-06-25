@@ -38,7 +38,10 @@ def test_search_libraries_503_when_thunder_down(client, monkeypatch):
     """GET /libraries/search returns 503 when overdrive raises ThunderError."""
     from agentic_librarian.availability.overdrive import ThunderError
 
-    monkeypatch.setattr(overdrive, "search_libraries", lambda q: (_ for _ in ()).throw(ThunderError("down")))
+    def _raise(_q):
+        raise ThunderError("down")
+
+    monkeypatch.setattr(overdrive, "search_libraries", _raise)
 
     resp = client.get("/libraries/search?q=king")
     assert resp.status_code == 503
@@ -81,3 +84,15 @@ def test_get_libraries_empty_when_none_saved(client, db_url):
     resp = client.get("/me/libraries")
     assert resp.status_code == 200
     assert resp.json() == {"libraries": []}
+
+
+def test_put_libraries_422_on_duplicate_slugs(client):
+    """PUT /me/libraries returns 422 when the request body contains duplicate slugs."""
+    payload = {
+        "libraries": [
+            {"slug": "seattle", "name": "Seattle Public Library"},
+            {"slug": "seattle", "name": "Seattle Public Library (duplicate)"},
+        ]
+    }
+    resp = client.put("/me/libraries", json=payload)
+    assert resp.status_code == 422
