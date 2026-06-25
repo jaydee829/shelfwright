@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 from collections import Counter
 from collections.abc import Callable
 from typing import Protocol
@@ -90,15 +91,25 @@ class _StyleLike(Protocol):
 
 
 # Module-level anchor cache: axis -> (low_vec, high_vec). Filled once per process.
+# Guarded by _lock so concurrent requests don't double-embed or read a half-filled cache.
 _anchor_cache: dict[str, tuple[list[float], list[float]]] = {}
 _genai_client: object | None = None  # genai.Client; typed as object to avoid an import-time genai dependency
+_lock = threading.Lock()
 
 
 def get_anchor_vectors(embed: Callable[[str], list[float]]) -> dict[str, tuple[list[float], list[float]]]:
-    """Embed each axis's anchor pair once and memoize."""
+    """Embed each axis's anchor pair once and memoize (thread-safe, double-checked).
+
+    The fully-built dict is published with a single atomic rebind, so a concurrent
+    reader sees the cache as either empty or complete — never partially filled (which
+    would KeyError on a missing axis). An embedding failure leaves the cache empty.
+    """
+    global _anchor_cache
     if not _anchor_cache:
-        for axis, (low, high) in ANCHORS.items():
-            _anchor_cache[axis] = (embed(low), embed(high))
+        with _lock:
+            if not _anchor_cache:
+                built = {axis: (embed(low), embed(high)) for axis, (low, high) in ANCHORS.items()}
+                _anchor_cache = built
     return _anchor_cache
 
 
@@ -110,11 +121,13 @@ def default_embedder() -> Callable[[str], list[float]] | None:
     if not key:
         return None
     if _genai_client is None:
-        from google import genai
+        with _lock:  # double-checked: build at most one client under concurrency
+            if _genai_client is None:
+                from google import genai
 
-        from agentic_librarian.llm_retry import genai_http_options
+                from agentic_librarian.llm_retry import genai_http_options
 
-        _genai_client = genai.Client(api_key=key, http_options=genai_http_options())
+                _genai_client = genai.Client(api_key=key, http_options=genai_http_options())
     client = _genai_client
     return lambda text: get_cached_embedding(client, _EMBED_MODEL, text)
 
