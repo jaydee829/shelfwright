@@ -18,7 +18,6 @@ import json
 import sys
 import time
 from pathlib import Path
-from urllib.parse import quote_plus
 
 import requests
 
@@ -29,8 +28,8 @@ _OUT = Path(__file__).resolve().parent.parent / "src" / "agentic_librarian" / "a
 
 
 def _page(page: int) -> dict:
-    url = f"{_THUNDER}/v2/libraries?perPage={_PER_PAGE}&page={page}&x-client-id={quote_plus(_CLIENT)}"
-    resp = requests.get(url, timeout=15, headers={"Accept": "application/json"})
+    params = {"perPage": _PER_PAGE, "page": page, "x-client-id": _CLIENT}
+    resp = requests.get(f"{_THUNDER}/v2/libraries", params=params, timeout=15, headers={"Accept": "application/json"})
     resp.raise_for_status()
     return resp.json()
 

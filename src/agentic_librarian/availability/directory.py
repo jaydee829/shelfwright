@@ -33,14 +33,7 @@ def search(query: str, limit: int = _DEFAULT_LIMIT) -> list[dict]:
     q = query.strip().lower()
     if not q:
         return []
-    prefix: list[dict] = []
-    contains: list[dict] = []
-    for rec in _directory():
-        name_l = rec["name"].lower()
-        if name_l.startswith(q):
-            prefix.append(rec)
-        elif q in name_l:
-            contains.append(rec)
-    prefix.sort(key=lambda r: r["name"].lower())
-    contains.sort(key=lambda r: r["name"].lower())
-    return (prefix + contains)[:limit]
+    matches = [rec for rec in _directory() if q in rec["name"].lower()]
+    # Prefix matches first (False sorts before True), then alphabetically by name.
+    matches.sort(key=lambda r: (not r["name"].lower().startswith(q), r["name"].lower()))
+    return matches[:limit]
