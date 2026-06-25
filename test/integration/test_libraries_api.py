@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from agentic_librarian.api import auth
 from agentic_librarian.api import libraries as libraries_mod
 from agentic_librarian.api import main as api_main
-from agentic_librarian.availability import overdrive
+from agentic_librarian.availability import directory
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.session import DatabaseManager
 
@@ -24,27 +24,14 @@ def client(db_url, monkeypatch):
     yield TestClient(api_main.app)
 
 
-def test_search_libraries_returns_list_from_overdrive(client, monkeypatch):
-    """GET /libraries/search?q=king returns the list from a monkeypatched overdrive."""
-    fake_results = [{"slug": "king-county", "name": "King County Library System"}]
-    monkeypatch.setattr(overdrive, "search_libraries", lambda q: fake_results)
+def test_search_libraries_filters_directory_snapshot(client, monkeypatch):
+    """GET /libraries/search?q=king returns matches from the directory snapshot."""
+    fake_results = [{"slug": "kcls", "name": "King County Library System"}]
+    monkeypatch.setattr(directory, "search", lambda q, **kw: fake_results)
 
     resp = client.get("/libraries/search?q=king")
     assert resp.status_code == 200
     assert resp.json() == fake_results
-
-
-def test_search_libraries_503_when_thunder_down(client, monkeypatch):
-    """GET /libraries/search returns 503 when overdrive raises ThunderError."""
-    from agentic_librarian.availability.overdrive import ThunderError
-
-    def _raise(_q):
-        raise ThunderError("down")
-
-    monkeypatch.setattr(overdrive, "search_libraries", _raise)
-
-    resp = client.get("/libraries/search?q=king")
-    assert resp.status_code == 503
 
 
 def test_put_then_get_libraries_round_trips_in_order(client, db_url):

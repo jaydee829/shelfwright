@@ -1,5 +1,6 @@
-"""Library-picker endpoints: search the public OverDrive directory, and read/replace the
-user's saved libraries (ordered). No secrets — slugs are public (see UserLibrary)."""
+"""Library-picker endpoints: search the OverDrive directory (a committed static snapshot —
+Thunder's live search is broken, see availability/directory.py), and read/replace the user's
+saved libraries (ordered). No secrets — slugs are public (see UserLibrary)."""
 
 from __future__ import annotations
 
@@ -7,8 +8,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException
 from pydantic import BaseModel
 
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
-from agentic_librarian.availability import overdrive
-from agentic_librarian.availability.overdrive import ThunderError
+from agentic_librarian.availability import directory
 from agentic_librarian.db.models import UserLibrary
 from agentic_librarian.db.session import DatabaseManager
 
@@ -32,12 +32,7 @@ class LibrariesIn(BaseModel):
 
 @router.get("/libraries/search")
 def search_libraries(q: str, user: AuthenticatedUser = Depends(get_current_user)):  # noqa: B008
-    if not q.strip():
-        return []
-    try:
-        return overdrive.search_libraries(q)
-    except ThunderError as exc:
-        raise HTTPException(status_code=503, detail="library directory unavailable") from exc
+    return directory.search(q)
 
 
 @router.get("/me/libraries")

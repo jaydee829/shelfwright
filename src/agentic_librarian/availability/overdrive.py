@@ -28,23 +28,6 @@ def _http_get_json(url: str) -> dict:
     return resp.json()
 
 
-def search_libraries(query: str) -> list[dict]:
-    """Public OverDrive directory search — powers the picker. Returns [{slug, name}]."""
-    url = f"{_THUNDER}/v2/libraries?query={quote_plus(query)}&x-client-id={_CLIENT}"
-    try:
-        data = _http_get_json(url)
-        out = []
-        for item in data.get("items", []):
-            slug = item.get("preferredKey") or item.get("advantageKey")
-            name = item.get("name")
-            if slug and name:
-                out.append({"slug": slug, "name": name})
-        return out
-    except Exception as exc:  # noqa: BLE001 - normalize every failure to ThunderError
-        logger.warning("Thunder search_libraries failed for query %r: %s", query, exc)
-        raise ThunderError(str(exc)) from exc
-
-
 def fetch_media(slug: str, title: str) -> list[dict]:
     """Per-library catalog search (ebook+audiobook) with availability inline. Returns the
     raw `items` list; matching/shaping is the service's job."""
