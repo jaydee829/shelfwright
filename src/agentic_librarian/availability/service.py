@@ -76,11 +76,13 @@ def availability_for(session: Session, library: dict, title: str, author: str) -
     calls. Empty list (matched nothing) is a real, cacheable result."""
     nt, na = _normalize(title), _normalize(author)
     slug = library["slug"]
+    now = datetime.now(UTC)
     row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
-    if row is not None and (datetime.now(UTC) - row.fetched_at.replace(tzinfo=UTC)) < _ttl():
+    if row is not None and (now - row.fetched_at.replace(tzinfo=UTC)) < _ttl():
         return row.payload.get("formats", [])
 
     try:
+        # raw title sent to Thunder (better search relevance); the cache is keyed on nt.
         items = overdrive.fetch_media(slug, title)
     except ThunderError:
         return None  # degrade: no badge, links unaffected
@@ -95,11 +97,11 @@ def availability_for(session: Session, library: dict, title: str, author: str) -
                 norm_title=nt,
                 norm_author=na,
                 payload=payload,
-                fetched_at=datetime.now(UTC),
+                fetched_at=now,
             )
         )
     else:
         row.payload = payload
-        row.fetched_at = datetime.now(UTC)
+        row.fetched_at = now
     session.flush()
     return formats
