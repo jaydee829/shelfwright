@@ -37,7 +37,13 @@ export default function SettingsView() {
 
   return (
     <div className="settings">
-      <header className="view-head"><h2>Libraries</h2></header>
+      <header className="view-head">
+        <h2>Libraries</h2>
+        <div className="settings__actions">
+          <button className="btn" onClick={() => void save()}>Save</button>
+          {status && <span className="settings__status" aria-live="polite">{status}</span>}
+        </div>
+      </header>
       <p className="settings__hint">Search for the library systems you have a Libby card for. We'll show live
         availability for these on your recommendations, in your priority order.</p>
 
@@ -65,11 +71,6 @@ export default function SettingsView() {
           </li>
         ))}
       </ul>
-
-      <div className="settings__actions">
-        <button className="btn" onClick={() => void save()}>Save</button>
-        {status && <span className="settings__status" aria-live="polite">{status}</span>}
-      </div>
     </div>
   )
 }
