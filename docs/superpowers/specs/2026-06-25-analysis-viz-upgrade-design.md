@@ -22,7 +22,7 @@ This is one cohesive frontend feature plus **one small, additive backend change*
 
 ## 3. Page composition (single scroll, top → bottom)
 
-1. **Snapshot** — keep the 4 stat tiles (`total_read`, `read_this_year`, `average_rating`, `distinct_authors`); add a **format donut** (Recharts `PieChart`) from `snapshot.formats`.
+1. **Snapshot** — keep the 4 stat tiles (`total_read`, `read_this_year`, `average_rating`, `distinct_authors`); add a **format proportion bar** from `snapshot.formats` (§7.1).
 2. **Style radar (hero)** — "The shape of your reading." 8 binned axes. (§5)
 3. **Trope cloud** — narrative fingerprint, from `top_tropes`. (§6)
 4. **Genre & mood** — two horizontal **bar charts** (Recharts `BarChart`) from `genres` / `moods`; genre rows labeled with the existing `GenreIcon`.
@@ -96,7 +96,7 @@ For each axis: collect the resolved value per read work that has one, score each
 
 ## 6. The clouds
 
-A single `WordCloud` component: entries rendered at a font size scaled by `count` (clamped min/max), the top entries given the gilt highlight, `currentColor` so it themes for free. Sized-by-frequency, wrapping flow layout (no physics/packing lib).
+A single `WordCloud` component: entries rendered at a font size scaled by `count` (clamped to a readable min/max), wrapping flow layout (no physics/packing lib). **Frequency is encoded by size and weight only — never by fading.** Each word takes a full-strength color cycled from the categorical palette (§7.1) by index, so adjacent words differ and *every* word, including the smallest, stays readable. (The earlier gold-with-opacity approach made small words illegible — explicitly rejected.)
 
 Fed two datasets:
 - **Trope cloud** ← `top_tropes` (already in payload).
@@ -104,7 +104,29 @@ Fed two datasets:
 
 ## 7. Charts / Recharts
 
-Recharts (new dependency) carries: the format **donut** (`PieChart`), genre & mood **bars** (`BarChart`), and the **radar** (`RadarChart`). All themed via the Arcane CSS variables (gilt fills, ink grid lines) read through `theme.ts` / CSS custom properties; wrapped in `ResponsiveContainer`; each non-text viz gets an `aria-label` summarizing its data for accessibility.
+Recharts (new dependency) carries the genre & mood **bars** (`BarChart`) and the **radar** (`RadarChart`). Both themed via the Arcane CSS variables (gilt fills, ink grid lines) read through CSS custom properties; wrapped in `ResponsiveContainer`; each gets an `aria-label` summarizing its data for accessibility. The genre/mood bars stay single-hue gilt — the row labels already differentiate them, and bars on a common axis read cleanly in one color.
+
+The **format proportion bar** (§7.1) and the **word clouds** (§6) are *not* Recharts — they're lightweight hand-rolled markup, and both use the categorical palette below.
+
+### 7.1 Color system — categorical palette
+
+The donut was rejected (humans judge length on a common baseline far better than angle/area), so the format mix becomes a single **horizontal 100%-stacked proportion bar**: one full-width bar, segments ordered largest → smallest, each a distinct categorical color, with a legend (swatch · name · %) underneath as the source of truth. A %-label renders inside a segment only when it's wide enough and contrast passes; otherwise it lives in the legend only. Every segment keeps a minimum visible width so small formats never vanish.
+
+Both the proportion bar and the word clouds draw from a dedicated **categorical scale** — distinct *hues* from across the palette, not shades of one. Add these tokens to `index.css` for both themes (values reuse existing palette hues so they stay on-brand and readable in each theme):
+
+```css
+:root {                /* light */
+  --cat-1: #c79a3e;  /* gold (gilt)   */  --cat-2: #1f9e94;  /* teal (spine)  */
+  --cat-3: #6d4ed6;  /* violet (glow) */  --cat-4: #9a3b2e;  /* brick (accent)*/
+  --cat-5: #3f7d4f;  /* green (ok)    */  --cat-6: #b07d2a;  /* deep amber    */
+}
+:root[data-theme="dark"] {
+  --cat-1: #e3b85e;  --cat-2: #45e0d0;  --cat-3: #b9a6ff;
+  --cat-4: #f08a7e;  --cat-5: #79c089;  --cat-6: #e0a44a;
+}
+```
+
+Six categories cover formats (usually ≤4) and give the clouds enough variety; if a dataset exceeds six entries the scale cycles. Consumers reference `--cat-1..6` (never hardcoded hex).
 
 ## 8. API contract (the backend change)
 
@@ -135,7 +157,9 @@ Frontend `Analysis` type gains `style_radar?` and `style_cloud?` (both optional)
 - `frontend/src/views/AnalysisView.{tsx,css}` — rewrite to the single-scroll composition; one child component per section.
 - `frontend/src/components/StyleRadar.{tsx,css}` *(new)* — Recharts `RadarChart` wrapper + degrade states.
 - `frontend/src/components/WordCloud.{tsx,css}` *(new)* — shared by trope + style clouds.
-- `frontend/src/components/StatChart.{tsx,css}` *(new, or inline)* — the genre/mood bars + format donut (thin Recharts wrappers).
+- `frontend/src/components/StatChart.{tsx,css}` *(new, or inline)* — the genre/mood bars (thin Recharts `BarChart` wrappers).
+- `frontend/src/components/ProportionBar.{tsx,css}` *(new)* — the format proportion bar (hand-rolled flex segments + legend).
+- `frontend/src/index.css` — add the `--cat-1..6` categorical tokens for both themes (§7.1).
 - `frontend/src/api/client.ts` — `style_radar?` / `style_cloud?` on `Analysis`.
 - `frontend/package.json` — add `recharts`.
 
@@ -145,7 +169,7 @@ Frontend `Analysis` type gains `style_radar?` and `style_cloud?` (both optional)
 - **Partial style data:** axes drop individually; radar hides under ~3 axes (§5).
 - **Backend not yet deployed:** optional fields absent → graceful degrade (§8).
 - **Anchor embedding fetch fails at startup:** scoring returns `null` for all axes (radar hidden), never 500s the endpoint.
-- **Recharts theming in dark mode:** colors come from CSS variables, verified in both themes via the headless QC harness.
+- **Theming in dark mode:** all viz colors (Recharts fills, `--cat-*` segments/words) come from CSS variables, verified in both themes via the headless QC harness.
 
 ## 11. Testing
 
