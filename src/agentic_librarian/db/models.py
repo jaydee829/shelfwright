@@ -295,7 +295,9 @@ class AvailabilityCache(Base):
     norm_title: Mapped[str] = mapped_column(String, primary_key=True)
     norm_author: Mapped[str] = mapped_column(String, primary_key=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False
+    )  # caller always supplies the fetch time; no default by design
 
 
 class ImportJob(Base):

@@ -28,6 +28,8 @@ def test_user_library_roundtrip(db_url):
         row = session.query(UserLibrary).filter_by(user_id=user.id).one()
         assert row.library_slug == "kcls"
         assert row.sort_order == 0
+        assert row.provider == "libby"
+        assert row.display_name == "King County Library System"
 
 
 def test_availability_cache_roundtrip(db_url):
@@ -46,3 +48,4 @@ def test_availability_cache_roundtrip(db_url):
         session.flush()
         row = session.query(AvailabilityCache).filter_by(library_slug="kcls").one()
         assert row.payload["formats"][0]["available"] is True
+        assert row.norm_title == "project hail mary"

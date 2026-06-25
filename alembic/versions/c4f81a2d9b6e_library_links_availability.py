@@ -1,6 +1,6 @@
 """library links + availability
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: c4f81a2d9b6e
 Revises: 7b7b4d6ae6f6
 Create Date: 2026-06-25 00:00:00.000000
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision: str = "a1b2c3d4e5f6"
+revision: str = "c4f81a2d9b6e"
 down_revision: str | None = "7b7b4d6ae6f6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
