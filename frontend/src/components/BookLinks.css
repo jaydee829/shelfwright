@@ -1,0 +1,8 @@
+.book-links { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.book-links__avail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.book-links__lib { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; font-size: 0.85rem; }
+.book-links__libname { font-weight: 600; }
+.book-links__fmt { opacity: 0.8; }
+.book-links__fmt.is-available { color: var(--color-success, #2e7d32); opacity: 1; font-weight: 600; }
+.book-links__row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.book-links__link { font-size: 0.85rem; text-decoration: underline; }

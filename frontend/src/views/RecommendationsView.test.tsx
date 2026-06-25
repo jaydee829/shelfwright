@@ -6,9 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('../api/client', () => ({
   getRecommendations: vi.fn(),
   setRecommendationStatus: vi.fn(),
+  getAvailability: vi.fn(),
 }))
 
-import { getRecommendations, setRecommendationStatus } from '../api/client'
+import { getRecommendations, setRecommendationStatus, getAvailability } from '../api/client'
 import RecommendationsView from './RecommendationsView'
 
 const rec = {
@@ -37,6 +38,7 @@ describe('RecommendationsView', () => {
   beforeEach(() => {
     vi.mocked(getRecommendations).mockResolvedValue([rec])
     vi.mocked(setRecommendationStatus).mockResolvedValue()
+    vi.mocked(getAvailability).mockResolvedValue({})
   })
   afterEach(() => vi.clearAllMocks())
 
