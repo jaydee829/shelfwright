@@ -55,6 +55,7 @@ export default function SettingsView() {
       </ul>
 
       <input className="settings__search" placeholder="Search for your library…"
+             aria-label="Search for your library"
              value={query} onChange={(e) => setQuery(e.target.value)} />
       <ul className="settings__results">
         {results.map((lib) => (
@@ -67,7 +68,7 @@ export default function SettingsView() {
 
       <div className="settings__actions">
         <button className="btn" onClick={() => void save()}>Save</button>
-        {status && <span className="settings__status">{status}</span>}
+        {status && <span className="settings__status" aria-live="polite">{status}</span>}
       </div>
     </div>
   )
