@@ -29,7 +29,7 @@ function RankedList({ title, items }: { title: string; items: Ranked[] }) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="analysis-section">
-      <h2 className="section-title">{title}</h2>
+      <h3 className="section-title">{title}</h3>
       {children}
     </section>
   )
