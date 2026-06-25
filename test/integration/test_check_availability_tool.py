@@ -7,8 +7,6 @@ from agentic_librarian.db.models import User, UserLibrary
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.mcp import server
 
-pytestmark = pytest.mark.db_integration
-
 
 def _user_with_library(session):
     user = User(id=uuid4(), email="t@example.com")
@@ -26,6 +24,7 @@ def _user_with_library(session):
     return user
 
 
+@pytest.mark.db_integration
 def test_check_availability_returns_links_and_badge(db_url, monkeypatch):
     from agentic_librarian.availability import service
 
@@ -48,8 +47,26 @@ def test_check_availability_returns_links_and_badge(db_url, monkeypatch):
     assert any(link["kind"] == "amazon" for link in out["links"])
 
 
-def test_check_availability_rejects_bad_input(db_url):
+def test_check_availability_rejects_bad_input():
+    out = server.check_availability("", "Andy Weir")
+    assert out["note"].startswith("Error")
+    assert out["libraries"] == []
+    assert out["links"] == []
+
+
+@pytest.mark.db_integration
+def test_check_availability_no_libraries_note(db_url):
     test_db_manager = DatabaseManager(db_url)
     server.set_db_manager(test_db_manager)
 
-    assert "Error" in server.check_availability("", "Andy Weir")["note"]
+    with test_db_manager.get_session() as session:
+        user = User(id=uuid4(), email="nolibrary@example.com")
+        session.add(user)
+        session.commit()
+
+    with as_user(user.id):
+        out = server.check_availability("Dune", "Frank Herbert")
+
+    assert out["libraries"] == []
+    assert any(link["kind"] == "amazon" for link in out["links"])  # links always present
+    assert "Settings" in out["note"]  # the "no libraries saved" guidance

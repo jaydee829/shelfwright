@@ -325,7 +325,7 @@ def check_availability(title: str, author: str) -> dict:
             "links": [],
             "note": "Error: title and author must be non-empty strings.",
         }
-    user_id = get_required_user_id()
+    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     libraries: list[dict] = []
     note = ""
     with db_manager.get_session() as session:
