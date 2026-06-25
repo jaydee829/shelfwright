@@ -104,6 +104,9 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
                     author_names.add(c.author.name)
             for narrator in edition.narrators:
                 narrators[narrator.name] += 1
+            # Per-work style map: author baseline overlaid with work-specific overrides.
+            # For co-authored works the baseline is last-author-wins per attribute (rare at
+            # this scale; merging across co-authors is a deferred product decision).
             baseline: dict = {}
             for c in work.contributors:
                 if c.role == "Author":
