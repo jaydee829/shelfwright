@@ -10,13 +10,16 @@ from agentic_librarian.api import main as api_main
 from agentic_librarian.core.user_context import DEFAULT_USER_EMAIL, DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,
+    AuthorStyle,
     Edition,
     Narrator,
     ReadingHistory,
+    Style,
     Trope,
     User,
     Work,
     WorkContributor,
+    WorkStyle,
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
@@ -50,6 +53,7 @@ def _seed_read(
     fmt="audiobook",
     rating=4,
     completed=None,
+    styles=None,
 ):
     with manager.get_session() as s:
         work = Work(title=title, genres=genres, moods=moods)
@@ -64,6 +68,15 @@ def _seed_read(
             s.add(t)
             s.flush()
             s.add(WorkTrope(work_id=work.id, trope_id=t.id, relevance_score=1.0))
+        if styles:
+            for attr, (sname, category) in styles.items():
+                st = Style(name=sname, category=category)
+                s.add(st)
+                s.flush()
+                if category == "Author":
+                    s.add(AuthorStyle(author_id=a.id, style_id=st.id, attribute_type=attr))
+                else:  # "Work"
+                    s.add(WorkStyle(work_id=work.id, style_id=st.id, attribute_type=attr))
         edition = Edition(work_id=work.id, format=fmt)
         if narrator:
             n = Narrator(name=narrator)
@@ -156,3 +169,41 @@ def test_analysis_excludes_other_users(client, db_url):
 
     body = client.get("/analysis").json()
     assert body["snapshot"]["total_read"] == 0  # other user's reading is invisible
+
+
+def test_analysis_includes_style_radar_and_cloud_keys(client, db_url):
+    manager = DatabaseManager(db_url)
+    _seed_read(
+        manager,
+        user_id=DEFAULT_USER_ID,
+        title="Dune",
+        author="Herbert",
+        genres=["Sci-Fi"],
+        moods=["epic"],
+        tropes=["chosen-one"],
+        styles={
+            "pacing": ("measured", "Author"),
+            "tone": ("atmospheric", "Author"),
+            "perspective": ("third person omniscient", "Work"),
+        },
+    )
+    body = client.get("/analysis").json()
+
+    assert set(body["style_radar"].keys()) == {
+        "pace",
+        "density",
+        "depth",
+        "inner_focus",
+        "humor",
+        "warmth",
+        "lexicon",
+        "world_building",
+    }
+    cloud = {row["name"]: row["count"] for row in body["style_cloud"]}
+    assert cloud == {"Atmospheric": 1, "Third Person Omniscient": 1}
+
+
+def test_analysis_empty_user_has_empty_style_fields(client):
+    body = client.get("/analysis").json()
+    assert body["style_cloud"] == []
+    assert all(v is None for v in body["style_radar"].values())
