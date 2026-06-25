@@ -1,0 +1,17 @@
+.proportion-bar {
+  display: flex; width: 100%; height: 34px;
+  border-radius: var(--radius); overflow: hidden;
+  border: 1px solid var(--border);
+}
+.proportion-seg {
+  min-width: 6px; display: flex; align-items: center; justify-content: center;
+  color: #1c1812; font: 600 var(--fs-xs) var(--font-display);
+  white-space: nowrap; overflow: hidden;
+}
+.proportion-legend {
+  list-style: none; margin: var(--space-3) 0 0; padding: 0;
+  display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4);
+  font-size: var(--fs-sm); color: var(--text-muted);
+}
+.proportion-legend li { display: flex; align-items: center; gap: var(--space-2); }
+.proportion-legend .swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
