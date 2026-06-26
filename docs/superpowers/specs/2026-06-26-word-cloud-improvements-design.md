@@ -32,8 +32,11 @@ Why the hook rather than the library's high-level `<WordCloud>` component:
   a presentation attribute).
 - The `isLoading`/empty state gives us the jsdom-degrade hook for the
   `role="img"` aria-summary test pattern we already use for unrenderable charts.
-- A seeded `random` makes the layout **deterministic** (no reshuffle on
-  re-render).
+- Memoising the hook inputs keeps the layout from re-running on a theme toggle or
+  unrelated re-render, so the cloud **does not reshuffle** during a session (and a
+  stray inline accessor would otherwise cause an infinite re-layout loop). Note:
+  `useWordCloud@1.3.0` does not forward a `random` option, so spiral placement uses
+  d3-cloud's default RNG — the arrangement is fresh per page load (fine for a cloud).
 
 Rejected alternatives:
 - **`adorable-word-cloud`** — pre-1.0 (v0.1.2), untouched since Aug 2024, and
@@ -116,8 +119,10 @@ harness (§7).
   same way; ~30% land vertical.
 - **Color:** word at sorted index `idx` → `className = "cat-" + ((idx % 6) + 1)`.
   Large words (`size` past a threshold, e.g. > 34px) also get `lg` for weight.
-- **Packing:** `padding = 1`, `spiral = "archimedean"`, `random =` a seeded
-  mulberry32 (fixed seed) so layout is stable across renders.
+- **Packing:** `padding = 1`, `spiral = "archimedean"`. Layout stability across
+  re-renders/theme toggles comes from **memoising the hook inputs** (the mapped
+  words, the `fontSize`/`rotate` accessors) so d3-cloud only re-lays-out on a real
+  word/width change — not from a seed (`useWordCloud@1.3.0` ignores `random`).
 
 ## 5. Accessibility & degrade
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { MIN_PX, colorClass, hashString, maxPx, mulberry32, rotateFor, sizeFor } from './wordCloudLayout'
+import { MIN_PX, colorClass, hashString, maxPx, rotateFor, sizeFor } from './wordCloudLayout'
 
 describe('maxPx (width-responsive ceiling)', () => {
   it('shrinks on narrow widths and caps on wide ones', () => {
@@ -47,16 +47,5 @@ describe('colorClass', () => {
     expect(colorClass(0)).toBe('cat-1')
     expect(colorClass(5)).toBe('cat-6')
     expect(colorClass(6)).toBe('cat-1')
-  })
-})
-
-describe('mulberry32', () => {
-  it('is a deterministic PRNG in [0, 1)', () => {
-    const a = mulberry32(1337)
-    const b = mulberry32(1337)
-    const first = a()
-    expect(first).toBe(b())
-    expect(first).toBeGreaterThanOrEqual(0)
-    expect(first).toBeLessThan(1)
   })
 })

@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWordCloud, type Word } from '@isoterik/react-word-cloud'
 import type { Ranked } from '../api/client'
 import { prepareCloudWords } from './wordCloudText'
-import { LARGE_PX, colorClass, mulberry32, rotateFor, sizeFor } from './wordCloudLayout'
+import { LARGE_PX, colorClass, rotateFor, sizeFor } from './wordCloudLayout'
 import './WordCloud.css'
 
 // d3-cloud measures glyphs on a canvas using this exact string before render.
 // Keep in sync with `.word-cloud text { font-family }` (var(--font-display)) in WordCloud.css.
 const FONT = "'Literata Variable', Georgia, serif"
 const ASPECT = 0.6
-const SEED = 1337
 const DEFAULT_WIDTH = 600
 
 /** A compact, rotated, frequency-accentuated word cloud. Runs the d3-cloud
@@ -38,15 +37,16 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
   const hi = counts.length ? Math.max(...counts) : 0
   const height = Math.round(width * ASPECT)
 
-  // Stabilise every hook input so the d3-cloud layout recomputes only when the words
-  // or width actually change — NOT on a theme toggle or unrelated re-render. A fresh
-  // function identity here (e.g. an inline `random`/accessor) re-triggers the layout
-  // effect every render → setState → infinite "Maximum update depth" loop. The seeded
-  // PRNG is memoised once, so a given input set always packs identically.
+  // Stabilise every hook input so the d3-cloud layout recomputes only when the words or
+  // width actually change — NOT on a theme toggle or unrelated re-render. A fresh function
+  // identity here (an inline accessor) would re-trigger the layout effect every render →
+  // setState → an infinite "Maximum update depth" loop, and would re-pack (reshuffle) the
+  // cloud on every toggle. Stable inputs ⇒ the layout runs once; the colour theme swaps via
+  // CSS only. (Spiral placement uses d3-cloud's default RNG — useWordCloud@1.3.0 ignores a
+  // `random` option — so the arrangement is fresh per page load, which is fine for a cloud.)
   const cloudWords = useMemo(() => words.map((w) => ({ text: w.name, value: w.count })), [words])
   const fontSize = useCallback((word: Word) => sizeFor(word.value, lo, hi, width), [lo, hi, width])
   const rotate = useCallback((word: Word) => rotateFor(word.text), [])
-  const random = useMemo(() => mulberry32(SEED), [])
 
   const { computedWords } = useWordCloud({
     words: cloudWords,
@@ -59,7 +59,6 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
     rotate,
     padding: 1,
     spiral: 'archimedean',
-    random,
   })
 
   if (words.length === 0) return null
