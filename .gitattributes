@@ -1,4 +1,20 @@
-# Shell scripts must check out LF everywhere — a CRLF working copy breaks bash
-# (classic symptom: "syntax error: unexpected end of file"). The infra/ scripts are
-# run from the WSL clone, but this protects any checkout.
+# Normalize ALL text files to LF in the repository and on checkout. Without this,
+# `core.autocrlf=true` on Windows checkouts produces persistent CRLF-vs-LF churn —
+# every text file shows as "modified" in `git status` even with no real change
+# (and the working copy can break LF-sensitive tooling). See the coordination board
+# 2026-06-26.
+* text=auto eol=lf
+
+# Shell scripts must be LF everywhere — a CRLF working copy breaks bash
+# (classic symptom: "syntax error: unexpected end of file"). Kept explicit.
 *.sh text eol=lf
+
+# Common binary assets — never normalize line endings on these.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
