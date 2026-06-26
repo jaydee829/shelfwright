@@ -1,7 +1,7 @@
 # Rollout — Safari-mobile sign-in fix (GH #78, ADR-055)
 
 **What ships:** a same-origin reverse-proxy for Firebase's `/__/auth/*` helper
-(`api/firebase_auth_proxy.py`) + runtime `authDomain = window.location.host`.
+(`src/agentic_librarian/api/firebase_auth_proxy.py`) + runtime `authDomain = window.location.host`.
 
 **No migration. No Google OAuth client edits. No pipeline/secret changes.** The proxy's
 upstream defaults in code to `agentic-librarian-prod.firebaseapp.com`. The serving host is
