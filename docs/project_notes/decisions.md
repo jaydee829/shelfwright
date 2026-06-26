@@ -828,3 +828,38 @@ This file documents key architectural decisions, their context, and trade-offs.
   failed deep pass) an imported book shows genres/moods but no tropes until deep enrichment lands.
 - Surfaced a separate, larger trope-quality issue: **semantic over-collapse** (the attractor canonicals) —
   filed as GH #70 (enhancement). That, not the fallback layer, is the main lever on recommendation quality.
+
+### ADR-054: Style radar via embedding-projection binning + additive degrade-safe /analysis fields (2026-06-25)
+
+**Context:**
+- The Analysis viz upgrade (#13) wanted a "style radar" for the user's reading. Literary style is stored
+  CATEGORICALLY (`Style` name + 1536-d embedding, linked via `AuthorStyle`/`WorkStyle` with an
+  `attribute_type`), but a radar needs a numeric magnitude per axis.
+- Wanted a binning that's honest, maintenance-free, and a small backend deliverable alongside the frontend.
+
+**Decision:**
+- Bin each categorical style value to 0–1 by **projecting its existing `Style.embedding` onto a per-axis
+  bipolar anchor pair** (low-pole vs high-pole phrase), embedded once in the same space
+  (`gemini-embedding-001`, SEMANTIC_SIMILARITY, 1536-d) and cached:
+  `score = clamp(dot(v−low, high−low) / dot(high−low, high−low), 0, 1)`. Module: `api/analysis_style.py`.
+- Only the **8 ORDINAL** attributes go on the radar (pace, density, depth, inner_focus, humor,
+  warmth [= `emotional_distance` inverted], lexicon, world_building); **NOMINAL** ones (tone, prose style,
+  dialogue, perspective) have no axis → they feed a **style word cloud**. Per read-work style =
+  author `AuthorStyle` baseline overlaid with `WorkStyle` overrides; aggregate over the user's shelf.
+- Surface two **ADDITIVE** fields on `GET /analysis` — `style_radar` + `style_cloud` — no schema/migration.
+  The endpoint MUST NEVER 500 from scoring: no embedder OR any embed failure (bad/invalid key, quota,
+  network) → radar degrades to all-null; the anchor cache is published only on full success (atomic rebind,
+  guarded by a `threading.Lock` + double-checked locking).
+
+**Alternatives considered:**
+- Curated phrase→score lookup per axis → rejected: brittle to new scout phrases, needs upkeep. Projection
+  reuses embeddings already stored and is maintenance-free.
+- Give `Work` its own embedding / numeric style columns → larger refactor (the work-representation gap), deferred.
+
+**Consequences:**
+- A radar that self-calibrates as the style vocabulary grows; nominal styles aren't wasted (cloud).
+- One embedding burst for the 16 anchors per process (cached). CI has no valid key → radar shows
+  null / "Gathering your style…" (frontend degrades); prod has the key, so it populates live.
+- Deferred fast-follows: per-author comparison radar (#71), DB-level `Style.name` canonicalization (#72).
+- Shipped via PR #74. The "never 500 on embed failure" rule was missed initially and caused a CI failure
+  (see bugs.md 2026-06-25) — the degrade path now has a unit test.
