@@ -894,3 +894,24 @@ This file documents key architectural decisions, their context, and trade-offs.
   libraries change rarely; a scheduled refresh is the natural middle ground, noted in #75). ~850 KB of
   reference data is committed to the repo. Isolation of the unofficial Thunder API is unchanged (still only
   `overdrive.py`, now availability-only).
+
+### ADR-056: Word cloud rebuild on @isoterik/react-word-cloud's useWordCloud hook (2026-06-26)
+
+**Context:**
+- GH #83: the Analysis word clouds (signature tropes + style) shipped in the viz upgrade (#74) read like a ranked list — a `flex-wrap` of words sorted largest→smallest with big gaps, no packing, no rotation, and wordy/`/`-joined labels.
+- We wanted a real packed "Wordle" cloud (spiral packing, rotation, accentuated size) without re-inventing the layout, while keeping our `--cat-*` palette + Literata + light/dark theming and degrading safely in jsdom tests.
+
+**Decision:**
+- Build on **`@isoterik/react-word-cloud` v1.3.0** (d3-cloud under the hood) via its low-level **`useWordCloud` hook**, rendering the SVG `<text>` ourselves so colour/font/theme stay under **className + CSS** control (SVG `fill` can't resolve `var()` as a presentation attr — same constraint as Recharts).
+- Cloud-local text preprocessing (`wordCloudText.ts`): split `/`-joined labels, strip a leading article, merge case-insensitive duplicates summing counts. Full names are preserved everywhere else.
+- Size via a power curve with a **width-responsive max** (`clamp(round(width*0.11), 36, 60)`) so the largest word caps ~38px on mobile / 60px desktop and never dominates a narrow column; deterministic ~70/30 rotation via a stable per-word hash.
+
+**Alternatives Considered:**
+- **`adorable-word-cloud`** → rejected: pre-1.0 (v0.1.2), untouched since Aug 2024, hard-depends on ALL of d3 (`^7.9.0`), no custom-render escape hatch for theming.
+- **Raw `d3-cloud`** → same engine, but we'd hand-write the React glue, async handling, and types `react-word-cloud` already provides.
+- **Python word-cloud packages** → rejected: generate a static raster, breaking the client-side JSON data flow and giving no light/dark theme reactivity.
+
+**Consequences:**
+- One new runtime dep (scoped d3 modules, not full d3). Drop-in: `<WordCloud items={Ranked[]} />` contract unchanged; both call sites + `AnalysisView` untouched.
+- **`useWordCloud@1.3.0` silently ignores a `random` option** (it neither destructures nor forwards it to d3-cloud's `computeWords`), so a seeded layout isn't available via the hook — placement uses `Math.random` (fresh arrangement per page load; fine for a cloud). See bugs.md 2026-06-26. **Layout stability across re-renders/theme toggles instead comes from MEMOISING the hook inputs** (the mapped words + `useCallback`'d accessors) so the layout effect only re-fires on a real word/width change — not a seed.
+- jsdom can't run d3-cloud's canvas, so the component degrades to a `role="img"` aria-summary that unit tests assert on; real visual proof is the QC harness (mobile + desktop, both themes). Used **ADR-056** (skipping ADR-055, reserved by the open Safari-auth PR #85).
