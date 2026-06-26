@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { useWordCloud } from '@isoterik/react-word-cloud'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useWordCloud, type Word } from '@isoterik/react-word-cloud'
 import type { Ranked } from '../api/client'
 import { prepareCloudWords } from './wordCloudText'
 import { LARGE_PX, colorClass, mulberry32, rotateFor, sizeFor } from './wordCloudLayout'
@@ -20,7 +20,6 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
   const words = useMemo(() => prepareCloudWords(items), [items])
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(DEFAULT_WIDTH)
-  const random = useMemo(() => mulberry32(SEED), [])
 
   useEffect(() => {
     const el = ref.current
@@ -39,15 +38,25 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
   const hi = counts.length ? Math.max(...counts) : 0
   const height = Math.round(width * ASPECT)
 
+  // Stabilise every hook input so the d3-cloud layout recomputes only when the words
+  // or width actually change — NOT on a theme toggle or unrelated re-render. A fresh
+  // function identity here (e.g. an inline `random`/accessor) re-triggers the layout
+  // effect every render → setState → infinite "Maximum update depth" loop. The seeded
+  // PRNG is memoised once, so a given input set always packs identically.
+  const cloudWords = useMemo(() => words.map((w) => ({ text: w.name, value: w.count })), [words])
+  const fontSize = useCallback((word: Word) => sizeFor(word.value, lo, hi, width), [lo, hi, width])
+  const rotate = useCallback((word: Word) => rotateFor(word.text), [])
+  const random = useMemo(() => mulberry32(SEED), [])
+
   const { computedWords } = useWordCloud({
-    words: words.map((w) => ({ text: w.name, value: w.count })),
+    words: cloudWords,
     width,
     height,
     font: FONT,
     fontWeight: 'normal',
     fontStyle: 'normal',
-    fontSize: (word) => sizeFor(word.value, lo, hi, width),
-    rotate: (word) => rotateFor(word.text),
+    fontSize,
+    rotate,
     padding: 1,
     spiral: 'archimedean',
     random,
