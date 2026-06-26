@@ -23,6 +23,11 @@ describe('sizeFor (power curve)', () => {
   it('scales the max down on a narrow column', () => {
     expect(sizeFor(20, 2, 20, 375)).toBeCloseTo(41)
   })
+
+  it('clamps an out-of-range count instead of returning NaN', () => {
+    expect(sizeFor(100, 2, 20, 1280)).toBeCloseTo(60) // above hi -> max
+    expect(sizeFor(0, 2, 20, 1280)).toBeCloseTo(MIN_PX) // below lo -> floor
+  })
 })
 
 describe('rotateFor (deterministic ~70/30)', () => {

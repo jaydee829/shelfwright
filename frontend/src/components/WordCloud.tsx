@@ -25,7 +25,9 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
     if (!el || typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver((entries) => {
       const w = entries[0]?.contentRect.width
-      if (w && w > 0) setWidth(w)
+      // Round: d3-cloud measures glyphs on a canvas, and sub-pixel widths drift
+      // the measurement vs. the SVG render (overlap).
+      if (w && w > 0) setWidth(Math.round(w))
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -48,7 +50,7 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
   const fontSize = useCallback((word: Word) => sizeFor(word.value, lo, hi, width), [lo, hi, width])
   const rotate = useCallback((word: Word) => rotateFor(word.text), [])
 
-  const { computedWords } = useWordCloud({
+  const { computedWords = [] } = useWordCloud({
     words: cloudWords,
     width,
     height,

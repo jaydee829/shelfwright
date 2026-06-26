@@ -15,7 +15,9 @@ export function maxPx(width: number): number {
 
 /** Frequency -> px via a power curve with a legible floor and width-responsive cap. */
 export function sizeFor(count: number, lo: number, hi: number, width: number): number {
-  const norm = hi === lo ? 0.5 : (count - lo) / (hi - lo)
+  // Clamp: a count outside [lo, hi] would make norm negative, and a negative base
+  // to a fractional power (EXP) is NaN — which would break SVG rendering.
+  const norm = hi === lo ? 0.5 : clamp((count - lo) / (hi - lo), 0, 1)
   return MIN_PX + norm ** EXP * (maxPx(width) - MIN_PX)
 }
 
