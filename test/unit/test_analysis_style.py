@@ -92,6 +92,17 @@ def test_aggregate_radar_skips_styles_without_embedding():
     assert radar["pace"] is None
 
 
+def test_aggregate_radar_degrades_to_null_when_embedder_raises():
+    # A bad/invalid API key (or quota/network failure) makes anchor embedding raise;
+    # the radar must degrade to all-null instead of propagating a 500 (spec degrade path).
+    def boom(_text):
+        raise RuntimeError("API key not valid")
+
+    radar = m.aggregate_radar([{"pacing": _Style("fast-paced", [1.0, 0.0])}], boom)
+    assert set(radar) == set(m.AXES)
+    assert all(v is None for v in radar.values())
+
+
 def test_aggregate_cloud_counts_titlecased_nominal_styles():
     maps = [
         {"tone": _Style("atmospheric", None), "perspective": _Style("first person", None)},

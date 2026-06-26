@@ -12,6 +12,7 @@ single axis; they feed the style word cloud instead.
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import threading
@@ -20,6 +21,8 @@ from collections.abc import Callable
 from typing import Protocol
 
 from agentic_librarian.scouts.utils import get_cached_embedding
+
+logger = logging.getLogger(__name__)
 
 # Fixed display order of the radar axes.
 AXES: tuple[str, ...] = (
@@ -137,17 +140,30 @@ def aggregate_radar(
     embed: Callable[[str], list[float]] | None,
 ) -> dict[str, float | None]:
     """Mean 0-1 score per axis across the user's read works. None when an axis has
-    no scorable data (or no embedder)."""
+    no scorable data, no embedder, or the anchor embedding can't be fetched.
+
+    Never raises: an embedding failure (bad/absent key, quota, network) degrades the
+    whole radar to all-null so /analysis stays up — the radar just hides client-side.
+    """
     scores: dict[str, list[float]] = {axis: [] for axis in AXES}
-    if embed is not None:
-        anchors = get_anchor_vectors(embed)
-        for style_map in style_maps:
-            for attr, style in style_map.items():
-                axis = RADAR_ATTR_TO_AXIS.get(attr)
-                if axis is None or style.embedding is None:
-                    continue
+    # Gather scorable (axis, vector) pairs first so we only pay for anchor embeddings
+    # when the shelf actually has ordinal styles to place.
+    scorable = [
+        (RADAR_ATTR_TO_AXIS[attr], style.embedding)
+        for style_map in style_maps
+        for attr, style in style_map.items()
+        if attr in RADAR_ATTR_TO_AXIS and style.embedding is not None
+    ]
+    if embed is not None and scorable:
+        try:
+            anchors = get_anchor_vectors(embed)
+        except Exception:  # noqa: BLE001 — any embed failure must degrade, not 500
+            logger.warning("style radar: anchor embedding failed; degrading to null", exc_info=True)
+            anchors = None
+        if anchors is not None:
+            for axis, vec in scorable:
                 low, high = anchors[axis]
-                s = score_axis(style.embedding, low, high)
+                s = score_axis(vec, low, high)
                 if s is not None:
                     scores[axis].append(s)
     return {axis: (math.fsum(v) / len(v) if v else None) for axis, v in scores.items()}
