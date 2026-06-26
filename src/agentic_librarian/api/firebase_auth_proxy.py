@@ -62,14 +62,37 @@ def set_client(client) -> None:  # noqa: ANN001  (test seam — accepts any get(
     _client = client
 
 
+def _forward_headers(request: Request) -> dict[str, str]:
+    """The minimal, safe set of request headers we forward upstream (no cookies/auth).
+    User-Agent + X-Forwarded-For are forwarded so Firebase/Google's anti-abuse sees the real
+    client rather than one Cloud Run egress IP behind a generic httpx user-agent (which can
+    trip rate-limiting / CAPTCHAs under load)."""
+    out = {"accept": request.headers.get("accept", "*/*")}
+    ua = request.headers.get("user-agent")
+    if ua:
+        out["user-agent"] = ua
+    # Prefer the incoming forwarded chain (Cloud Run sets it with the real client IP);
+    # fall back to the immediate peer.
+    xff = request.headers.get("x-forwarded-for") or (request.client.host if request.client else None)
+    if xff:
+        out["x-forwarded-for"] = xff
+    return out
+
+
 @router.get("/__/auth/{path:path}")
 async def proxy_firebase_auth(path: str, request: Request) -> Response:
+    # Defense-in-depth: the upstream host + `/__/auth/` prefix are fixed, but reject a path
+    # that tries to climb out of the prefix (`..` segments or a leading slash) before we
+    # build the URL.
+    if ".." in path or path.startswith("/"):
+        return Response(status_code=400, content=b"invalid path")
+
     upstream = f"https://{_upstream_host()}/__/auth/{path}"
     try:
         resp = await _get_client().get(
             upstream,
             params=dict(request.query_params),
-            headers={"accept": request.headers.get("accept", "*/*")},
+            headers=_forward_headers(request),
         )
         # We do NOT call raise_for_status(), so an upstream HTTP error *response* (4xx/5xx)
         # is a normal `resp` and is passed through below with its real status. This except

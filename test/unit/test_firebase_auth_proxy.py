@@ -61,9 +61,11 @@ def test_passthrough_status_and_content_type():
 
 
 def test_relaxes_x_frame_options_deny_to_sameorigin():
-    stub = _StubClient(httpx.Response(200, content=b"<html></html>", headers={"x-frame-options": "DENY"}))
+    # Mixed-case input like Firebase actually sends: httpx normalizes header names to
+    # lowercase in .items(), so the lowercase check below matches regardless of upstream casing.
+    stub = _StubClient(httpx.Response(200, content=b"<html></html>", headers={"X-Frame-Options": "DENY"}))
     resp = _client_for(stub).get("/__/auth/iframe")
-    assert resp.headers["x-frame-options"] == "SAMEORIGIN"
+    assert resp.headers.get("x-frame-options") == "SAMEORIGIN"
 
 
 def test_upstream_failure_returns_502():
@@ -77,3 +79,20 @@ def test_no_x_frame_options_when_absent():
     stub = _StubClient(httpx.Response(200, content=b"<html></html>"))
     resp = _client_for(stub).get("/__/auth/iframe")
     assert "x-frame-options" not in resp.headers
+
+
+def test_forwards_user_agent_and_client_ip():
+    """User-Agent + X-Forwarded-For are forwarded upstream (anti-abuse / rate-limiting)."""
+    stub = _StubClient(httpx.Response(200, content=b"OK"))
+    _client_for(stub).get("/__/auth/handler", headers={"user-agent": "MyBrowser/1.0"})
+    _, _, fwd = stub.calls[0]
+    assert fwd["user-agent"] == "MyBrowser/1.0"
+    assert fwd.get("x-forwarded-for")  # set from the incoming XFF chain or the client peer
+
+
+def test_rejects_path_traversal():
+    """A path that climbs out of /__/auth/ is rejected (400) and never reaches upstream."""
+    stub = _StubClient(httpx.Response(200, content=b"OK"))
+    resp = _client_for(stub).get("/__/auth/%2e%2e/secret")
+    assert resp.status_code == 400
+    assert not stub.calls
