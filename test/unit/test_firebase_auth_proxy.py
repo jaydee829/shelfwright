@@ -62,3 +62,10 @@ def test_upstream_failure_returns_502():
     stub = _StubClient(exc=httpx.ConnectError("boom"))
     resp = _client_for(stub).get("/__/auth/handler")
     assert resp.status_code == 502
+
+
+def test_no_x_frame_options_when_absent():
+    """When upstream sends no X-Frame-Options, the proxy must not inject one."""
+    stub = _StubClient(httpx.Response(200, content=b"<html></html>"))
+    resp = _client_for(stub).get("/__/auth/iframe")
+    assert "x-frame-options" not in resp.headers

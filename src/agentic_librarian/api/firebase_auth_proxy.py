@@ -71,6 +71,9 @@ async def proxy_firebase_auth(path: str, request: Request) -> Response:
             params=dict(request.query_params),
             headers={"accept": request.headers.get("accept", "*/*")},
         )
+        # We do NOT call raise_for_status(), so an upstream HTTP error *response* (4xx/5xx)
+        # is a normal `resp` and is passed through below with its real status. This except
+        # only fires on transport/network failures (connect/timeout/protocol) → 502.
     except httpx.HTTPError as exc:
         logger.warning("Firebase auth proxy upstream failed for /__/auth/%s: %s", path, exc)
         return Response(status_code=502, content=b"auth helper upstream unavailable")
