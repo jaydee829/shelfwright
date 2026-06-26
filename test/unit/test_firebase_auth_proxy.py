@@ -4,6 +4,7 @@ a stub client is injected via set_client()."""
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,13 @@ from agentic_librarian.api import firebase_auth_proxy
 from agentic_librarian.api.firebase_auth_proxy import router
 
 UPSTREAM = "agentic-librarian-prod.firebaseapp.com"
+
+
+@pytest.fixture(autouse=True)
+def _reset_proxy_client():
+    """Reset the module-global httpx client after each test so a stub never leaks."""
+    yield
+    firebase_auth_proxy.set_client(None)
 
 
 class _StubClient:

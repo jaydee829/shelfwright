@@ -4,10 +4,18 @@ forwarded upstream, NOT served the SPA index shell."""
 from __future__ import annotations
 
 import httpx
+import pytest
 from fastapi.testclient import TestClient
 
 from agentic_librarian.api import firebase_auth_proxy
 from agentic_librarian.api.main import app
+
+
+@pytest.fixture(autouse=True)
+def _reset_proxy_client():
+    """Reset the module-global httpx client after each test so a stub never leaks."""
+    yield
+    firebase_auth_proxy.set_client(None)
 
 
 def test_auth_path_is_proxied_not_served_spa_shell():
