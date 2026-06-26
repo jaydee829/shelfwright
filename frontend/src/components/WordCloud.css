@@ -1,7 +1,22 @@
 .word-cloud {
-  list-style: none; margin: 0; padding: 0;
-  display: flex; flex-wrap: wrap; align-items: baseline;
-  gap: var(--space-2) var(--space-4); justify-content: center;
-  line-height: 1.9;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
-.word-cloud li { display: inline; }
+.word-cloud svg {
+  max-width: 100%;
+  height: auto;
+}
+/* Font MUST match the FONT string passed to useWordCloud, or measurement and
+   render diverge and words overlap. */
+.word-cloud text {
+  font-family: var(--font-display);
+  cursor: default;
+}
+.word-cloud text.lg { font-weight: 600; }
+.word-cloud text.cat-1 { fill: var(--cat-1); }
+.word-cloud text.cat-2 { fill: var(--cat-2); }
+.word-cloud text.cat-3 { fill: var(--cat-3); }
+.word-cloud text.cat-4 { fill: var(--cat-4); }
+.word-cloud text.cat-5 { fill: var(--cat-5); }
+.word-cloud text.cat-6 { fill: var(--cat-6); }
