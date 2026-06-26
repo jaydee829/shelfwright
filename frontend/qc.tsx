@@ -58,14 +58,25 @@ const analysis = {
   snapshot: { total_read: 142, read_this_year: 31, average_rating: 4.2, distinct_authors: 96, formats: [{ name: 'audiobook', count: 71 }, { name: 'hardcover', count: 38 }, { name: 'ebook', count: 33 }] },
   genres: [{ name: 'fantasy', count: 58 }, { name: 'science fiction', count: 47 }, { name: 'literary', count: 18 }, { name: 'mystery', count: 12 }],
   moods: [{ name: 'reflective', count: 40 }, { name: 'adventurous', count: 33 }, { name: 'dark', count: 22 }],
-  top_tropes: [{ name: 'found family', count: 29 }, { name: 'morally grey', count: 21 }, { name: 'slow burn', count: 17 }],
+  top_tropes: [
+    { name: 'Found Family', count: 29 }, { name: 'Enemies / Lovers', count: 24 },
+    { name: 'Morally Grey', count: 21 }, { name: 'The Chosen One', count: 18 },
+    { name: 'Slow Burn', count: 17 }, { name: 'Hidden Identity', count: 14 },
+    { name: 'Quest', count: 12 }, { name: 'Mentor / Protege', count: 10 },
+    { name: 'Forbidden Love', count: 9 }, { name: 'A Court Intrigue', count: 7 },
+    { name: 'Redemption Arc', count: 6 }, { name: 'Found Family', count: 5 },
+    { name: 'Unreliable Narrator', count: 4 }, { name: 'Time Loop', count: 3 },
+    { name: 'Heist', count: 2 },
+  ],
   authors: [{ name: 'N. K. Jemisin', count: 6 }, { name: 'Ursula K. Le Guin', count: 5 }],
   narrators: [{ name: 'Ray Porter', count: 8 }, { name: 'Moira Quirk', count: 4 }],
   style_radar: { pace: 0.74, density: 0.42, depth: 0.66, inner_focus: 0.55, humor: 0.21, warmth: 0.7, lexicon: 0.5, world_building: 0.82 },
   style_cloud: [
-    { name: 'Atmospheric', count: 22 }, { name: 'Lyrical', count: 14 }, { name: 'Cynical', count: 9 },
-    { name: 'Minimalist', count: 7 }, { name: 'First Person', count: 12 }, { name: 'Unreliable', count: 5 },
+    { name: 'Atmospheric', count: 22 }, { name: 'Lyrical', count: 14 },
+    { name: 'First / Third Person', count: 12 }, { name: 'Cynical', count: 9 },
+    { name: 'Minimalist', count: 7 }, { name: 'Unreliable', count: 5 },
     { name: 'Wry', count: 4 }, { name: 'Naturalistic', count: 3 },
+    { name: 'Ornate', count: 2 },
   ],
 }
 
