@@ -101,11 +101,16 @@ harness (§7).
 
 - **Font (measurement + render):** `FONT = "'Literata Variable', Georgia, serif"`
   — passed to the hook as `font` *and* set in CSS on `text`. Identical strings.
-- **Size (power curve):** with `lo`/`hi` = min/max merged count,
-  `norm = hi === lo ? 0.5 : (count - lo) / (hi - lo)`, then
+- **Size (power curve, width-responsive max):** with `lo`/`hi` = min/max merged
+  count, `norm = hi === lo ? 0.5 : (count - lo) / (hi - lo)`, then
   `size = MIN_PX + norm ** EXP * (MAX_PX - MIN_PX)`.
-  Defaults: `MIN_PX = 14`, `MAX_PX = 60`, `EXP = 1.4`. The floor keeps rare
-  words legible; the high ceiling + `EXP > 1` makes frequent words pop.
+  `MIN_PX = 14`, `EXP = 1.4`. **`MAX_PX` is derived from the container width**, not
+  a fixed constant, so it shrinks on narrow/mobile columns:
+  `MAX_PX = clamp(round(width * MAX_FACTOR), MAX_FLOOR, MAX_CEIL)` with
+  `MAX_FACTOR = 0.11`, `MAX_FLOOR = 36`, `MAX_CEIL = 60`. (≈360px mobile → ~40px;
+  ≳545px → caps at 60px.) The floor keeps the largest word impactful even on
+  narrow screens; the cap prevents one word from dominating a wide layout.
+  `MAX_FACTOR`/floor/cap are tuned in the QC harness at both viewports.
 - **Rotation (deterministic, ~70/30):** `rotate(word) = hashString(word.text)
   % 10 < 3 ? 90 : 0`. A stable string hash so a given word always orients the
   same way; ~30% land vertical.
@@ -149,9 +154,12 @@ SVG `<text>` render. Both clouds reuse the same component, as today.
   positioned `<text>` (d3-cloud doesn't lay out in jsdom) — the visual is proven
   in QC.
 - **QC harness** (`frontend/qc.html` / `qc.tsx` + Playwright): screenshot the
-  trope cloud and style cloud in **both themes**; verify packing density,
-  rotation mix, size contrast, palette spread, and small-word legibility. This
-  is the real quality gate; tune §4 params here. Zero console errors.
+  trope cloud and style cloud in **both themes** at **two viewports — mobile
+  (~375px) and full desktop (~1280px)**. Verify packing density, rotation mix,
+  size contrast, palette spread, and small-word legibility, and specifically
+  confirm the width-responsive `MAX_PX` keeps the largest word from overflowing
+  or dominating the narrow mobile column while still reaching ~60px on desktop.
+  This is the real quality gate; tune §4 params here. Zero console errors.
 
 ## 8. Dependency
 
