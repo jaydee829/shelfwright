@@ -8,6 +8,9 @@
   /* action / accents */
   --accent: #9a3b2e; --on-accent: #fff3ec; --on-danger: #fff3ec; --on-badge: #ffffff;
   --gilt: #c79a3e; --star: #c79a3e;
+  /* categorical scale — distinct hues for proportion bar + word clouds */
+  --cat-1: #c79a3e; --cat-2: #1f9e94; --cat-3: #6d4ed6;
+  --cat-4: #9a3b2e; --cat-5: #3f7d4f; --cat-6: #b07d2a;
   --glow: #6d4ed6; --glow-soft: rgba(109,78,214,.55);
   --spine: linear-gradient(180deg,#1f9e94,#14756d); --spine-glow: rgba(31,158,148,.5);
   --page-edge: repeating-linear-gradient(90deg,#f6eedb 0 2px,#d8c8a0 2px 4px);
@@ -41,6 +44,8 @@
   --border: #4a3f5e;
   --accent: #e3b85e; --on-accent: #1a160f; --on-danger: #1a160f; --on-badge: #ffffff;
   --gilt: #e3b85e; --star: #e3b85e;
+  --cat-1: #e3b85e; --cat-2: #45e0d0; --cat-3: #b9a6ff;
+  --cat-4: #f08a7e; --cat-5: #79c089; --cat-6: #e0a44a;
   --glow: #45e0d0; --glow-soft: rgba(69,224,208,.6);
   --spine: linear-gradient(180deg,#c64a3a,#8f2f24); --spine-glow: rgba(198,74,58,.7);
   --page-edge: repeating-linear-gradient(90deg,rgba(227,184,94,.55) 0 1px,transparent 1px 4px);

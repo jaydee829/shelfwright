@@ -33,6 +33,12 @@ export interface Ranked {
   count: number
 }
 
+export type StyleAxis =
+  | 'pace' | 'density' | 'depth' | 'inner_focus'
+  | 'humor' | 'warmth' | 'lexicon' | 'world_building'
+
+export type StyleRadar = Record<StyleAxis, number | null>
+
 export interface Analysis {
   snapshot: {
     total_read: number
@@ -46,6 +52,8 @@ export interface Analysis {
   top_tropes: Ranked[]
   authors: Ranked[]
   narrators: Ranked[]
+  style_radar?: StyleRadar
+  style_cloud?: Ranked[]
 }
 
 export interface ChatMessage {

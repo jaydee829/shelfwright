@@ -1,0 +1,4 @@
+.genre-mood-bars { width: 100%; }
+.genre-mood-bars h3 { margin: 0 0 var(--space-2); }
+.genre-mood-bars .bars-bar { fill: var(--gilt); }
+.genre-mood-bars .bars-axis text { fill: var(--text-muted); font-family: var(--font-body); }

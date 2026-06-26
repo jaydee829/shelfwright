@@ -61,6 +61,12 @@ const analysis = {
   top_tropes: [{ name: 'found family', count: 29 }, { name: 'morally grey', count: 21 }, { name: 'slow burn', count: 17 }],
   authors: [{ name: 'N. K. Jemisin', count: 6 }, { name: 'Ursula K. Le Guin', count: 5 }],
   narrators: [{ name: 'Ray Porter', count: 8 }, { name: 'Moira Quirk', count: 4 }],
+  style_radar: { pace: 0.74, density: 0.42, depth: 0.66, inner_focus: 0.55, humor: 0.21, warmth: 0.7, lexicon: 0.5, world_building: 0.82 },
+  style_cloud: [
+    { name: 'Atmospheric', count: 22 }, { name: 'Lyrical', count: 14 }, { name: 'Cynical', count: 9 },
+    { name: 'Minimalist', count: 7 }, { name: 'First Person', count: 12 }, { name: 'Unreliable', count: 5 },
+    { name: 'Wry', count: 4 }, { name: 'Naturalistic', count: 3 },
+  ],
 }
 
 const conversation = {

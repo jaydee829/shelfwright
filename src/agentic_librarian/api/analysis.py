@@ -13,8 +13,18 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import joinedload
 
+from agentic_librarian.api import analysis_style
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
-from agentic_librarian.db.models import Edition, ReadingHistory, Work, WorkContributor, WorkTrope
+from agentic_librarian.db.models import (
+    Author,
+    AuthorStyle,
+    Edition,
+    ReadingHistory,
+    Work,
+    WorkContributor,
+    WorkStyle,
+    WorkTrope,
+)
 from agentic_librarian.db.session import DatabaseManager
 
 router = APIRouter()
@@ -52,6 +62,16 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
                 .selectinload(Work.tropes)
                 .joinedload(WorkTrope.trope),
                 joinedload(ReadingHistory.edition).selectinload(Edition.narrators),
+                joinedload(ReadingHistory.edition)
+                .joinedload(Edition.work)
+                .selectinload(Work.contributors)
+                .joinedload(WorkContributor.author)
+                .selectinload(Author.styles)
+                .joinedload(AuthorStyle.style),
+                joinedload(ReadingHistory.edition)
+                .joinedload(Edition.work)
+                .selectinload(Work.styles)
+                .joinedload(WorkStyle.style),
             )
             .all()
         )
@@ -65,6 +85,7 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
         authors: Counter = Counter()
         narrators: Counter = Counter()
         author_names: set[str] = set()
+        style_maps: list[dict] = []
 
         for r in rows:
             edition = r.edition
@@ -83,6 +104,20 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
                     author_names.add(c.author.name)
             for narrator in edition.narrators:
                 narrators[narrator.name] += 1
+            # Per-work style map: author baseline overlaid with work-specific overrides.
+            # For co-authored works the baseline is last-author-wins per attribute (rare at
+            # this scale; merging across co-authors is a deferred product decision).
+            baseline: dict = {}
+            for c in work.contributors:
+                if c.role == "Author" and c.author:
+                    for asty in c.author.styles:
+                        baseline[asty.attribute_type] = asty.style
+            overrides = {wsty.attribute_type: wsty.style for wsty in work.styles}
+            style_maps.append({**baseline, **overrides})
+
+        embed = analysis_style.default_embedder()
+        style_radar = analysis_style.aggregate_radar(style_maps, embed)
+        style_cloud = analysis_style.aggregate_cloud(style_maps)
 
         return {
             "snapshot": {
@@ -97,4 +132,6 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
             "top_tropes": _ranked(tropes),
             "authors": _ranked(authors),
             "narrators": _ranked(narrators),
+            "style_radar": style_radar,
+            "style_cloud": style_cloud,
         }

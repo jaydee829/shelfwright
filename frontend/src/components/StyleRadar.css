@@ -1,0 +1,6 @@
+.style-radar { width: 100%; }
+.radar-empty { text-align: center; padding: var(--space-6) 0; }
+.style-radar .radar-shape { fill: var(--gilt); stroke: var(--gilt); }
+.style-radar .radar-grid line,
+.style-radar .radar-grid polygon { stroke: var(--border); }
+.style-radar .radar-axis text { fill: var(--text-muted); font-family: var(--font-body); }
