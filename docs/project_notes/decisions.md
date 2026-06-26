@@ -830,7 +830,6 @@ This file documents key architectural decisions, their context, and trade-offs.
   filed as GH #70 (enhancement). That, not the fallback layer, is the main lever on recommendation quality.
 
 ### ADR-054: Style radar via embedding-projection binning + additive degrade-safe /analysis fields (2026-06-25)
-
 **Context:**
 - The Analysis viz upgrade (#13) wanted a "style radar" for the user's reading. Literary style is stored
   CATEGORICALLY (`Style` name + 1536-d embedding, linked via `AuthorStyle`/`WorkStyle` with an
@@ -863,7 +862,7 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Deferred fast-follows: per-author comparison radar (#71), DB-level `Style.name` canonicalization (#72).
 - Shipped via PR #74. The "never 500 on embed failure" rule was missed initially and caused a CI failure
   (see bugs.md 2026-06-25) — the degrade path now has a unit test.
-  
+
 ### ADR-053: Library-picker search via a committed static directory snapshot (2026-06-25)
 **Context:**
 - The library-links feature (#57) needs a "find your library" search for the Settings picker. The initial
