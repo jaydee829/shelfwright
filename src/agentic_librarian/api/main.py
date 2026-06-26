@@ -18,6 +18,7 @@ from agentic_librarian.api.analysis import router as analysis_router
 from agentic_librarian.api.auth import AuthenticatedUser, get_current_user
 from agentic_librarian.api.availability import router as availability_router
 from agentic_librarian.api.books import router as books_router
+from agentic_librarian.api.firebase_auth_proxy import router as firebase_auth_proxy_router
 from agentic_librarian.api.imports import router as imports_router
 from agentic_librarian.api.internal import router as internal_router
 from agentic_librarian.api.libraries import router as libraries_router
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI):
 # auto-docs so the full API schema isn't exposed unauthenticated. (GET /docs etc. now fall
 # through to the SPA catch-all, which is harmless.)
 app = FastAPI(title="Agentic Librarian API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.include_router(firebase_auth_proxy_router)
 app.include_router(recommendations_router)
 app.include_router(analysis_router)
 app.include_router(availability_router)
