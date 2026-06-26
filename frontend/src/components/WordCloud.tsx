@@ -5,6 +5,8 @@ import { prepareCloudWords } from './wordCloudText'
 import { LARGE_PX, colorClass, mulberry32, rotateFor, sizeFor } from './wordCloudLayout'
 import './WordCloud.css'
 
+// d3-cloud measures glyphs on a canvas using this exact string before render.
+// Keep in sync with `.word-cloud text { font-family }` (var(--font-display)) in WordCloud.css.
 const FONT = "'Literata Variable', Georgia, serif"
 const ASPECT = 0.6
 const SEED = 1337
@@ -31,6 +33,7 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
     return () => ro.disconnect()
   }, [])
 
+  // Spread is safe here: a cloud holds ~10-30 words (tropes/styles), never enough to overflow the call stack.
   const counts = words.map((w) => w.count)
   const lo = counts.length ? Math.min(...counts) : 0
   const hi = counts.length ? Math.max(...counts) : 0
@@ -54,11 +57,12 @@ export default function WordCloud({ items }: { items: Ranked[] }) {
 
   const colorByText = new Map(words.map((w, i) => [w.name, colorClass(i)]))
   const top = words.slice(0, 3).map((w) => w.name).join(', ')
-  const label = `Word cloud of ${words.length} word${words.length === 1 ? '' : 's'}. Most frequent: ${top}.`
+  const more = words.length > 3 ? ` and ${words.length - 3} more` : ''
+  const label = `Word cloud of ${words.length} word${words.length === 1 ? '' : 's'}. Most frequent: ${top}${more}.`
 
   return (
     <div className="word-cloud" ref={ref} role="img" aria-label={label}>
-      <svg width={width} height={height} aria-hidden="true">
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
         <g transform={`translate(${width / 2},${height / 2})`}>
           {computedWords.map((w) => (
             <text
