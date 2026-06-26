@@ -152,7 +152,7 @@ def aggregate_radar(
         (RADAR_ATTR_TO_AXIS[attr], style.embedding)
         for style_map in style_maps
         for attr, style in style_map.items()
-        if attr in RADAR_ATTR_TO_AXIS and style.embedding is not None
+        if attr in RADAR_ATTR_TO_AXIS and style is not None and style.embedding is not None
     ]
     if embed is not None and scorable:
         try:
@@ -175,6 +175,6 @@ def aggregate_cloud(style_maps: list[dict[str, _StyleLike]], top_n: int = 20) ->
     counter: Counter[str] = Counter()
     for style_map in style_maps:
         for attr, style in style_map.items():
-            if attr in CLOUD_ATTRS and style.name:
+            if attr in CLOUD_ATTRS and style is not None and style.name:
                 counter[style.name.title()] += 1
     return [{"name": name, "count": count} for name, count in counter.most_common(top_n)]

@@ -11,7 +11,7 @@ const MIN_AXES = 3
 
 export default function StyleRadar({ radar }: { radar?: RadarData }) {
   const points = radar
-    ? ORDER.filter((a) => radar[a] !== null).map((a) => ({ axis: AXIS_LABEL[a], value: radar[a] as number }))
+    ? ORDER.filter((a) => radar[a] != null).map((a) => ({ axis: AXIS_LABEL[a], value: radar[a] as number }))
     : []
 
   if (points.length < MIN_AXES) {

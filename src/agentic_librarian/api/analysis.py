@@ -109,7 +109,7 @@ def get_analysis(user: AuthenticatedUser = Depends(get_current_user)):  # noqa: 
             # this scale; merging across co-authors is a deferred product decision).
             baseline: dict = {}
             for c in work.contributors:
-                if c.role == "Author":
+                if c.role == "Author" and c.author:
                     for asty in c.author.styles:
                         baseline[asty.attribute_type] = asty.style
             overrides = {wsty.attribute_type: wsty.style for wsty in work.styles}
