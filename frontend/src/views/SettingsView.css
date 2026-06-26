@@ -1,0 +1,9 @@
+.settings { display: flex; flex-direction: column; gap: var(--space-3); }
+.settings__hint { color: var(--text-muted); font-size: var(--fs-sm); }
+.settings__saved, .settings__results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.settings__saved-row, .settings__result-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.settings__controls { display: flex; gap: var(--space-1); }
+.settings__search { padding: var(--space-2); width: 100%; box-sizing: border-box; }
+/* In the view-head, push Save/status to the right so it stays visible regardless of list length. */
+.settings__actions { display: flex; gap: var(--space-2); align-items: center; margin-left: auto; }
+.settings__status { color: var(--text-muted); font-size: var(--fs-sm); }

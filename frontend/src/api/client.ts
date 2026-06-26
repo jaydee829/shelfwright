@@ -67,6 +67,37 @@ export interface Conversation {
   messages: ChatMessage[]
 }
 
+export interface BookLink {
+  kind: 'libby' | 'hoopla' | 'bookshop' | 'amazon'
+  label: string
+  url: string
+}
+
+export interface LibbyFormat {
+  format: string
+  available: boolean
+  copies_owned: number | null
+  copies_available: number | null
+  holds_ratio: number | null
+  wait_days: number | null
+}
+
+export interface LibbyAvailability {
+  library: string
+  slug: string
+  formats: LibbyFormat[]
+}
+
+export interface BookAvailability {
+  links: BookLink[]
+  libby: LibbyAvailability[]
+}
+
+export interface SavedLibrary {
+  slug: string
+  name: string
+}
+
 /** fetch with the Firebase ID token attached. */
 async function authedFetchRaw(path: string, init: RequestInit = {}): Promise<Response> {
   const token = await getIdToken()
@@ -291,6 +322,34 @@ export async function retryImport(jobId: string): Promise<{ retried: number }> {
   const res = await authedFetchRaw(`/import/${jobId}/retry`, { method: 'POST' })
   if (!res.ok) throw new Error(`retry import → ${res.status}`)
   return res.json() as Promise<{ retried: number }>
+}
+
+export async function getAvailability(workIds: string[]): Promise<Record<string, BookAvailability>> {
+  const res = await authedFetchRaw('/availability', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ work_ids: workIds }),
+  })
+  if (!res.ok) throw new Error(`availability → ${res.status}`)
+  return res.json() as Promise<Record<string, BookAvailability>>
+}
+
+export function searchLibraries(q: string): Promise<SavedLibrary[]> {
+  return getJson<SavedLibrary[]>(`/libraries/search?q=${encodeURIComponent(q)}`)
+}
+
+export async function getMyLibraries(): Promise<SavedLibrary[]> {
+  const data = await getJson<{ libraries: SavedLibrary[] }>('/me/libraries')
+  return data.libraries
+}
+
+export async function saveMyLibraries(libraries: SavedLibrary[]): Promise<void> {
+  const res = await authedFetchRaw('/me/libraries', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ libraries }),
+  })
+  if (!res.ok) throw new Error(`save libraries → ${res.status}`)
 }
 
 function dispatchFrame(frame: string, handlers: ChatHandlers): void {

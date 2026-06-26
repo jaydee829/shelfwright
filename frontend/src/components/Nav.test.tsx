@@ -4,9 +4,9 @@ import { MemoryRouter } from 'react-router'
 import Nav from './Nav'
 
 describe('Nav', () => {
-  it('renders the five primary tabs as links with accessible names', () => {
+  it('renders the six primary tabs as links with accessible names', () => {
     render(<Nav />, { wrapper: MemoryRouter })
-    for (const name of ['Chat', 'History', 'Picks', 'Analysis', 'Add']) {
+    for (const name of ['Chat', 'History', 'Picks', 'Analysis', 'Add', 'Libraries']) {
       expect(screen.getByRole('link', { name })).toBeInTheDocument()
     }
   })
@@ -18,5 +18,6 @@ describe('Nav', () => {
     expect(screen.getByRole('link', { name: 'Picks' })).toHaveAttribute('href', '/recommendations')
     expect(screen.getByRole('link', { name: 'Analysis' })).toHaveAttribute('href', '/analysis')
     expect(screen.getByRole('link', { name: 'Add' })).toHaveAttribute('href', '/add')
+    expect(screen.getByRole('link', { name: 'Libraries' })).toHaveAttribute('href', '/settings')
   })
 })

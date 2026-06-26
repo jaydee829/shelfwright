@@ -8,6 +8,7 @@ const ITEMS: { to: string; label: string; icon: LineIconName; end: boolean }[] =
   { to: '/recommendations', label: 'Picks', icon: 'picks', end: false },
   { to: '/analysis', label: 'Analysis', icon: 'analysis', end: false },
   { to: '/add', label: 'Add', icon: 'add', end: false },
+  { to: '/settings', label: 'Libraries', icon: 'shelf', end: false },
 ]
 
 export default function Nav() {

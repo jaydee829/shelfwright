@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { getRecommendations, setRecommendationStatus, type Recommendation } from '../api/client'
+import { getRecommendations, getAvailability, setRecommendationStatus, type BookAvailability, type Recommendation } from '../api/client'
+import BookLinks from '../components/BookLinks'
 import { GenreIcon } from '../components/GenreIcon'
 import { NewMarker } from '../components/NewMarker'
 import { computeNewIds, markSeen } from '../lib/lastVisit'
@@ -20,6 +21,7 @@ function ReadBadge({ r }: { r: Recommendation }) {
 export default function RecommendationsView() {
   const navigate = useNavigate()
   const [recs, setRecs] = useState<Recommendation[] | null>(null)
+  const [avail, setAvail] = useState<Record<string, BookAvailability>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [newIds, setNewIds] = useState<Set<string>>(new Set())
 
@@ -32,6 +34,10 @@ export default function RecommendationsView() {
       setNewIds(computeNewIds('recs', ids))
       markSeen('recs', ids)
       setRecs(data)
+      const workIds = data.map((r) => r.work_id)
+      if (workIds.length > 0) {
+        void getAvailability(workIds).then(setAvail).catch(() => { /* links-only fallback: leave avail empty */ })
+      }
     })
   }, [])
 
@@ -72,6 +78,7 @@ export default function RecommendationsView() {
               <button className="btn" onClick={() => readThis(r)}>✓ I read this</button>
               <button className="btn btn--ghost" onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
             </div>
+            <BookLinks availability={avail[r.work_id]} />
           </article>
         ))}
       </div>

@@ -1,0 +1,8 @@
+.book-links { margin-top: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); }
+.book-links__avail { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.book-links__lib { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: baseline; font-size: var(--fs-sm); }
+.book-links__libname { font-weight: 600; }
+.book-links__fmt { color: var(--text-muted); }
+.book-links__fmt.is-available { color: var(--gilt); opacity: 1; font-weight: 600; }
+.book-links__row { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.book-links__link { font-size: var(--fs-sm); text-decoration: underline; color: var(--gilt); }

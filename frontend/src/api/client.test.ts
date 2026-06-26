@@ -5,7 +5,7 @@ vi.mock('../auth/firebase', () => ({
 }))
 
 import { getIdToken } from '../auth/firebase'
-import { addBook, probeAccess, streamChat } from './client'
+import { addBook, getAvailability, probeAccess, searchLibraries, streamChat } from './client'
 
 function sseStream(chunks: string[]): Response {
   const body = new ReadableStream<Uint8Array>({
@@ -97,5 +97,24 @@ describe('addBook', () => {
   it('throws on a 404 (book not found)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('nope', { status: 404 })))
     await expect(addBook({ title: 'X', author: 'Y' })).rejects.toThrow()
+  })
+})
+
+describe('availability client', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+
+  it('posts work_ids and returns the availability map', async () => {
+    const map = { w1: { links: [{ kind: 'amazon', label: 'Amazon', url: 'u' }], libby: [] } }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      { ok: true, json: () => Promise.resolve(map) } as Response))
+    const out = await getAvailability(['w1'])
+    expect(out.w1.links[0].kind).toBe('amazon')
+  })
+
+  it('searchLibraries hits the directory endpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      { ok: true, json: () => Promise.resolve([{ slug: 'kcls', name: 'KCLS' }]) } as Response))
+    const out = await searchLibraries('king')
+    expect(out[0].slug).toBe('kcls')
   })
 })

@@ -10,6 +10,7 @@ import HistoryEditView from './views/HistoryEditView'
 import HistoryView from './views/HistoryView'
 import ImportView from './views/ImportView'
 import RecommendationsView from './views/RecommendationsView'
+import SettingsView from './views/SettingsView'
 
 function Gate() {
   const { status } = useAuth()
@@ -27,6 +28,7 @@ function Gate() {
           <Route path="analysis" element={<AnalysisView />} />
           <Route path="add" element={<AddBookView />} />
           <Route path="import" element={<ImportView />} />
+          <Route path="settings" element={<SettingsView />} />
         </Route>
       </Routes>
     </BrowserRouter>

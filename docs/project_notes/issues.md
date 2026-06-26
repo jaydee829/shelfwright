@@ -12,6 +12,16 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-25 - Library Links + Live Availability (#57) — SHIPPED + DEPLOYED
+- **Status**: Merged + deployed; migration applied on prod; working live.
+- **Description**: "Where to get it" for recommended books — a live Libby/OverDrive availability badge for the user's saved libraries, free→local→retail links (Libby/Hoopla/Bookshop/Amazon), a `check_availability` chat MCP tool, and a Settings library picker. Subagent-driven (10 TDD tasks + per-task spec/quality review + final whole-branch review).
+- **URL**: PR #73 (`3039e75`), search-fix PR #76 (`06d3660`); enhancement #75; ADR-053
+- **Notes**:
+  - Architecture: one isolated unofficial-Thunder client (`availability/overdrive.py`, `x-client-id=dewey`, swappable for the official partner API) + read-through `availability_cache` (4h TTL) shared by the recs REST endpoint AND the MCP tool + pure `links.py` (links never depend on Thunder → outage degrades to links-only) + `user_libraries` table (public slugs, not the keyring). Migration `c4f81a2d9b6e` (applied on prod). Spec/plan/runbook under `docs/superpowers/...2026-06-25-library-links-availability*` + `docs/runbooks/library-links-rollout.md`.
+  - **#76 (search fix):** Thunder's `/v2/libraries?query=` **ignores the query param** — returns all ~12,963 libraries for any input (even gibberish); Libby's autocomplete host is 403-gated. So the picker only ever showed the first 24 of everything. Fix = a committed `{slug,name}` snapshot (`scripts/fetch_library_directory.py` → `availability/library_directory.json`) filtered server-side (`availability/directory.py`). Also moved the Settings Save button into the header. ADR-053; live-fetch alternative = #75.
+  - Gemini-reviewed both PRs (non-blocking; logging + `requests` `params=` + single-pass sort applied). A CI-only `DetachedInstanceError` in the MCP-tool db_integration tests was caught + fixed (bugs.md 2026-06-25).
+  - **Deferred (separate future issues):** checkout/holds + a Hoopla availability badge → need an OverDrive/Hoopla **partnership** (business gate, not engineering); #75 (live-fetch+cache directory); #56 (inbound web-link reading).
+
 ### 2026-06-24 - Catalog QC: contributor dedup + trope-name cleaning + fallback prune
 - **Status**: Code merged; operator backfills partially applied (see Notes)
 - **Description**: A run of backend catalog-quality cleanups on the bench (off `main`), all subagent-driven + Gemini-reviewed.
