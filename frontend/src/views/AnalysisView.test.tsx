@@ -4,6 +4,10 @@ import type { Analysis } from '../api/client'
 
 vi.mock('../api/client', () => ({ getAnalysis: vi.fn() }))
 
+vi.mock('@isoterik/react-word-cloud', () => ({
+  useWordCloud: () => ({ computedWords: [], isLoading: false }),
+}))
+
 import { getAnalysis } from '../api/client'
 import AnalysisView from './AnalysisView'
 
@@ -31,8 +35,8 @@ describe('AnalysisView', () => {
   it('renders the snapshot, tropes, style, and people in one scroll', async () => {
     render(<AnalysisView />)
     expect(await screen.findByText('12')).toBeInTheDocument()
-    expect(screen.getByText('Chosen One')).toBeInTheDocument()
-    expect(screen.getByText('Atmospheric')).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /chosen one/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /atmospheric/i })).toBeInTheDocument()
     expect(screen.getByText('Vance')).toBeInTheDocument()
     expect(screen.getByRole('img', { name: /shape of your reading/i })).toBeInTheDocument()
   })
