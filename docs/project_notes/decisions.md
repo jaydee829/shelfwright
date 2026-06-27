@@ -895,6 +895,44 @@ This file documents key architectural decisions, their context, and trade-offs.
   reference data is committed to the repo. Isolation of the unofficial Thunder API is unchanged (still only
   `overdrive.py`, now availability-only).
 
+### ADR-055: Same-origin Firebase auth helper via FastAPI reverse-proxy (fixes Safari-mobile sign-in) (2026-06-26)
+**Context:**
+- A Safari-mobile user could not load the app (#78): Firebase Auth threw "Unable to process request due to
+  missing initial state … storage-partitioned browser environment." Root cause = **storage partitioning**, not
+  a code bug. The SDK loads its OAuth helper from `https://{authDomain}/__/auth/{handler,iframe}`; `authDomain`
+  is `agentic-librarian-prod.firebaseapp.com` while the app is served **same-origin from Cloud Run** on
+  `librarian-api-….run.app` — a different registrable domain. The helper writes the OAuth "initial state" to
+  `sessionStorage` on the `firebaseapp.com` origin; Safari ITP isolates that as third-party, so the state is
+  gone on return. The error names `signInWithRedirect` even though we call `signInWithPopup` because Safari/iOS
+  proactively inits the redirect/iframe path (`_shouldInitProactively`) — so popup↔redirect swaps don't help.
+  This is industry-wide (Firefox TCP, Chrome Privacy Sandbox), not Safari-only; the only real fix is a
+  **same-origin auth helper**.
+**Decision:**
+- Reverse-proxy Firebase's `/__/auth/*` helper through the FastAPI container that already serves the SPA, and
+  set the browser `authDomain` to the app's **own** origin at runtime (`window.location.host`). New router
+  `api/firebase_auth_proxy.py` (`GET /__/auth/{path}`) forwards to `https://{FIREBASE_AUTH_UPSTREAM}/__/auth/...`
+  (env, default `agentic-librarian-prod.firebaseapp.com`) — **fixed path prefix + fixed upstream host, never
+  derived from request input** (no open-proxy/SSRF). Async `httpx`, streamed passthrough of status/Content-Type/
+  cache headers, relax upstream `X-Frame-Options: DENY`→`SAMEORIGIN`, registered **before** the SPA catch-all.
+  Frontend `auth/firebase.ts` resolves `authDomain = window.location.host` on a non-localhost browser host (env
+  fallback for dev/tests), keeps `signInWithPopup` primary, adds `getRedirectResult` on load. Needs **no Google
+  OAuth client edits** (registered `redirect_uri` stays on `firebaseapp.com`; proxy forwards the final leg
+  same-origin) and **no pipeline change**. Spec: `docs/superpowers/specs/2026-06-26-safari-mobile-auth-fix-design.md`.
+**Alternatives Considered:**
+- **Migrate frontend to Firebase Hosting (Option B)** — Hosting serves `/__/auth/` natively + free CDN + first-class
+  custom domains, but adds a second deploy surface, API rewrites, and CORS/header-forwarding; too big for a
+  production hotfix. **Deferred → GH #79** (the deliberate future-evolution path).
+- **Stand up a custom domain now (Option C)** — forces a domain decision now to fix a bug and still needs the proxy
+  (= A + a domain purchase). A nicer domain doesn't require Hosting anyway (Cloud Run domain mapping). **→ #79.**
+- **Switch popup→redirect / vice-versa** — doesn't address partitioning; rejected.
+**Consequences:**
+- Fixes #78 for real Safari-mobile users with a small, bounded, reversible change on the existing single-origin
+  architecture; pre-empts the same breakage on Chrome/Firefox. Auth state stays per-browser (no shared server
+  state → no new concurrency class); the proxy is stateless (worst case a transient 502 for one user). Trade-off:
+  auth-helper traffic (per-sign-in, tiny, cacheable) now rides Cloud Run instead of Firebase's CDN — fine at this
+  scale; CDN-level static delivery is #79. **Forward-compatible:** runtime `authDomain` carries unchanged onto a
+  future custom domain or Hosting migration; under Hosting the proxy can simply be retired.
+
 ### ADR-056: Word cloud rebuild on @isoterik/react-word-cloud's useWordCloud hook (2026-06-26)
 
 **Context:**
@@ -914,4 +952,4 @@ This file documents key architectural decisions, their context, and trade-offs.
 **Consequences:**
 - One new runtime dep (scoped d3 modules, not full d3). Drop-in: `<WordCloud items={Ranked[]} />` contract unchanged; both call sites + `AnalysisView` untouched.
 - **`useWordCloud@1.3.0` silently ignores a `random` option** (it neither destructures nor forwards it to d3-cloud's `computeWords`), so a seeded layout isn't available via the hook — placement uses `Math.random` (fresh arrangement per page load; fine for a cloud). See bugs.md 2026-06-26. **Layout stability across re-renders/theme toggles instead comes from MEMOISING the hook inputs** (the mapped words + `useCallback`'d accessors) so the layout effect only re-fires on a real word/width change — not a seed.
-- jsdom can't run d3-cloud's canvas, so the component degrades to a `role="img"` aria-summary that unit tests assert on; real visual proof is the QC harness (mobile + desktop, both themes). Used **ADR-056** (skipping ADR-055, reserved by the open Safari-auth PR #85).
+- jsdom can't run d3-cloud's canvas, so the component degrades to a `role="img"` aria-summary that unit tests assert on; real visual proof is the QC harness (mobile + desktop, both themes).

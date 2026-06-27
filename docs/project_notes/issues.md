@@ -12,6 +12,15 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-06-26 - Safari-mobile sign-in fix: same-origin Firebase auth helper (#78)
+- **Status**: In Progress — diagnosed; design approved; spec written; implementation to follow.
+- **Description**: Safari-mobile users couldn't load the app (Firebase Auth "missing initial state" — storage partitioning, because `authDomain` `firebaseapp.com` ≠ the same-origin Cloud Run app host). Fix = reverse-proxy Firebase's `/__/auth/*` helper through FastAPI + runtime `authDomain = window.location.host`, so the helper is first-party. Option A of the brainstorm.
+- **URL**: bug #78; future-evolution enhancement #79; ADR-055; spec `docs/superpowers/specs/2026-06-26-safari-mobile-auth-fix-design.md`
+- **Notes**:
+  - No Google OAuth client edits and no pipeline change; the serving host is already in Firebase Authorized domains. New `api/firebase_auth_proxy.py` (async httpx, fixed upstream + `/__/auth/` prefix, registered before the SPA catch-all, relaxes `X-Frame-Options`→`SAMEORIGIN`).
+  - **#79** captures the deliberate future path (custom domain + CDN, optionally Firebase Hosting). Option A is forward-compatible — runtime `authDomain` carries onto a custom domain/Hosting unchanged; under Hosting the proxy can be retired.
+  - Root cause is industry-wide (Firefox TCP, Chrome Privacy Sandbox), not Safari-only — this is best practice, not a band-aid. See bugs.md 2026-06-26.
+
 ### 2026-06-25 - Library Links + Live Availability (#57) — SHIPPED + DEPLOYED
 - **Status**: Merged + deployed; migration applied on prod; working live.
 - **Description**: "Where to get it" for recommended books — a live Libby/OverDrive availability badge for the user's saved libraries, free→local→retail links (Libby/Hoopla/Bookshop/Amazon), a `check_availability` chat MCP tool, and a Settings library picker. Subagent-driven (10 TDD tasks + per-task spec/quality review + final whole-branch review).
