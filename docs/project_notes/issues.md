@@ -12,14 +12,21 @@ This file tracks work history and ticket references.
 
 ## Log
 
-### 2026-06-26 - Safari-mobile sign-in fix: same-origin Firebase auth helper (#78)
-- **Status**: In Progress — diagnosed; design approved; spec written; implementation to follow.
-- **Description**: Safari-mobile users couldn't load the app (Firebase Auth "missing initial state" — storage partitioning, because `authDomain` `firebaseapp.com` ≠ the same-origin Cloud Run app host). Fix = reverse-proxy Firebase's `/__/auth/*` helper through FastAPI + runtime `authDomain = window.location.host`, so the helper is first-party. Option A of the brainstorm.
-- **URL**: bug #78; future-evolution enhancement #79; ADR-055; spec `docs/superpowers/specs/2026-06-26-safari-mobile-auth-fix-design.md`
+### 2026-06-26 - Safari-mobile sign-in fix: same-origin Firebase auth helper (#78) — SHIPPED + DEPLOYED
+- **Status**: Completed — merged + deployed; prod proxy verified live. (Remaining: a human Safari-device sign-in test.)
+- **Description**: Safari-mobile users couldn't load the app (Firebase Auth "missing initial state" — storage partitioning, because `authDomain` `firebaseapp.com` ≠ the same-origin Cloud Run app host). Fix = reverse-proxy Firebase's `/__/auth/*` helper through FastAPI + runtime `authDomain = window.location.host`, so the helper is first-party. Option A of the brainstorm. Implemented via subagent-driven execution (backend + frontend each spec+quality reviewed + final whole-branch review).
+- **URL**: PR #85 (`4fa31b1`); bug #78; future-evolution enhancement #79; ADR-055; spec `docs/superpowers/specs/2026-06-26-safari-mobile-auth-fix-design.md`; runbook `docs/runbooks/safari-auth-fix-rollout.md`
 - **Notes**:
-  - No Google OAuth client edits and no pipeline change; the serving host is already in Firebase Authorized domains. New `api/firebase_auth_proxy.py` (async httpx, fixed upstream + `/__/auth/` prefix, registered before the SPA catch-all, relaxes `X-Frame-Options`→`SAMEORIGIN`).
+  - No Google OAuth client edits and no pipeline change; the serving host is already in Firebase Authorized domains. New `api/firebase_auth_proxy.py` (async httpx, fixed upstream + `/__/auth/` prefix, registered before the SPA catch-all, relaxes `X-Frame-Options`→`SAMEORIGIN`, path-traversal guard, forwards UA/XFF for anti-abuse). `httpx` promoted to a runtime dependency.
+  - **Gemini review** addressed (`50980de`): the HIGH `X-Frame-Options` case-insensitivity flag was a non-issue (httpx lowercases header keys — verified on 0.28.1; added a mixed-case test); UA/XFF forwarding + path-traversal guard added.
+  - **Deployed** 2026-06-26 (CD auto-fired on `4fa31b1`, no anomaly); prod proxy verified: `GET https://librarian-api-…run.app/__/auth/iframe.js` → 200 `text/javascript` (first-party, not the SPA shell).
   - **#79** captures the deliberate future path (custom domain + CDN, optionally Firebase Hosting). Option A is forward-compatible — runtime `authDomain` carries onto a custom domain/Hosting unchanged; under Hosting the proxy can be retired.
   - Root cause is industry-wide (Firefox TCP, Chrome Privacy Sandbox), not Safari-only — this is best practice, not a band-aid. See bugs.md 2026-06-26.
+
+### 2026-06-26 - Line-ending normalization (`.gitattributes` `* text=auto eol=lf`)
+- **Status**: Completed — PR #80 (`4f239fc`) merged.
+- **Description**: `core.autocrlf=true` on Windows produced persistent CRLF-vs-LF churn (every text file showing as modified in `git status`). Added `* text=auto eol=lf` + binary rules and renormalized the 5 files that had CRLF committed in the index (line-ending-only). Kept separate from the Safari fix PR to keep that diff focused.
+- **URL**: PR #80
 
 ### 2026-06-25 - Library Links + Live Availability (#57) — SHIPPED + DEPLOYED
 - **Status**: Merged + deployed; migration applied on prod; working live.
