@@ -60,16 +60,17 @@ def get_availability(
             .filter(Work.id.in_(parsed))
             .all()
         )
-        for work in works:
-            authors = _authors(work)
-            author = authors[0] if authors else ""
-            libby: list[dict] = []
-            for lib in libs:
-                formats = service.availability_for(session, lib, work.title, author)
-                if formats:  # non-empty match → show a badge for this library
-                    libby.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})
-            result[str(work.id)] = {
-                "links": build_links(work.title, author, libraries=libs),
-                "libby": libby,
-            }
+        # scalars captured before the session closes (detached-instance rule)
+        work_rows = [(str(w.id), w.title, (_authors(w) or [""])[0]) for w in works]
+
+    pairs = [(title, author) for _, title, author in work_rows]
+    availability = service.batch_availability(db_manager, libs, pairs)
+
+    for wid, title, author in work_rows:
+        libby = []
+        for lib in libs:
+            formats = availability.get((lib["slug"], title, author))
+            if formats:  # non-empty match → badge
+                libby.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})
+        result[wid] = {"links": build_links(title, author, libraries=libs), "libby": libby}
     return result

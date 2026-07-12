@@ -339,23 +339,21 @@ def check_availability(title: str, author: str) -> dict:
             .order_by(UserLibrary.sort_order)
             .all()
         ]
-        if not libs:
-            note = "No libraries saved — the reader can add theirs in Settings."
-        for lib in libs:
-            try:
-                formats = availability_service.availability_for(session, lib, title, author)
-            except Exception as exc:  # noqa: BLE001 - never throw into the agent loop
-                logger.warning(
-                    "check_availability lookup failed for %r by %r at %r: %s",
-                    title,
-                    author,
-                    lib.get("name"),
-                    exc,
-                )
-                formats = None
-            if formats:
-                libraries.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})
-        links = build_links(title, author, libraries=libs)
+    if not libs:
+        note = "No libraries saved — the reader can add theirs in Settings."
+    availability = availability_service.batch_availability(db_manager, libs, [(title, author)])
+    for lib in libs:
+        formats = availability.get((lib["slug"], title, author))
+        if formats is None:
+            logger.warning(
+                "check_availability lookup failed for %r by %r at %r",
+                title,
+                author,
+                lib.get("name"),
+            )
+        elif formats:
+            libraries.append({"library": lib["name"], "slug": lib["slug"], "formats": formats})
+    links = build_links(title, author, libraries=libs)
     if libs and not libraries and not note:
         note = "Couldn't confirm live availability — offer the search links."
     return {"title": title, "author": author, "libraries": libraries, "links": links, "note": note}
