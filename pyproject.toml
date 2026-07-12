@@ -151,3 +151,6 @@ markers = [
     "integration: tests that verify components of the system integrated",
     "live: tests against real external services (operator-run, never CI)",
 ]
+filterwarnings = [
+    "error::sqlalchemy.exc.SAWarning",
+]

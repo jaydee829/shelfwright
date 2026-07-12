@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from agentic_librarian.availability import overdrive
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _PROVIDER = "libby"
 _FORMATS = (("ebook", "eBook"), ("audiobook", "Audiobook"))
+_EVICT_AFTER_DAYS = 30
 
 
 def _ttl() -> timedelta:
@@ -73,6 +75,38 @@ def _shape_formats(items: list[dict], title: str, author: str) -> list[dict]:
     return out
 
 
+def _upsert_cache_row(session, slug: str, title: str, author: str, formats: list, now) -> None:
+    """Durable upsert on the composite PK (GH #110) — two concurrent writers can no longer
+    IntegrityError; last write wins, which is fine for a cache."""
+    nt, na = _normalize(title), _normalize(author)
+    stmt = (
+        pg_insert(AvailabilityCache)
+        .values(
+            provider=_PROVIDER,
+            library_slug=slug,
+            norm_title=nt,
+            norm_author=na,
+            payload={"formats": formats},
+            fetched_at=now,
+        )
+        .on_conflict_do_update(
+            index_elements=["provider", "library_slug", "norm_title", "norm_author"],
+            set_={"payload": {"formats": formats}, "fetched_at": now},
+        )
+    )
+    session.execute(stmt)
+
+
+def _evict_stale(session, now) -> None:
+    """Opportunistic eviction piggybacked on writes (GH #110) — rows are otherwise
+    immortal. Unindexed seq scan is fine at this table's size; revisit if it grows."""
+    session.execute(
+        AvailabilityCache.__table__.delete().where(
+            AvailabilityCache.fetched_at < now - timedelta(days=_EVICT_AFTER_DAYS)
+        )
+    )
+
+
 def availability_for(session: Session, library: dict, title: str, author: str) -> list[dict] | None:
     """Single-lookup read-through cache (request paths use batch_availability, GH #94). Read-
     through cache for ONE (library, title, author). Returns the per-format list, or None if
@@ -92,21 +126,8 @@ def availability_for(session: Session, library: dict, title: str, author: str) -
         return None  # degrade: no badge, links unaffected
 
     formats = _shape_formats(items, title, author)
-    payload = {"formats": formats}
-    if row is None:
-        session.add(
-            AvailabilityCache(
-                provider=_PROVIDER,
-                library_slug=slug,
-                norm_title=nt,
-                norm_author=na,
-                payload=payload,
-                fetched_at=now,
-            )
-        )
-    else:
-        row.payload = payload
-        row.fetched_at = now
+    _upsert_cache_row(session, slug, title, author, formats, now)
+    _evict_stale(session, now)
     session.flush()
     return formats
 
@@ -146,26 +167,12 @@ def batch_availability(db_manager, libs: list[dict], items: list[tuple[str, str]
         try:
             with db_manager.get_session() as session:
                 for (slug, title, author), formats in fetched.items():
-                    nt, na = _normalize(title), _normalize(author)
-                    row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
-                    payload = {"formats": formats}
-                    if row is None:
-                        session.add(
-                            AvailabilityCache(
-                                provider=_PROVIDER,
-                                library_slug=slug,
-                                norm_title=nt,
-                                norm_author=na,
-                                payload=payload,
-                                fetched_at=now,
-                            )
-                        )
-                    else:
-                        row.payload = payload
-                        row.fetched_at = now
-                    session.flush()
+                    _upsert_cache_row(session, slug, title, author, formats, now)
+                _evict_stale(session, now)
+                session.flush()
         except Exception as exc:  # noqa: BLE001 - cache write-back is best-effort (ALWAYS-200)
-            # GH #110 covers the durable upsert; until then write-back is best-effort
-            logger.warning("availability cache write-back failed (concurrent insert?): %s", exc)
+            # defense in depth: the upsert (GH #110) makes concurrent writers safe, but
+            # write-back still must never take down the ALWAYS-200 request path.
+            logger.warning("availability cache write-back failed: %s", exc)
         results.update(fetched)
     return results

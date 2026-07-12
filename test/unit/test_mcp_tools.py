@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -127,22 +128,100 @@ def test_check_reading_history_mock(mock_db_manager):
 
 def test_update_reading_status_mock(mock_db_manager):
     session = mock_db_manager.get_session.return_value.__enter__.return_value
+    _mock_work_lookup(session)
 
-    mock_work = Work(id="work-uuid", title="Test Book")
+    with patch("agentic_librarian.mcp.server.two_phase.add_read_event") as mock_add_read_event:
+        mock_add_read_event.return_value = {"read_number": 1, "already_logged": False}
+        resp = update_reading_status("Test Book", "Author", "read")
 
-    # Mock the work query
+    assert "Successfully updated" in resp
+    mock_add_read_event.assert_called_once()
+
+
+def _mock_work_lookup(session, work_id="work-uuid", editions=()):
+    """update_reading_status's rewritten body needs the work lookup to resolve an id, plus
+    an edition-format lookup (same session, same mocked query chain) — the read-event write
+    itself goes through two_phase.add_read_event (mocked separately per test), not this
+    session. `editions` stubs the edition-format query's .all() result."""
+    mock_work = Work(id=work_id, title="Test Book")
     mock_query = session.query.return_value
     mock_query.join.return_value = mock_query
     mock_query.filter.return_value = mock_query
     mock_query.first.return_value = mock_work
+    mock_query.all.return_value = list(editions)
+    return mock_work
 
-    # Mock the edition query (filter_by)
-    mock_query.filter_by.return_value.first.return_value = MagicMock()
 
-    resp = update_reading_status("Test Book", "Author", "read")
+def test_update_reading_status_honors_year(mock_db_manager):
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    _mock_work_lookup(session)
+
+    with patch("agentic_librarian.mcp.server.two_phase.add_read_event") as mock_add_read_event:
+        mock_add_read_event.return_value = {"read_number": 1, "already_logged": False}
+        resp = update_reading_status("Test Book", "Author", "read", year=2019)
+
+    assert mock_add_read_event.call_args.kwargs["completed"] == date(2019, 1, 1)
+    assert "assumed" not in resp
     assert "Successfully updated" in resp
-    session.add.assert_called()
-    session.flush.assert_called()
+
+
+def test_update_reading_status_rejects_bad_year(mock_db_manager):
+    resp = update_reading_status("Test Book", "Author", "read", year=1200)
+    assert "Error" in resp
+    assert f"1900 and {date.today().year}" in resp
+
+
+def test_update_reading_status_flags_assumed_today(mock_db_manager):
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    _mock_work_lookup(session)
+
+    with patch("agentic_librarian.mcp.server.two_phase.add_read_event") as mock_add_read_event:
+        mock_add_read_event.return_value = {"read_number": 1, "already_logged": False}
+        resp = update_reading_status("Test Book", "Author", "read")
+
+    assert mock_add_read_event.call_args.kwargs["completed"] == date.today()
+    assert "assumed" in resp
+
+
+def test_update_reading_status_rejects_future_date(mock_db_manager):
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    resp = update_reading_status("Test Book", "Author", "read", date_completed=tomorrow)
+    assert "Error" in resp
+    assert "future" in resp
+
+
+def test_update_reading_status_reuses_sole_edition_format(mock_db_manager):
+    """Exactly one edition on the work -> its format is reused instead of "Unknown"."""
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    sole_edition = MagicMock(format="audiobook")
+    _mock_work_lookup(session, editions=[sole_edition])
+
+    with patch("agentic_librarian.mcp.server.two_phase.add_read_event") as mock_add_read_event:
+        mock_add_read_event.return_value = {"read_number": 1, "already_logged": False}
+        resp = update_reading_status("Test Book", "Author", "read")
+
+    assert mock_add_read_event.call_args.kwargs["fmt"] == "audiobook"
+    assert "Successfully updated" in resp
+
+
+@pytest.mark.parametrize(
+    "editions",
+    [
+        [],
+        [MagicMock(format="ebook"), MagicMock(format="audiobook")],
+    ],
+    ids=["zero_editions", "two_editions"],
+)
+def test_update_reading_status_falls_back_to_unknown_format(mock_db_manager, editions):
+    """Zero or multiple (ambiguous) editions -> "Unknown", same as before the fix."""
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    _mock_work_lookup(session, editions=editions)
+
+    with patch("agentic_librarian.mcp.server.two_phase.add_read_event") as mock_add_read_event:
+        mock_add_read_event.return_value = {"read_number": 1, "already_logged": False}
+        update_reading_status("Test Book", "Author", "read")
+
+    assert mock_add_read_event.call_args.kwargs["fmt"] == "Unknown"
 
 
 def test_get_user_trope_preferences_mock(mock_db_manager):

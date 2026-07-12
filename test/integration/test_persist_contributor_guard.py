@@ -1,6 +1,6 @@
 import pytest
 
-from agentic_librarian.db.models import Author, WorkContributor
+from agentic_librarian.db.models import Author, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import persist_enriched_work
 
@@ -49,3 +49,27 @@ def test_persist_reuses_existing_author_case_insensitively(db_url):
         session.flush()
         # the existing row is reused, not duplicated
         assert session.query(Author).filter(Author.name.ilike("casualfarmer")).count() == 1
+
+
+def test_existing_work_gains_new_contributor(db_url):
+    """#96: re-persisting an existing work links newly discovered contributors."""
+    manager = DatabaseManager(db_url)
+    row1 = {
+        "Title": "CG Work",
+        "Author_1": "Alice",
+        "format": "ebook",
+        "skip_enrichment": False,
+        "date_completed": None,
+        "genres": [],
+        "moods": [],
+    }
+    with manager.get_session() as s:
+        persist_enriched_work(s, row1, _NullManager(), _NullManager())
+        s.flush()
+    with manager.get_session() as s:
+        row2 = dict(row1)
+        row2["contributors"] = [{"name": "Alice", "role": "Author"}, {"name": "Bob", "role": "Author"}]
+        persist_enriched_work(s, row2, _NullManager(), _NullManager())
+        s.flush()
+        work = s.query(Work).filter_by(title="CG Work").one()
+        assert {(c.author.name, c.role) for c in work.contributors} == {("Alice", "Author"), ("Bob", "Author")}

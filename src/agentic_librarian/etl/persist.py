@@ -18,6 +18,7 @@ from agentic_librarian.db.models import (
     Narrator,
     NarratorStyle,
     ReadingHistory,
+    Trope,
     Work,
     WorkContributor,
     WorkStyle,
@@ -25,6 +26,7 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.etl.contributor_dedup import norm_name
 from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods, clean_trope_name
+from agentic_librarian.etl.trope_predicate import is_fallback_trope_name
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
@@ -74,6 +76,39 @@ def _nan_to_list(value):
     return value if isinstance(value, list) else []
 
 
+def collect_embedding_texts(row: dict) -> list[str]:
+    """Every text persist_enriched_work will pass to standardize_trope/standardize_style for
+    this row — trope names, author/work/narrator style strings, plus the cleaned genre∪mood
+    fallback tags IF (and only if) persist would actually fall back to them (no real
+    enriched_tropes AND the caller hasn't opted out via write_fallback_tropes=False). Used to
+    warm the get_cached_embedding LRU BEFORE a write session opens (GH #123) so the in-session
+    standardize_* calls become cache hits instead of network embeds."""
+    texts: list[str] = []
+
+    enriched_tropes = _nan_to_list(row.get("enriched_tropes"))
+    for t_data in enriched_tropes:
+        name = t_data.get("trope_name")
+        if isinstance(name, str) and name.strip():
+            texts.append(name)
+
+    for style_data in (row.get("author_style"), row.get("work_style")):
+        for _attr_type, style_name in _iter_style_items(style_data, "warm"):
+            texts.append(style_name)
+    narrator_styles = row.get("narrator_styles")
+    if isinstance(narrator_styles, dict):
+        for n_style_data in narrator_styles.values():
+            for _attr_type, style_name in _iter_style_items(n_style_data, "warm"):
+                texts.append(style_name)
+
+    if not enriched_tropes and row.get("write_fallback_tropes", True):
+        genres = clean_genres(_nan_to_list(row.get("genres")))
+        moods = clean_moods(_nan_to_list(row.get("moods")))
+        for tag in set(genres) | set(moods):
+            texts.extend(clean_trope_name(tag))
+
+    return texts
+
+
 def persist_enriched_work(
     session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
 ) -> Work | None:
@@ -100,8 +135,28 @@ def persist_enriched_work(
     if not raw_contributors:
         return None
 
-    # Resolve/Create Authors and create WorkContributor objects
-    work_contributors_list = []
+    # 2. Work lookup. Moved above contributor materialization (#96) so the existing-work branch
+    # can merge desired contributors instead of relying on WorkContributor objects built before we
+    # know whether this is a new or existing work. no_autoflush guards this query against
+    # autoflushing other pending session state (e.g. an Author added earlier in this same call for
+    # a prior row in a batch import) mid-lookup.
+    with session.no_autoflush:
+        work = (
+            session.query(Work)
+            .join(WorkContributor)
+            .join(Author)
+            .filter(Work.title == row["Title"])
+            .filter(Author.name == (row.get("Author_1") or row.get("Author")))
+            .first()
+        )
+
+    # Resolve/Create Authors and collect (author, role) pairs to link below. Author creation
+    # happens only for entries that will actually be linked to the work (both the new-work and
+    # existing-work branches below link every desired pair), so orphan Authors can no longer
+    # result from any prod path (two_phase/imports always set skip_enrichment=False); the
+    # Dagster ETL's skip_enrichment=True branch can still flush an unlinked Author for an
+    # existing work — acceptable for operator-curated re-runs, listed in PR-D's dry-run.
+    desired: list[tuple[Author, str]] = []
     author_style_data = row.get("author_style", {})
 
     seen_contributors: set[tuple[str, str]] = set()
@@ -139,7 +194,7 @@ def persist_enriched_work(
                 if not existing_link:
                     session.add(AuthorStyle(author=author, style=standard_style, attribute_type=attr_type))
 
-        work_contributors_list.append(WorkContributor(author=author, role=role))
+        desired.append((author, role))
 
     # Coerce every enrichment/CSV field that pandas may deliver as NaN before it reaches the ORM.
     # Scalars -> None (SQL NULL); list-typed fields -> [] so downstream iteration/set() can't crash
@@ -157,21 +212,10 @@ def persist_enriched_work(
     audio_minutes = _nan_to_none(row.get("audio_minutes"))
     publication_date = _nan_to_none(row.get("publication_date"))
 
-    # 2. Work. no_autoflush: the not-yet-added WorkContributor objects above must not be
-    # cascaded by this query's autoflush (raises a SAWarning and could flush incomplete rows).
-    with session.no_autoflush:
-        work = (
-            session.query(Work)
-            .join(WorkContributor)
-            .join(Author)
-            .filter(Work.title == row["Title"])
-            .filter(Author.name == (row.get("Author_1") or row.get("Author")))
-            .first()
-        )
     if not work:
         work = Work(
             title=row["Title"],
-            contributors=work_contributors_list,
+            contributors=[WorkContributor(author=a, role=r) for a, r in desired],
             original_publication_year=original_publication_year,
             description=description,
             genres=genres,
@@ -185,6 +229,14 @@ def persist_enriched_work(
         work.description = description or work.description
         work.genres = genres or work.genres
         work.moods = moods or work.moods
+        # GH #96: link newly discovered contributors (deep pass / re-import). Previously the
+        # WorkContributor objects dangled off Author.contributions and SQLAlchemy 2.0's removed
+        # backref-cascade silently never flushed them (SAWarning) — co-authors were lost and
+        # their Author rows orphaned. Mirror the narrator merge below.
+        existing_pairs = {(c.author_id, c.role) for c in work.contributors}
+        for author, role in desired:
+            if (author.id, role) not in existing_pairs:
+                work.contributors.append(WorkContributor(author=author, role=role))
 
     # 2.5 Work Styles
     work_style_data = row.get("work_style", {})
@@ -335,12 +387,16 @@ def persist_enriched_work(
             # only when the caller wants them — the two-phase fast pass opts out (write_fallback_tropes
             # =False) because its deep pass supplies the real tropes (Spec #65, 2026-06-23). Cleaned the
             # same way as genres/moods so a fallback can never write a UUID-tailed / unsplit slug.
-            has_real_trope = (
-                session.query(WorkTrope)
-                .filter(WorkTrope.work_id == work.id, WorkTrope.justification.isnot(None))
-                .first()
-                is not None
+            # GH #111: "has a real trope" = any linked trope whose cleaned name is NOT a
+            # re-encoding of this work's genres/moods (the shared #69 predicate) — the old
+            # `justification IS NOT NULL` heuristic misclassified real attractor tropes.
+            linked = (
+                session.query(Trope.name)
+                .join(WorkTrope, WorkTrope.trope_id == Trope.id)
+                .filter(WorkTrope.work_id == work.id)
+                .all()
             )
+            has_real_trope = any(is_fallback_trope_name(name, work.genres, work.moods) is False for (name,) in linked)
             if row.get("write_fallback_tropes", True) and not has_real_trope:
                 for tag in all_fallback_tags:
                     for name in clean_trope_name(tag):

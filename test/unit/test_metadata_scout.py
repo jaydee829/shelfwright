@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -373,3 +374,54 @@ def test_claude_grounded_scouts_produce_styles_and_tropes(monkeypatch):
     assert tropes.get("tropes"), "expected non-empty tropes from the Claude LLMTropeScout"
     style = StyleScout(api_key="x").scout_author_style("Brandon Sanderson")
     assert style, "expected non-empty author style from the Claude StyleScout"
+
+
+def test_enrich_returns_empty_when_no_scout_contributes():
+    """#98: a title no scout can confirm must be falsy — revives the 404/not_found paths."""
+
+    class FailingScout(md_scout.BaseScout):
+        def search(self, title, author, **kwargs):
+            raise RuntimeError("boom")
+
+    class EmptyScout(md_scout.BaseScout):
+        def search(self, title, author, **kwargs):
+            return {}
+
+    manager = md_scout.ScoutManager()
+    manager.register_scout(FailingScout(), priority=1)
+    manager.register_scout(EmptyScout(), priority=2)
+
+    assert manager.enrich(title="asdfjkl", author="Nobody") == {}
+
+
+def test_enrich_truthy_when_a_scout_contributes():
+    class GenreScout(md_scout.BaseScout):
+        def search(self, title, author, **kwargs):
+            return {"genres": {"Fantasy"}}
+
+    manager = md_scout.ScoutManager()
+    manager.register_scout(GenreScout(), priority=1)
+
+    result = manager.enrich(title="Real Book", author="Real Author")
+    assert result and result["source_priority"] == ["GenreScout"]
+
+
+def test_trope_scout_empty_tropes_is_falsy(monkeypatch):
+    """An LLM that can't verify the book returns {'tropes': []} — that must NOT count as a
+    contributing source (it was truthy before and defeated the gate)."""
+    scout = md_scout.LLMTropeScout.__new__(md_scout.LLMTropeScout)
+    monkeypatch.setattr(scout, "_llm", SimpleNamespace(generate=lambda *a, **k: '{"tropes": []}'), raising=False)
+    assert scout.search("Ghost Book", "Nobody") == {}
+
+
+def test_trope_prompt_has_unknown_book_escape(monkeypatch):
+    seen = {}
+
+    def fake_generate(prompt, grounded=True):
+        seen["prompt"] = prompt
+        return '{"tropes": []}'
+
+    scout = md_scout.LLMTropeScout.__new__(md_scout.LLMTropeScout)
+    monkeypatch.setattr(scout, "_llm", SimpleNamespace(generate=fake_generate), raising=False)
+    scout.search("X", "Y")
+    assert "cannot verify" in seen["prompt"].lower()

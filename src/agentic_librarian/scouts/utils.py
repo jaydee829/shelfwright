@@ -6,6 +6,10 @@ from functools import lru_cache
 from google import genai
 from google.genai import types
 
+# Current GA Gemini embedding model — the single source of truth for the model name (managers
+# and the #123 warm-before-session callers all reference this instead of copying the string).
+EMBED_MODEL = "gemini-embedding-001"
+
 # Match the pgvector column dimension (Vector(1536) on Style/Trope). gemini-embedding-001
 # defaults to 3072, so we must request 1536 explicitly.
 EMBEDDING_DIMENSIONS = 1536

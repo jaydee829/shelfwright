@@ -3,7 +3,7 @@ import os
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import Trope
-from agentic_librarian.scouts.utils import get_cached_embedding
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
 
 
 class TropeManager:
@@ -14,7 +14,7 @@ class TropeManager:
         self._api_key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not self._api_key:
             raise ValueError("Google API key not set for TropeManager.")
-        self.model_name = "gemini-embedding-001"  # Current GA Gemini embedding model
+        self.model_name = EMBED_MODEL
 
     def _get_embedding(self, text: str) -> list[float]:
         """Fetch embedding from Gemini via the shared module-level client + cache (#101)."""

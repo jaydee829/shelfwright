@@ -77,7 +77,7 @@ This file tracks important project configuration, constants, and environment det
   (full `DATABASE_URL`, Cloud SQL unix socket); schema managed by Alembic (Lift 1+).
   Nightly automated backups (09:00 UTC) + 7-day PITR enabled 2026-07-12 (GH #91; codified in
   `infra/02-cloudsql.sh`).
-  Engine pools: `pool_pre_ping` + 30-min recycle, 5+5 per engine (overflow headroom while embeds still run inside sessions — GH #123), one shared engine per API process (GH #102/#94) — 2 instances × 10 = 20 of db-f1-micro's ~25 connections.
+  Engine pools: `pool_pre_ping` + 30-min recycle, 5+2 per engine, one shared engine per API process (GH #102/#94) — 2 instances × 7 = 14 of db-f1-micro's ~25 connections; #123 landed (embeds warmed into the LRU before write/search sessions, so overflow tightened from 5).
 - **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
   `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.

@@ -28,8 +28,10 @@ from agentic_librarian.db.models import (
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.enrichment import two_phase
 from agentic_librarian.enrichment.tasks import enqueue_enrichment
+from agentic_librarian.enrichment.two_phase import _normalize, _normalized_col
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
 from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,20 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
     """
     Performs a pgvector similarity search across tropes and literary styles.
     """
+    # GH #123: warm the embedding LRU before the session opens so the in-session
+    # _get_embedding calls below are cache hits, not network round-trips held under a
+    # pooled connection (the pool's 5+2 sizing depends on no embed calls inside sessions).
+    for t in target_tropes or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, t)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for trope %r — retrying in-session", t)
+    for s in target_styles or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, s)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for style %r — retrying in-session", s)
+
     with db_manager.get_session() as session:
         tm = TropeManager(session=session)
         sm = StyleManager(session=session)
@@ -190,6 +206,19 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     ranked by similarity to current target vibes.
     """
     user_id = get_required_user_id()
+    # GH #123: warm before the session opens (see search_internal_database above) — a no-op
+    # cache-hit in-session either way if there turn out to be no suggestions to rank.
+    for t in target_tropes or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, t)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for trope %r — retrying in-session", t)
+    for s in target_styles or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, s)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for style %r — retrying in-session", s)
+
     with db_manager.get_session() as session:
         # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
         query = (
@@ -435,8 +464,24 @@ def _valid_name(value, max_len: int = 500) -> bool:
 
 
 @mcp.tool()
-def update_reading_status(title: str, author: str, status: str, notes: str | None = None) -> str:
-    """Updates history based on feedback (e.g. 'I read that years ago')."""
+def update_reading_status(
+    title: str,
+    author: str,
+    status: str,
+    notes: str | None = None,
+    date_completed: str | None = None,
+    year: int | None = None,
+) -> str:
+    """Updates history based on feedback (e.g. 'I read that years ago'). date_completed
+    (ISO YYYY-MM-DD) takes precedence over year (a bare year is written as Jan 1 of that
+    year — the documented convention for an unknown month/day, not a claim the user said
+    "January 1"); with neither, the completion date is ASSUMED to be today and the reply
+    says so — the caller should ask the user roughly when they read it if the exact date
+    matters, since an assumed-today date wrongly blocks the 2-year re-read rule for years.
+    Two 'read' calls with the same year (no exact date) resolve to the same Jan 1 date and
+    dedup to a single row rather than logging a second read. A year-only entry also opens
+    the 2-year re-read window up to ~11 months early, since it is dated Jan 1 regardless of
+    which month the book was actually finished."""
     if not _valid_name(title):
         return "Error: title must be a non-empty string of at most 500 characters."
     if not _valid_name(author):
@@ -447,39 +492,52 @@ def update_reading_status(title: str, author: str, status: str, notes: str | Non
         # false-success). Reject honestly instead (SEC-002).
         return f"Error: status must be one of {', '.join(_READING_STATUSES)}; got {status!r}."
     notes = notes[:2000] if isinstance(notes, str) else None
-    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
+
+    # date resolution (GH #112): date_completed > year (Jan 1 convention) > today-fallback.
+    assumed_today = False
+    if date_completed is not None:
+        try:
+            completed = date.fromisoformat(str(date_completed))
+        except ValueError:
+            return f"Error: date_completed must be ISO YYYY-MM-DD; got {date_completed!r}."
+        if completed > date.today():
+            return f"Error: date_completed {completed.isoformat()} is in the future."
+    elif year is not None:
+        if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= date.today().year:
+            return f"Error: year must be between 1900 and {date.today().year}; got {year!r}."
+        completed = date(year, 1, 1)  # convention: unknown month/day -> Jan 1 (documented)
+    else:
+        completed = date.today()
+        assumed_today = True
+
+    get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
     try:
         with db_manager.get_session() as session:
-            # Find the work/edition first
             work = (
                 session.query(Work)
                 .join(WorkContributor)
                 .join(Author)
-                .filter(Work.title == title, Author.name == author)
+                .filter(_normalized_col(Work.title) == _normalize(title))
+                .filter(_normalized_col(Author.name) == _normalize(author))
                 .first()
             )
             if not work:
                 return f"Work '{title}' by {author} not found in database."
-
-            # Find first edition
-            edition = session.query(Edition).filter_by(work_id=work.id).first()
-            if not edition:
-                # Create a placeholder edition if none exists
-                edition = Edition(work=work, format="Unknown")
-                session.add(edition)
-                session.flush()
-
-            if canonical == "read":
-                history = ReadingHistory(
-                    edition=edition,
-                    user_id=user_id,
-                    date_completed=date.today(),  # Placeholder for manual addition
-                    user_notes=notes,
-                )
-                session.add(history)
-
-            session.flush()  # ADR-016
-            return f"Successfully updated status for '{title}' to {status}."
+            work_id = work.id
+            # Reuse the work's own edition format when it's unambiguous (exactly one
+            # edition); otherwise "Unknown" as before. Scalar captured before the session
+            # closes to avoid a DetachedInstanceError on the ORM object.
+            editions = session.query(Edition).filter(Edition.work_id == work_id).all()
+            edition_fmt = editions[0].format if len(editions) == 1 else "Unknown"
+            edition_fmt = edition_fmt or "Unknown"
+        if canonical == "read":
+            logged = two_phase.add_read_event(work_id, completed=completed, rating=None, notes=notes, fmt=edition_fmt)
+            if logged["already_logged"]:
+                return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
+        note = (
+            " (completion date assumed today — ask the user when they read it if it matters)" if assumed_today else ""
+        )
+        return f"Successfully updated status for '{title}' to {status}.{note}"
     except Exception as e:
         return f"Error updating status: {str(e)}"
 
