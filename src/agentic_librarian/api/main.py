@@ -1,3 +1,5 @@
+import asyncio
+import concurrent.futures
 import contextlib
 import os
 from datetime import date
@@ -49,6 +51,16 @@ def set_db_manager(new_manager: DatabaseManager) -> None:
     db_manager = new_manager
 
 
+def _pin_default_executor() -> None:
+    # GH #93: tool bodies, auth resolves, and enqueue loops all run via asyncio.to_thread.
+    # Python's DEFAULT executor is min(32, cpu_count+4) ≈ 5-6 threads on Cloud Run's 1 vCPU —
+    # five concurrent slow tool calls would queue every request's auth resolve behind them.
+    # Pin 32 workers (I/O-bound work; threads are cheap) so capacity doesn't scale with vCPUs.
+    asyncio.get_running_loop().set_default_executor(
+        concurrent.futures.ThreadPoolExecutor(max_workers=32, thread_name_prefix="offloop")
+    )
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
     """Build ONE DatabaseManager at startup and inject it into the API-request-path
@@ -58,6 +70,7 @@ async def lifespan(app: FastAPI):
     fallbacks for non-API processes (Dagster, CLI). Lazy construction means no DB
     connection happens here. Tests that use TestClient WITHOUT a `with` block skip
     lifespan and keep their own monkeypatched managers."""
+    _pin_default_executor()
     shared = DatabaseManager()
     # ADR-058 (#92): refuse to serve when the DB schema is behind this code's migration
     # head — the failed revision keeps traffic on the previous one. Unreachable DB only

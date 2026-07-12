@@ -70,7 +70,7 @@ def _make_row(manager, **kw):
 def test_dedup_links_existing_catalog_work_without_scouts(wired, monkeypatch):
     _seed_work(wired)
     # If a scout were called, this would blow up — proving de-dup short-circuits.
-    monkeypatch.setattr(two_phase, "_scout_and_persist", lambda *a, **k: pytest.fail("scouts ran on a de-dup hit"))
+    monkeypatch.setattr(two_phase, "_run_scouts", lambda *a, **k: pytest.fail("scouts ran on a de-dup hit"))
     row_id = _make_row(wired)
 
     assert worker.process_import_row(row_id) == "done"

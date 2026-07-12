@@ -16,6 +16,7 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.enrichment import two_phase
 from agentic_librarian.mcp import server as mcp_server
 from agentic_librarian.mcp.server import (
     check_reading_history,
@@ -122,6 +123,7 @@ def seeded_work_id(db_url):
     DatabaseManager, call set_db_manager, seed inside a committed session."""
     test_db_manager = DatabaseManager(db_url)
     set_db_manager(test_db_manager)
+    two_phase.set_db_manager(test_db_manager)  # add_book_to_history now routes through two_phase
     with test_db_manager.get_session() as session:
         author = Author(name="Security Test Author")
         session.add(author)
@@ -228,9 +230,10 @@ def test_update_reading_status_validates_title_author_shape(db_url):
 
 
 def _stub_enrich(monkeypatch, work_id):
-    """add_book_to_history delegates get-or-create+enrichment to enrich_and_persist_work
-    (same module global) — stub it so tests are offline-deterministic."""
-    monkeypatch.setattr(mcp_server, "enrich_and_persist_work", lambda **kw: work_id)
+    """add_book_to_history delegates get-or-create+enrichment to two_phase.enrich_fast —
+    stub it as a dedup HIT (created=False) so tests are offline-deterministic and exercise
+    no enqueue side effect."""
+    monkeypatch.setattr(mcp_server.two_phase, "enrich_fast", lambda *a, **kw: (UUID(work_id), False))
 
 
 @pytest.mark.db_integration
@@ -281,11 +284,13 @@ def test_add_book_defaults_date_to_today(db_url, seeded_work_id, monkeypatch):
 @pytest.mark.db_integration
 def test_add_book_rejections_write_nothing(db_url, monkeypatch):
     # Validation precedes enrichment: a call that reaches enrich here is a failure.
-    monkeypatch.setattr(
-        mcp_server, "enrich_and_persist_work", lambda **kw: pytest.fail("enrich must not run on invalid input")
-    )
+    def _fail_enrich(*a, **kw):
+        pytest.fail("enrich must not run on invalid input")
+
+    monkeypatch.setattr(mcp_server.two_phase, "enrich_fast", _fail_enrich)
     test_db_manager = DatabaseManager(db_url)
     set_db_manager(test_db_manager)
+    two_phase.set_db_manager(test_db_manager)  # add_book_to_history now routes through two_phase
     assert "Error" in mcp_server.add_book_to_history(title="  ", author="A")
     assert "Error" in mcp_server.add_book_to_history(title="T", author="A", date_completed="June 1st")
     assert "Error" in mcp_server.add_book_to_history(title="T", author="A", date_completed="2999-01-01")
@@ -299,9 +304,10 @@ def test_add_book_rejections_write_nothing(db_url, monkeypatch):
 
 @pytest.mark.db_integration
 def test_add_book_unresolvable_title_errors(db_url, monkeypatch):
-    monkeypatch.setattr(mcp_server, "enrich_and_persist_work", lambda **kw: None)
+    monkeypatch.setattr(mcp_server.two_phase, "enrich_fast", lambda *a, **kw: None)
     test_db_manager = DatabaseManager(db_url)
     set_db_manager(test_db_manager)
+    two_phase.set_db_manager(test_db_manager)  # add_book_to_history now routes through two_phase
     out = mcp_server.add_book_to_history(title="Definitely Fake", author="Nobody")
     assert "Error" in out and "could not resolve" in out
 

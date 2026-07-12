@@ -38,8 +38,12 @@ def test_check_availability_returns_links_and_badge(db_url, monkeypatch):
 
     monkeypatch.setattr(
         service,
-        "availability_for",
-        lambda *a, **k: [{"format": "Audiobook", "available": True}],
+        "batch_availability",
+        lambda db_manager, libs, items: {
+            (lib["slug"], title, author): [{"format": "Audiobook", "available": True}]
+            for lib in libs
+            for title, author in items
+        },
     )
     with as_user(user_id):
         out = server.check_availability("Project Hail Mary", "Andy Weir")

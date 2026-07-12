@@ -7,14 +7,27 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 
 logger = logging.getLogger(__name__)
 
 
-def _client():
-    from google.cloud import tasks_v2
+_client_cached = None
+_client_lock = threading.Lock()
 
-    return tasks_v2.CloudTasksClient()
+
+def _client():
+    """Seam for tests. Cached (GH #93): CloudTasksClient opens a gRPC channel + auth —
+    building one per enqueued row made a 2000-row commit open 2000 channels. Lazily
+    imports google-cloud-tasks so the dependency is only needed where enqueue runs."""
+    global _client_cached
+    if _client_cached is None:
+        with _client_lock:
+            if _client_cached is None:
+                from google.cloud import tasks_v2
+
+                _client_cached = tasks_v2.CloudTasksClient()
+    return _client_cached
 
 
 def enqueue_import_row(row_id: str) -> bool:

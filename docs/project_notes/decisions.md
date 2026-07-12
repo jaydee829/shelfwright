@@ -1005,3 +1005,35 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Any deploy path is covered (workflow or manual gcloud), with no DB credentials in CI.
 - A forgotten alembic COPY in Dockerfile.api fails the runner smoke test (guard raises on a
   missing script dir), so the guard cannot silently vanish from the image.
+
+### ADR-059: Off-loop tool execution + sessions never span external calls (2026-07-12)
+**Context:**
+- ADK FunctionTool runs sync tools inline on the uvicorn event loop; every mesh tool was
+  sync, the auth dependency did sync verify+DB per request, and import commit enqueued up
+  to 2000 Cloud Tasks synchronously — one slow operation stalled every user on the
+  instance (GH #93). Enrichment/availability held DB sessions open across scout/LLM/
+  Thunder calls — minutes idle-in-transaction, pool exhaustion, a wide #95 TOCTOU window
+  (GH #94). Chat's add-book ran the full 6-scout enrichment inline (~1-2 min in-chat).
+**Decision:**
+- `make_async_tool` (signature-preserving `asyncio.to_thread` wrapper) on all 11 mesh
+  FunctionTools; auth's verify+DB body via to_thread (ContextVar set stays in the
+  coroutine); Cloud Tasks clients cached at module level; commit's enqueue loop off-loop.
+- The session rule: read-session → external work with NO session → fresh write-session
+  that re-checks dedup. Applied to two_phase fast/deep, availability (three-phase batch),
+  and the chat discovery tool.
+- Chat add-book re-routed through the two-phase path (fast pass + queued deep pass) —
+  user-approved contract: the Librarian announces background analysis and never anchors
+  trope-based recommendations on a deep-pending work in the same turn. Tool contract
+  (`str | None`) unchanged for the pipeline/Claude-backend callers.
+- Pool overflow is 5, not the PR-A interim 10 or a tight 2: embedding calls (search
+  tools, persist-time standardize_trope/style) still run inside sessions, so a Gemini
+  429 burst can stretch sessions to minutes even after #94. Tightening to 2 is tracked
+  by GH #123 (hoist embed calls out of sessions).
+**Consequences:**
+- One user's enrichment can no longer brown out the instance; chat adds return in seconds.
+- The deep pass now re-scouts outside any transaction: a late transient failure re-pays
+  nothing already persisted, and dedup re-checks close the widened race window.
+- to_thread runs on the loop's default executor, pinned to 32 workers in the API lifespan
+  (Python's own default is min(32, cpus+4) ≈ 5-6 on Cloud Run's 1 vCPU — too small once
+  every auth resolve and tool body shares it); the enrich/import queues (4/5 concurrent)
+  remain the heavy-work throttles.

@@ -86,7 +86,7 @@ def test_librarian_has_the_import_flow():
     assert "IMPORT" in text
     assert "add_book_to_history" in text
     assert "defaults to today" in text
-    assert "minute or two" in text  # sets latency expectations before enrichment runs
+    assert "background" in text  # sets the still-investigating expectation for new discoveries
 
 
 def test_confirm_clause_covers_the_import_tool():

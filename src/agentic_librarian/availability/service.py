@@ -8,6 +8,7 @@ wrong 'available now'. Each format (ebook/audiobook) is matched independently.""
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 from agentic_librarian.availability import overdrive
 from agentic_librarian.availability.overdrive import ThunderError
 from agentic_librarian.db.models import AvailabilityCache
+
+logger = logging.getLogger(__name__)
 
 _PROVIDER = "libby"
 _FORMATS = (("ebook", "eBook"), ("audiobook", "Audiobook"))
@@ -71,9 +74,10 @@ def _shape_formats(items: list[dict], title: str, author: str) -> list[dict]:
 
 
 def availability_for(session: Session, library: dict, title: str, author: str) -> list[dict] | None:
-    """Read-through cache for ONE (library, title, author). Returns the per-format list, or
-    None if Thunder failed (caller degrades to links-only). A fresh cache row → zero upstream
-    calls. Empty list (matched nothing) is a real, cacheable result."""
+    """Single-lookup read-through cache (request paths use batch_availability, GH #94). Read-
+    through cache for ONE (library, title, author). Returns the per-format list, or None if
+    Thunder failed (caller degrades to links-only). A fresh cache row → zero upstream calls.
+    Empty list (matched nothing) is a real, cacheable result."""
     nt, na = _normalize(title), _normalize(author)
     slug = library["slug"]
     now = datetime.now(UTC)
@@ -105,3 +109,63 @@ def availability_for(session: Session, library: dict, title: str, author: str) -
         row.fetched_at = now
     session.flush()
     return formats
+
+
+def batch_availability(db_manager, libs: list[dict], items: list[tuple[str, str]]) -> dict:
+    """Batch read-through cache in THREE phases (GH #94): (1) one short session reads
+    every fresh cache row; (2) Thunder fetches for the misses run with NO session held
+    (previously each miss pinned the request's connection idle-in-transaction);
+    (3) one short session writes the fetched payloads back. Returns
+    {(slug, title, author): formats-list | None} — None means Thunder failed for that
+    lookup (caller degrades to links-only; the ALWAYS-200 contract is unchanged)."""
+    now = datetime.now(UTC)
+    results: dict = {}
+    misses: list[tuple[dict, str, str]] = []
+
+    with db_manager.get_session() as session:
+        for lib in libs:
+            for title, author in items:
+                nt, na = _normalize(title), _normalize(author)
+                row = session.get(AvailabilityCache, (_PROVIDER, lib["slug"], nt, na))
+                if row is not None and (now - row.fetched_at.replace(tzinfo=UTC)) < _ttl():
+                    results[(lib["slug"], title, author)] = row.payload.get("formats", [])
+                else:
+                    misses.append((lib, title, author))
+
+    fetched: dict = {}
+    for lib, title, author in misses:
+        try:
+            items_raw = overdrive.fetch_media(lib["slug"], title)  # raw title: better relevance
+        except ThunderError as exc:
+            logger.warning("availability fetch failed for %r at %r: %s", title, lib["slug"], exc)
+            results[(lib["slug"], title, author)] = None  # degrade: no badge
+            continue
+        fetched[(lib["slug"], title, author)] = _shape_formats(items_raw, title, author)
+
+    if fetched:
+        try:
+            with db_manager.get_session() as session:
+                for (slug, title, author), formats in fetched.items():
+                    nt, na = _normalize(title), _normalize(author)
+                    row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
+                    payload = {"formats": formats}
+                    if row is None:
+                        session.add(
+                            AvailabilityCache(
+                                provider=_PROVIDER,
+                                library_slug=slug,
+                                norm_title=nt,
+                                norm_author=na,
+                                payload=payload,
+                                fetched_at=now,
+                            )
+                        )
+                    else:
+                        row.payload = payload
+                        row.fetched_at = now
+                    session.flush()
+        except Exception as exc:  # noqa: BLE001 - cache write-back is best-effort (ALWAYS-200)
+            # GH #110 covers the durable upsert; until then write-back is best-effort
+            logger.warning("availability cache write-back failed (concurrent insert?): %s", exc)
+        results.update(fetched)
+    return results
