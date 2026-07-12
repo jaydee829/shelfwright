@@ -170,6 +170,21 @@ Symmetric hand-written downgrade, house naming, single head (ADR-058 guard).
   `enqueue_enrichment` (operator-run with prod env; Cloud Scheduler automation deferred to
   6.6/#114). Also absorbs the 6.2b deferral (deep-enqueue failure recovery).
 
+### PR-D inputs from PR-C's final review (2026-07-12)
+
+1. The dry-run's **orphan-author list may legitimately be nonzero even post-PR-C**: the
+   Dagster ETL's `skip_enrichment=True` branch can still flush an unlinked Author on an
+   existing work (operator-curated re-runs only; prod paths always set it False).
+2. Expect **"Unknown"-format editions** in the dry-run report — update_reading_status
+   historically minted them (PR-C now reuses a sole existing edition's format, but legacy
+   rows and zero/multi-edition works still produce Unknown).
+3. **#97 absorbs #123's warm-failure hardening**: a persist whose vectors were all skipped
+   (Gemini degradation) leaves a work with no real tropes — `--requeue-unenriched` is the
+   recovery path; no error-class discrimination needed in the warm loop.
+4. Product note for the #97/6.5 bucket: #98 means a real-but-unindexed book (absent from
+   Hardcover/Google Books) now lands `not_found` instead of creating a bare work — the
+   import report and chat messaging should say so in user-facing terms.
+
 ### Dedup backfill (THE USER GATE)
 `clean_catalog.py --dedup-for-constraints`:
 - **Plan (dry-run) report**: case-insensitive duplicate authors + narrators (merge target =

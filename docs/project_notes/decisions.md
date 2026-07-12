@@ -1042,4 +1042,7 @@ This file documents key architectural decisions, their context, and trade-offs.
   trope/style texts before their read session opens — so persist-time
   standardize_trope/style and the search tools' `_get_embedding` calls are cache hits,
   not network round-trips, inside any session. Pool overflow tightened 5 → 2
-  (db/session.py) now that no external call of any kind runs inside a session.
+  (db/session.py); two residuals remain: a warm-FAILURE degrades to in-session embeds via
+  `_safe_standardize` (bounded: enrich queue is 4-concurrent; PR-D's requeue sweep is the
+  recovery), and `/analysis` embeds ~24 radar anchor texts inside its session once per
+  process (first call only, then module-cached).

@@ -71,7 +71,10 @@ class DatabaseManager:
             # recycle beats server-side idle kills. 5+2 per engine × max-instances=2 = 14
             # vs db-f1-micro's ~25. Safe since #94 (no scout/LLM/Thunder calls in sessions)
             # and #123 (embeds warmed into the LRU before write sessions; search tools warm
-            # before reading).
+            # before reading) — two residuals remain: a warm-FAILURE degrades to in-session
+            # embeds via _safe_standardize (bounded: enrich queue is 4-concurrent; PR-D's
+            # requeue sweep is the recovery), and /analysis embeds ~24 radar anchor texts
+            # inside its session once per process (first call only, then module-cached).
             # sqlite (tests) uses its own pool class that rejects QueuePool kwargs.
             pool_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 2}
         self._engine = create_engine(db_url, connect_args=connect_args, **pool_kwargs)

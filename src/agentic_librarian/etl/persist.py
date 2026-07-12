@@ -152,7 +152,10 @@ def persist_enriched_work(
 
     # Resolve/Create Authors and collect (author, role) pairs to link below. Author creation
     # happens only for entries that will actually be linked to the work (both the new-work and
-    # existing-work branches below link every desired pair), so no orphan Author rows can result.
+    # existing-work branches below link every desired pair), so orphan Authors can no longer
+    # result from any prod path (two_phase/imports always set skip_enrichment=False); the
+    # Dagster ETL's skip_enrichment=True branch can still flush an unlinked Author for an
+    # existing work — acceptable for operator-curated re-runs, listed in PR-D's dry-run.
     desired: list[tuple[Author, str]] = []
     author_style_data = row.get("author_style", {})
 

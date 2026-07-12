@@ -474,10 +474,14 @@ def update_reading_status(
 ) -> str:
     """Updates history based on feedback (e.g. 'I read that years ago'). date_completed
     (ISO YYYY-MM-DD) takes precedence over year (a bare year is written as Jan 1 of that
-    year — the documented convention for an unknown month/day); with neither, the
-    completion date is ASSUMED to be today and the reply says so — the caller should ask
-    the user roughly when they read it if the exact date matters, since an assumed-today
-    date wrongly blocks the 2-year re-read rule for years."""
+    year — the documented convention for an unknown month/day, not a claim the user said
+    "January 1"); with neither, the completion date is ASSUMED to be today and the reply
+    says so — the caller should ask the user roughly when they read it if the exact date
+    matters, since an assumed-today date wrongly blocks the 2-year re-read rule for years.
+    Two 'read' calls with the same year (no exact date) resolve to the same Jan 1 date and
+    dedup to a single row rather than logging a second read. A year-only entry also opens
+    the 2-year re-read window up to ~11 months early, since it is dated Jan 1 regardless of
+    which month the book was actually finished."""
     if not _valid_name(title):
         return "Error: title must be a non-empty string of at most 500 characters."
     if not _valid_name(author):
@@ -520,8 +524,14 @@ def update_reading_status(
             if not work:
                 return f"Work '{title}' by {author} not found in database."
             work_id = work.id
+            # Reuse the work's own edition format when it's unambiguous (exactly one
+            # edition); otherwise "Unknown" as before. Scalar captured before the session
+            # closes to avoid a DetachedInstanceError on the ORM object.
+            editions = session.query(Edition).filter(Edition.work_id == work_id).all()
+            edition_fmt = editions[0].format if len(editions) == 1 else "Unknown"
+            edition_fmt = edition_fmt or "Unknown"
         if canonical == "read":
-            logged = two_phase.add_read_event(work_id, completed=completed, rating=None, notes=notes, fmt="Unknown")
+            logged = two_phase.add_read_event(work_id, completed=completed, rating=None, notes=notes, fmt=edition_fmt)
             if logged["already_logged"]:
                 return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
         note = (
