@@ -56,5 +56,5 @@ def test_matching_version_passes(monkeypatch, sqlite_manager):
 
 def test_missing_config_raises(monkeypatch, sqlite_manager):
     monkeypatch.setenv("MIGRATION_GUARD", "on")
-    with pytest.raises(Exception):  # packaging bug must be loud (spec: smoke test catches it)
+    with pytest.raises(Exception):  # noqa: B017 - any failure loading alembic config must be loud (packaging bug)
         check_migrations(sqlite_manager, config_path="does-not-exist.ini")
