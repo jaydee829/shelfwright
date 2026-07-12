@@ -59,7 +59,8 @@ def get_shared_genai_client() -> genai.Client:
     return _shared_client
 
 
-@lru_cache(maxsize=128)
+# 1024 × ~12KB/vector ≈ 13MB — sized so a bulk import's trope churn doesn't evict the analysis anchors.
+@lru_cache(maxsize=1024)
 def get_cached_embedding(model_name: str, text: str) -> list[float]:
     """Shared embed chokepoint for ETL ingestion, MCP tools, and the recommendation flow.
     Cached on (model_name, text) so identical tags embed over the network once per process

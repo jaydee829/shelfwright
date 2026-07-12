@@ -12,7 +12,7 @@ def test_engine_pool_flags():
     assert e.pool._pre_ping is True
     assert e.pool._recycle == 1800
     assert e.pool.size() == 5
-    assert e.pool._max_overflow == 2
+    assert e.pool._max_overflow == 10
 
 
 def test_lifespan_shares_one_manager_everywhere():
