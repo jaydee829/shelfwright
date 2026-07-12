@@ -1,3 +1,6 @@
+import asyncio
+import functools
+import inspect
 import os
 
 from google.adk.agents import LlmAgent
@@ -21,6 +24,23 @@ from agentic_librarian.mcp.server import (
     update_reading_status,
     update_suggestion_status,
 )
+
+
+def make_async_tool(fn):
+    """Wrap a sync MCP tool as a coroutine running via asyncio.to_thread (GH #93):
+    ADK's FunctionTool calls sync functions INLINE on the event loop, so one user's
+    slow tool (DB + embedding + scout calls) stalls every concurrent request and SSE
+    stream on the instance. to_thread copies the calling context, so the
+    get_required_user_id() ContextVar still resolves (the runtime._record_event_usage
+    precedent). __signature__/__name__/__doc__ are preserved because ADK builds the
+    tool schema from them."""
+
+    @functools.wraps(fn)
+    async def _async_tool(*args, **kwargs):
+        return await asyncio.to_thread(fn, *args, **kwargs)
+
+    _async_tool.__signature__ = inspect.signature(fn)
+    return _async_tool
 
 
 def _model_name() -> str:
@@ -54,7 +74,7 @@ class AnalystAgent(LlmAgent):
             name="Analyst",
             description="Specializes in extracting structured book attributes and analyzing user taste.",
             instruction=prompts.ANALYST_INSTRUCTION,
-            tools=[FunctionTool(get_user_trope_preferences)],
+            tools=[FunctionTool(make_async_tool(get_user_trope_preferences))],
             output_schema=Targets,
             output_key="targets",
         )
@@ -93,10 +113,10 @@ class CriticAgent(LlmAgent):
             instruction=prompts.CRITIC_INSTRUCTION,
             output_key=output_key,
             tools=[
-                FunctionTool(search_internal_database),
-                FunctionTool(get_work_details),
-                FunctionTool(check_reading_history),
-                FunctionTool(get_recommendation_candidates),
+                FunctionTool(make_async_tool(search_internal_database)),
+                FunctionTool(make_async_tool(get_work_details)),
+                FunctionTool(make_async_tool(check_reading_history)),
+                FunctionTool(make_async_tool(get_recommendation_candidates)),
             ],
         )
 
@@ -167,14 +187,14 @@ class LibrarianAgent(LlmAgent):
                 AgentTool(analyst),
                 AgentTool(explorer),
                 AgentTool(critic),
-                FunctionTool(get_unacted_suggestions),
-                FunctionTool(get_recommendation_candidates),
-                FunctionTool(check_reading_history),
-                FunctionTool(add_book_to_history),
-                FunctionTool(enrich_and_persist_work),
-                FunctionTool(update_reading_status),
-                FunctionTool(update_suggestion_status),
-                FunctionTool(log_suggestion),
+                FunctionTool(make_async_tool(get_unacted_suggestions)),
+                FunctionTool(make_async_tool(get_recommendation_candidates)),
+                FunctionTool(make_async_tool(check_reading_history)),
+                FunctionTool(make_async_tool(add_book_to_history)),
+                FunctionTool(make_async_tool(enrich_and_persist_work)),
+                FunctionTool(make_async_tool(update_reading_status)),
+                FunctionTool(make_async_tool(update_suggestion_status)),
+                FunctionTool(make_async_tool(log_suggestion)),
             ],
         )
 
