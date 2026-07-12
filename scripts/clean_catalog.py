@@ -7,6 +7,8 @@
   python scripts/clean_catalog.py --tropes --apply --yes
   python scripts/clean_catalog.py --requeue-unenriched --dry-run
   python scripts/clean_catalog.py --requeue-unenriched --apply --yes
+  python scripts/clean_catalog.py --dedup-for-constraints --dry-run
+  python scripts/clean_catalog.py --dedup-for-constraints --apply --yes
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost."""
 
@@ -14,11 +16,69 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import UTC, datetime
+from pathlib import Path
 
 from agentic_librarian.db.models import Trope, Work
 from agentic_librarian.db.session import DatabaseManager, resolve_database_url
-from agentic_librarian.etl import contributor_dedup, enrichment_sweep, trope_backfill
+from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, trope_backfill
 from agentic_librarian.etl.tag_backfill import is_prod_url
+
+
+def _write_dedup_report(plan) -> Path:
+    """Every id in the plan, always written (dry-run AND apply) — this file is what the
+    operator reviews before approving --apply (THE USER GATE, Spec 2026-07-12)."""
+    reports_dir = Path("data/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = reports_dir / f"dedup-{ts}.txt"
+
+    lines: list[str] = [f"Dedup plan report — {ts}", "=" * 60, ""]
+    lines.append(f"duplicate_authors: {len(plan.duplicate_authors)} groups")
+    for g in plan.duplicate_authors:
+        lines.append(f"  survivor={g.survivor_id} ({g.survivor_name!r})  losers={g.loser_ids} ({g.loser_names!r})")
+        lines.append(f"    repoint_links={g.repoint_links}  delete_links={g.delete_links}")
+        lines.append(f"    repoint_styles={g.repoint_styles}  delete_styles={g.delete_styles}")
+    lines.append("")
+
+    lines.append(f"duplicate_narrators: {len(plan.duplicate_narrators)} groups")
+    for g in plan.duplicate_narrators:
+        lines.append(f"  survivor={g.survivor_id} ({g.survivor_name!r})  losers={g.loser_ids} ({g.loser_names!r})")
+        lines.append(f"    repoint_links={g.repoint_links}  delete_links={g.delete_links}")
+        lines.append(f"    repoint_styles={g.repoint_styles}  delete_styles={g.delete_styles}")
+    lines.append("")
+
+    lines.append(f"duplicate_editions: {len(plan.duplicate_editions)} groups")
+    for g in plan.duplicate_editions:
+        lines.append(f"  survivor={g.survivor_id}  work_id={g.work_id}  format={g.fmt!r}  losers={g.loser_ids}")
+        lines.append(
+            f"    repoint_reading_history={g.repoint_reading_history}  "
+            f"delete_reading_history={g.delete_reading_history}"
+        )
+        lines.append(f"    repoint_narrators={g.repoint_narrators}  delete_narrators={g.delete_narrators}")
+    lines.append("")
+
+    lines.append(f"duplicate_reading_history: {len(plan.duplicate_reading_history)} groups")
+    for g in plan.duplicate_reading_history:
+        lines.append(f"  survivor={g.survivor_id}  losers={g.loser_ids}  ({g.detail})")
+    lines.append("")
+
+    lines.append(f"duplicate_suggestions: {len(plan.duplicate_suggestions)} groups")
+    for g in plan.duplicate_suggestions:
+        lines.append(f"  survivor={g.survivor_id}  losers={g.loser_ids}  ({g.detail})")
+    lines.append("")
+
+    lines.append(f"orphan_authors: {len(plan.orphan_authors)} ids (deleted on apply)")
+    lines.append(f"  {plan.orphan_authors}")
+    lines.append("")
+
+    lines.append(f"duplicate_works_report_only: {len(plan.duplicate_works_report_only)} groups (NEVER applied)")
+    for w in plan.duplicate_works_report_only:
+        lines.append(f"  key={w.norm_key!r}  work_ids={w.work_ids}  titles={w.titles}")
+    lines.append("")
+
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
 
 
 def _refuse(args, url, safe) -> int | None:
@@ -50,6 +110,21 @@ def main(argv: list[str] | None = None) -> int:
             "re-enqueues each via enqueue_enrichment — requires Cloud Tasks env "
             "(CLOUD_TASKS_QUEUE, ENRICH_TARGET_BASE_URL, ENRICH_INVOKER_SA) set, i.e. run this "
             "from the prod operator context, not local dev."
+        ),
+    )
+    ap.add_argument(
+        "--dedup-for-constraints",
+        action="store_true",
+        help=(
+            "Phase 6.3 THE USER GATE (#95): plan+apply the pre-constraint dedup backfill "
+            "(duplicate_authors/narrators/editions/reading_history/suggestions + orphan_authors; "
+            "duplicate_works_report_only is a report-only detail list, never applied). Structural "
+            "distinguishers only (the #69 lesson) — see etl/dedup_backfill.py. Sequence: PR-C "
+            "deployed (pollution stopped) -> this dry-run on prod -> operator reviews the report "
+            "and approves -> --apply --yes -> operator runs `alembic upgrade head` (lands the #95 "
+            "unique constraints, now safe) -> merge PR-D -> deploy. Every id in the plan is always "
+            "written to data/reports/dedup-<UTC timestamp>.txt for review, on both dry-run and "
+            "apply. See docs/runbooks/phase6-3-schema-rollout.md."
         ),
     )
     ap.add_argument("--dry-run", action="store_true")
@@ -137,7 +212,55 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\napplied: enqueued {enqueued}/{len(candidates)} works (see logs for any that skipped).")
             return 0
 
-        print("Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, or --requeue-unenriched.")
+        if args.dedup_for_constraints:
+            plan = dedup_backfill.plan_dedup(session)
+            summary = plan.summary()
+            print("\n=== dedup-for-constraints plan (THE USER GATE) ===")
+            for key, count in summary.items():
+                print(f"  {key:32} {count}")
+
+            print("\n--- duplicate_authors samples ---")
+            for g in plan.duplicate_authors[:10]:
+                print(f"  keep {g.survivor_name!r} ({g.survivor_id})  merge {g.loser_names!r} ({g.loser_ids})")
+            print("--- duplicate_narrators samples ---")
+            for g in plan.duplicate_narrators[:10]:
+                print(f"  keep {g.survivor_name!r} ({g.survivor_id})  merge {g.loser_names!r} ({g.loser_ids})")
+            print("--- duplicate_editions samples ---")
+            for g in plan.duplicate_editions[:10]:
+                print(f"  work={g.work_id} format={g.fmt!r}  keep {g.survivor_id}  merge {g.loser_ids}")
+            print("--- duplicate_reading_history samples ---")
+            for g in plan.duplicate_reading_history[:10]:
+                print(f"  keep {g.survivor_id}  delete {g.loser_ids}  ({g.detail})")
+            print("--- duplicate_suggestions samples ---")
+            for g in plan.duplicate_suggestions[:10]:
+                print(f"  keep {g.survivor_id}  delete {g.loser_ids}  ({g.detail})")
+            print("--- orphan_authors samples ---")
+            for aid in plan.orphan_authors[:10]:
+                print(f"  {aid}")
+            print("--- duplicate_works_report_only samples (NEVER applied — operator triage) ---")
+            for w in plan.duplicate_works_report_only[:10]:
+                print(f"  {w.titles}  ({w.work_ids})")
+
+            report_path = _write_dedup_report(plan)
+            print(f"\nfull plan (every id) written to {report_path} — review this before approving --apply.")
+
+            early = _refuse(args, url, safe)
+            if early is not None:
+                return early
+            applied = dedup_backfill.apply_dedup(session, plan)
+            print("\napplied:")
+            for key, count in applied.items():
+                print(f"  {key:32} {count}")
+            print(
+                "\nNext: operator runs `alembic upgrade head` on prod to land the #95 unique "
+                "constraints, then merge PR-D and deploy."
+            )
+            return 0
+
+        print(
+            "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
+            "--requeue-unenriched, or --dedup-for-constraints."
+        )
         return 1
 
 
