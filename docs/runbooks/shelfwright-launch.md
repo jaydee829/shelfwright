@@ -251,7 +251,7 @@ Ships through the usual review → merge → deploy.
 - [ ] `https://www.shelfwright.app` → 301 → apex
 - [ ] Fresh-incognito **new-user** Google sign-in completes on shelfwright.app
 - [ ] Chat streams on shelfwright.app; old `run.app` URL still serves
-- [ ] `curl -sI https://shelfwright.app/__/auth/iframe.js` → `200`, JS content-type
+- [ ] `curl -s -o /dev/null -w "%{http_code} %{content_type}" https://shelfwright.app/__/auth/iframe.js` → `200 text/javascript...` (note: must be a GET — the app returns 405 to HEAD/`curl -I`)
 - [ ] Repo is `jaydee829/shelfwright`; manual `workflow_dispatch` deploy green
 - [ ] `pip install shelfwright` installs the 0.0.1 stub
 - [ ] UI shows Shelfwright; ADR-057 recorded
