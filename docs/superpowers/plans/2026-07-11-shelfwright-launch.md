@@ -210,7 +210,7 @@ git commit -m "feat(frontend): Shelfwright product branding, Librarian persona r
 ### Task 3: ADR-057 + branch rename + PR
 
 **Files:**
-- Modify: `docs/project_notes/decisions.md` (append after ADR-055)
+- Modify: `docs/project_notes/decisions.md` (append after ADR-056)
 
 **Interfaces:**
 - Consumes: nothing; documents decisions from the spec.
@@ -326,7 +326,7 @@ git remote set-url origin https://github.com/jaydee829/shelfwright.git
 
 ---
 
-### Task 6: PyPI upload — **operator-gated** (after Task 1 merges or from the branch)
+### Task 6: PyPI upload — **operator-gated** (after Task 5's repo rename, so the published Repository URL resolves)
 
 Follow runbook Workstream 3.
 
