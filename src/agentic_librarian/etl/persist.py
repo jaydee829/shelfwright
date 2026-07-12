@@ -18,6 +18,7 @@ from agentic_librarian.db.models import (
     Narrator,
     NarratorStyle,
     ReadingHistory,
+    Trope,
     Work,
     WorkContributor,
     WorkStyle,
@@ -25,6 +26,7 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.etl.contributor_dedup import norm_name
 from agentic_librarian.etl.tag_cleaning import clean_genres, clean_moods, clean_trope_name
+from agentic_librarian.etl.trope_predicate import is_fallback_trope_name
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
@@ -335,12 +337,16 @@ def persist_enriched_work(
             # only when the caller wants them — the two-phase fast pass opts out (write_fallback_tropes
             # =False) because its deep pass supplies the real tropes (Spec #65, 2026-06-23). Cleaned the
             # same way as genres/moods so a fallback can never write a UUID-tailed / unsplit slug.
-            has_real_trope = (
-                session.query(WorkTrope)
-                .filter(WorkTrope.work_id == work.id, WorkTrope.justification.isnot(None))
-                .first()
-                is not None
+            # GH #111: "has a real trope" = any linked trope whose cleaned name is NOT a
+            # re-encoding of this work's genres/moods (the shared #69 predicate) — the old
+            # `justification IS NOT NULL` heuristic misclassified real attractor tropes.
+            linked = (
+                session.query(Trope.name)
+                .join(WorkTrope, WorkTrope.trope_id == Trope.id)
+                .filter(WorkTrope.work_id == work.id)
+                .all()
             )
+            has_real_trope = any(is_fallback_trope_name(name, work.genres, work.moods) is False for (name,) in linked)
             if row.get("write_fallback_tropes", True) and not has_real_trope:
                 for tag in all_fallback_tags:
                     for name in clean_trope_name(tag):
