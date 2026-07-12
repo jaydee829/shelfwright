@@ -128,7 +128,11 @@ redirect, and Cloudflare's own certificate covers `www`.
 **Done when:** `curl -sI https://www.shelfwright.app/library` returns `301` with
 `location: https://shelfwright.app/library`.
 
-## Workstream 1b — register the new host with sign-in (after cert is ACTIVE)
+## Workstream 1b — register the new host with sign-in
+
+Steps 1.6 and 1.7 are pure allowlist entries with no dependency on the certificate — they
+can be done at any point (e.g. during the cert wait). Only step 1.8, the live sign-in
+test, requires the cert to be ACTIVE.
 
 ### Step 1.6 — Firebase Authorized domains **[You]**
 
