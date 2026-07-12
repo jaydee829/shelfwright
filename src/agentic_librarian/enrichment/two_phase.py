@@ -16,6 +16,7 @@ discovery write tool, left untouched): same persist core, tiered scouts."""
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func
@@ -172,28 +173,47 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
         return {"read_number": len(prior_reads) + 1, "already_logged": False}
 
 
-def enrich_deep(work_id: UUID) -> bool:
+def enrich_deep(work_id: UUID) -> str:
     """Deep pass (Cloud Tasks target): read the Work's identity in a short session, run
     the slow LLM scouts with NO session held (#94 — previously minutes idle-in-transaction
     at enrich-queue concurrency 4, where a late transient failure also re-paid every LLM
-    call), then re-persist in a fresh session. Returns False if no Work has that id."""
+    call), then re-persist in a fresh session.
+
+    Returns one of:
+      "missing" — no Work has that id, or it has no linked Author (non-retryable).
+      "empty"   — the scouts yielded nothing to add this pass. A SHORT session stamps
+                  work.deep_enriched_at = now() anyway (GH #97): the timestamp means "the
+                  deep pass COMPLETED", including confirmed-empty — the caller (api/internal.py)
+                  decides retryability from the work's real-trope state, not from this string
+                  alone. An exception raised before this point propagates uncaught, leaving
+                  deep_enriched_at unstamped so Cloud Tasks retries the whole pass.
+      "done"    — the scouts found something; the write session persists the row AND stamps
+                  deep_enriched_at on the SAME Work in the SAME session."""
     with db_manager.get_session() as session:
         work = session.get(Work, work_id)
         if work is None:
-            return False
+            return "missing"
         author = next((c.author.name for c in work.contributors if c.role == "Author"), None)
         if author is None:
-            return False
+            return "missing"
         title = work.title  # scalars captured before close (detached-instance rule)
         fmt = work.editions[0].format if work.editions else "ebook"
 
     row = _run_scouts(create_deep_scout_manager(), title=title, author=author, fmt=fmt)
     if row is None:
-        return True  # scouts found nothing to add; the task is done, not retryable
+        # scouts found nothing to add; the pass is done (not retryable on its own), but
+        # stamp completion so the requeue sweep doesn't treat this work as never-attempted.
+        with db_manager.get_session() as session:
+            w = session.get(Work, work_id)
+            if w is not None:
+                w.deep_enriched_at = datetime.now(UTC)
+        return "empty"
 
     _warm_embeddings(row)
 
     with db_manager.get_session() as session:
-        _persist_row(session, row)
+        work = _persist_row(session, row)
+        if work is not None:
+            work.deep_enriched_at = datetime.now(UTC)
         session.flush()
-    return True
+    return "done"

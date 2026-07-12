@@ -5,6 +5,8 @@
   python scripts/clean_catalog.py --contributors --apply --yes
   python scripts/clean_catalog.py --tropes --dry-run
   python scripts/clean_catalog.py --tropes --apply --yes
+  python scripts/clean_catalog.py --requeue-unenriched --dry-run
+  python scripts/clean_catalog.py --requeue-unenriched --apply --yes
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost."""
 
@@ -15,7 +17,7 @@ import sys
 
 from agentic_librarian.db.models import Trope, Work
 from agentic_librarian.db.session import DatabaseManager, resolve_database_url
-from agentic_librarian.etl import contributor_dedup, trope_backfill
+from agentic_librarian.etl import contributor_dedup, enrichment_sweep, trope_backfill
 from agentic_librarian.etl.tag_backfill import is_prod_url
 
 
@@ -38,6 +40,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--contributors", action="store_true")
     ap.add_argument("--tropes", action="store_true")
     ap.add_argument("--prune-fallbacks", action="store_true")
+    ap.add_argument(
+        "--requeue-unenriched",
+        action="store_true",
+        help=(
+            "GH #97 recovery path: list works that never completed a deep-enrichment pass "
+            "(deep_enriched_at IS NULL) or completed one without landing a real trope (poison "
+            "tasks that exhausted Cloud Tasks retries on the 503 empty-pass path). --apply --yes "
+            "re-enqueues each via enqueue_enrichment — requires Cloud Tasks env "
+            "(CLOUD_TASKS_QUEUE, ENRICH_TARGET_BASE_URL, ENRICH_INVOKER_SA) set, i.e. run this "
+            "from the prod operator context, not local dev."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
@@ -109,7 +123,21 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\napplied: {trope_backfill.apply_trope_changes(session, tm, changes)} trope rows cleaned.")
             return 0
 
-        print("Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, or --tropes.")
+        if args.requeue_unenriched:
+            candidates = enrichment_sweep.plan_requeue(session)
+            print(f"\n{len(candidates)} works would be requeued for deep enrichment.")
+            for c in candidates[:80]:
+                print(f"  [{c.reason:20}] {c.title[:60]}  ({c.work_id})")
+            early = _refuse(args, url, safe)
+            if early is not None:
+                return early
+            from agentic_librarian.enrichment.tasks import enqueue_enrichment
+
+            enqueued = sum(1 for c in candidates if enqueue_enrichment(str(c.work_id)))
+            print(f"\napplied: enqueued {enqueued}/{len(candidates)} works (see logs for any that skipped).")
+            return 0
+
+        print("Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, or --requeue-unenriched.")
         return 1
 
 

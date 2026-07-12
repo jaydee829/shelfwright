@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Header, HTTPException
 
 from agentic_librarian.enrichment import two_phase
+from agentic_librarian.etl.trope_predicate import is_fallback_trope_name
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,12 +54,41 @@ def _require_queue_caller(authorization: str | None) -> None:
         raise HTTPException(status_code=403, detail="Caller is not the enrichment queue.")
 
 
+def _has_real_trope(work_id: UUID) -> bool:
+    """True if work_id has >=1 genuine narrative trope link (shared #111 predicate over
+    its linked trope names + its own genres/moods). False for zero links, or links that
+    are ALL fallback (re-encoded genre/mood) or junk."""
+    from agentic_librarian.db.models import Trope, Work, WorkTrope
+
+    with two_phase.db_manager.get_session() as session:
+        work = session.get(Work, work_id)
+        if work is None:
+            return False
+        names = (
+            session.query(Trope.name)
+            .join(WorkTrope, WorkTrope.trope_id == Trope.id)
+            .filter(WorkTrope.work_id == work_id)
+        ).all()
+        return any(is_fallback_trope_name(name, work.genres, work.moods) is False for (name,) in names)
+
+
 @router.post("/internal/enrich/{work_id}")
 def enrich(work_id: UUID, authorization: str | None = Header(None)):  # noqa: B008
     _require_queue_caller(authorization)
-    if not two_phase.enrich_deep(work_id):
+    result = two_phase.enrich_deep(work_id)
+    if result == "missing":
         # Non-retryable: the work no longer exists. 404 stops Cloud Tasks from retrying.
         raise HTTPException(status_code=404, detail="work not found")
+    if result == "empty":
+        if _has_real_trope(work_id):
+            # The work already has a real fingerprint from a prior pass; this empty pass
+            # added nothing new but isn't a failure — don't make Cloud Tasks retry forever.
+            return {"work_id": str(work_id), "status": "already_enriched"}
+        # No real trope AND this pass found nothing: retryable. Cloud Tasks retries with
+        # backoff; retry exhaustion is the poison-task end state — the requeue sweep
+        # (etl/enrichment_sweep.py, scripts/clean_catalog.py --requeue-unenriched) is the
+        # operator backstop for works that exhaust retries or were never queued at all.
+        raise HTTPException(status_code=503, detail={"work_id": str(work_id), "status": "empty_deep_pass"})
     return {"work_id": str(work_id), "status": "enriched"}
 
 

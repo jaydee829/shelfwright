@@ -73,5 +73,5 @@ def test_enrich_deep_runs_scouts_outside_any_session(monkeypatch):
 
     monkeypatch.setattr(two_phase, "_run_scouts", fake_run_scouts)
     with patch.object(two_phase, "create_deep_scout_manager", return_value=MagicMock()):
-        assert two_phase.enrich_deep(work_id=MagicMock()) is True
+        assert two_phase.enrich_deep(work_id=MagicMock()) == "empty"
     assert scout_seen["open_sessions_during_scout"] == 0

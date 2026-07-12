@@ -55,12 +55,15 @@ def test_enrich_deep_updates_same_work_idempotently(db_url, monkeypatch):
 
     work_id = _seed_work(manager, title="Dune", author="Frank Herbert")
 
-    assert two_phase.enrich_deep(work_id) is True
-    assert two_phase.enrich_deep(work_id) is True  # retry-safe (Cloud Tasks redelivery)
+    assert two_phase.enrich_deep(work_id) == "done"
+    assert two_phase.enrich_deep(work_id) == "done"  # retry-safe (Cloud Tasks redelivery)
 
     with manager.get_session() as s:
         links = s.query(WorkTrope).filter_by(work_id=work_id).all()
         assert len(links) == 1  # single trope link despite two runs
+        # GH #97: the write session stamps deep_enriched_at on a successful ("done") persist.
+        work = s.query(Work).filter_by(title="Dune").one()
+        assert work.deep_enriched_at is not None
 
         # GH #96: a co-author discovered by the deep pass must be LINKED on the existing work
         # (previously the WorkContributor dangled and SQLAlchemy 2.0 silently dropped it), and
@@ -84,7 +87,26 @@ def test_enrich_deep_returns_false_for_unknown_work(db_url, monkeypatch):
 
     manager = DatabaseManager(db_url)
     monkeypatch.setattr(two_phase, "db_manager", manager)
-    assert two_phase.enrich_deep(uuid4()) is False
+    assert two_phase.enrich_deep(uuid4()) == "missing"
+
+
+def test_enrich_deep_empty_pass_still_stamps_deep_enriched_at(db_url, monkeypatch):
+    """GH #97: scouts-found-nothing is NOT a failure — it's a completed pass. The timestamp
+    means "the deep pass completed" (including confirmed-empty), so the requeue sweep doesn't
+    treat this work as never-attempted."""
+    from agentic_librarian.enrichment import two_phase
+
+    monkeypatch.setattr(two_phase, "create_deep_scout_manager", lambda: _FakeManager(None))
+
+    manager = DatabaseManager(db_url)
+    monkeypatch.setattr(two_phase, "db_manager", manager)
+    work_id = _seed_work(manager, title="Obscure Title", author="Obscure Author")
+
+    assert two_phase.enrich_deep(work_id) == "empty"
+
+    with manager.get_session() as s:
+        work = s.get(Work, work_id)
+        assert work.deep_enriched_at is not None
 
 
 def test_add_read_event_logs_and_dedups_rereads(db_url, monkeypatch):
