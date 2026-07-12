@@ -7,7 +7,7 @@ touches only the ids it names (apply-what-was-shown)."""
 from datetime import date, timedelta
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
@@ -25,6 +25,7 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl import dedup_backfill as db_
+from test.integration.constraint_helpers import drop_unique_indexes, recreate_unique_indexes
 
 pytestmark = pytest.mark.db_integration
 
@@ -34,22 +35,12 @@ pytestmark = pytest.mark.db_integration
 # realistic pre-constraint duplicate rows, drop just the 5 dedup-relevant indexes for this
 # module and recreate them afterward — the FK indexes/timestamptz/deep_enriched_at parts of
 # the same migration are irrelevant to duplicates and stay in place throughout.
-_DEDUP_UNIQUE_INDEXES = [
-    ("uq_authors_name_lower", "CREATE UNIQUE INDEX uq_authors_name_lower ON authors (lower(name))"),
-    ("uq_narrators_name_lower", "CREATE UNIQUE INDEX uq_narrators_name_lower ON narrators (lower(name))"),
-    (
-        "uq_editions_work_format",
-        "CREATE UNIQUE INDEX uq_editions_work_format ON editions (work_id, format) NULLS NOT DISTINCT",
-    ),
-    (
-        "uq_reading_history_user_edition_date",
-        "CREATE UNIQUE INDEX uq_reading_history_user_edition_date "
-        "ON reading_history (user_id, edition_id, date_completed)",
-    ),
-    (
-        "uq_suggestions_active",
-        "CREATE UNIQUE INDEX uq_suggestions_active ON suggestions (user_id, work_id) WHERE status = 'Suggested'",
-    ),
+_DEDUP_UNIQUE_INDEX_NAMES = [
+    "uq_authors_name_lower",
+    "uq_narrators_name_lower",
+    "uq_editions_work_format",
+    "uq_reading_history_user_edition_date",
+    "uq_suggestions_active",
 ]
 
 
@@ -60,13 +51,10 @@ def _pre_constraint_schema(db_url):
     dry-run -> approve -> apply -> `alembic upgrade head` sequence."""
     engine = create_engine(db_url)
     with engine.begin() as conn:
-        for name, _create_sql in _DEDUP_UNIQUE_INDEXES:
-            conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+        drop_unique_indexes(conn, _DEDUP_UNIQUE_INDEX_NAMES)
     yield
     with engine.begin() as conn:
-        for name, create_sql in _DEDUP_UNIQUE_INDEXES:
-            conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
-            conn.execute(text(create_sql))
+        recreate_unique_indexes(conn, _DEDUP_UNIQUE_INDEX_NAMES)
     engine.dispose()
 
 
