@@ -557,10 +557,14 @@ class LLMTropeScout(LLMScout):
         - justification: (how this trope manifests in this specific book)
 
         CRITICAL: Focus on narrative devices and archetypes. Avoid broad genres (Fantasy, Sci-Fi) or simple moods.
+        If you cannot verify that this book actually exists, return {{"tropes": []}}.
         Return ONLY a raw JSON object with a 'tropes' key containing a list of these trope objects.
         """
         text = self._llm.generate(prompt, grounded=True)
-        return self._safe_extract_json(text, "Tropes", title) or {"tropes": []}
+        data = self._safe_extract_json(text, "Tropes", title) or {}
+        # GH #98: an empty trope list means the model couldn't verify the book — return
+        # falsy so ScoutManager doesn't count this scout as a contributing source.
+        return data if data.get("tropes") else {}
 
 
 # --- THE MANAGER ---
@@ -667,4 +671,11 @@ class ScoutManager:
         # Final clean up
         merged_data["genres"] = list(merged_data["genres"])
         merged_data["moods"] = list(merged_data["moods"])
+
+        # GH #98: merged_data is seeded from raw caller input, so it is ALWAYS truthy even
+        # when every scout failed or returned nothing. If no scout contributed, return {} so
+        # callers' not-found paths (books.py 404, import outcome, _run_scouts -> None) work.
+        if not merged_data["source_priority"]:
+            return {}
+
         return merged_data
