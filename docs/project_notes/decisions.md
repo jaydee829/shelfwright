@@ -1028,7 +1028,7 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Pool overflow is 5, not the PR-A interim 10 or a tight 2: embedding calls (search
   tools, persist-time standardize_trope/style) still run inside sessions, so a Gemini
   429 burst can stretch sessions to minutes even after #94. Tightening to 2 is tracked
-  by the pre-embed follow-up (hoist embed calls out of sessions).
+  by GH #123 (hoist embed calls out of sessions).
 **Consequences:**
 - One user's enrichment can no longer brown out the instance; chat adds return in seconds.
 - The deep pass now re-scouts outside any transaction: a late transient failure re-pays

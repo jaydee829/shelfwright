@@ -73,7 +73,7 @@ class DatabaseManager:
             # scout/LLM/Thunder calls from sessions, but embedding calls still run inside
             # them (search tools + persist-time standardize_trope/style) — under a Gemini
             # 429 burst those sessions stretch to minutes. Tighten to 5+2 once embeds are
-            # hoisted out of sessions (follow-up issue).
+            # hoisted out of sessions (GH #123).
             # sqlite (tests) uses its own pool class that rejects QueuePool kwargs.
             pool_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 5}
         self._engine = create_engine(db_url, connect_args=connect_args, **pool_kwargs)
