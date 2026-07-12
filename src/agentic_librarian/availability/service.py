@@ -8,6 +8,7 @@ wrong 'available now'. Each format (ebook/audiobook) is matched independently.""
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session
 from agentic_librarian.availability import overdrive
 from agentic_librarian.availability.overdrive import ThunderError
 from agentic_librarian.db.models import AvailabilityCache
+
+logger = logging.getLogger(__name__)
 
 _PROVIDER = "libby"
 _FORMATS = (("ebook", "eBook"), ("audiobook", "Audiobook"))
@@ -133,7 +136,8 @@ def batch_availability(db_manager, libs: list[dict], items: list[tuple[str, str]
     for lib, title, author in misses:
         try:
             items_raw = overdrive.fetch_media(lib["slug"], title)  # raw title: better relevance
-        except ThunderError:
+        except ThunderError as exc:
+            logger.warning("availability fetch failed for %r at %r: %s", title, lib["slug"], exc)
             results[(lib["slug"], title, author)] = None  # degrade: no badge
             continue
         fetched[(lib["slug"], title, author)] = _shape_formats(items_raw, title, author)
