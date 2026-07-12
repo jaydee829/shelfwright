@@ -87,7 +87,8 @@ automatic rollback semantics with zero credentials handed to CI.
 | DB state at startup | Guard behavior |
 |---|---|
 | `alembic_version` == repo head | start normally |
-| `alembic_version` behind/diverged | log the two versions, **raise** → container exits |
+| `alembic_version` behind (known non-head revision) | log the two versions, **raise** → container exits |
+| `alembic_version` ahead/unknown revision (mid-migration window, rollback) | **log warning, continue** |
 | `alembic_version` table absent | treat as mismatch (un-stamped DB should be loud) |
 | DB unreachable / query error | **log warning, continue startup** — a transient DB blip must not kill scale-from-zero cold starts; DB health has its own signals |
 | `MIGRATION_GUARD=off` env | skip entirely (emergency escape hatch, e.g. deploying the fix for a bad migration) |

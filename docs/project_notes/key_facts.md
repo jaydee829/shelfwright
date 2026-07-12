@@ -103,14 +103,14 @@ This file tracks important project configuration, constants, and environment det
 - This token layer is the **foundation for "Visual Identity v2"** (the planned redesign extends it with
   a real palette + type/spacing scales + component restyle).
 
-## CI/CD note (deploy anomaly, 2026-06-17, RESOLVED 2026-06-22)
-- The 2026-06-17 "push-to-main stopped auto-deploying" anomaly was root-caused 2026-06-22: `[skip ci]`
-  on spec/plan branch commits leaked into the **squash-merge commit bodies** of #50–#54 (GitHub honors a
-  skip directive anywhere in the HEAD commit message → ALL push workflows skipped). Full write-up in
-  bugs.md (2026-06-17 entry). Current prevention is manual (delete the `[skip ci]` bullets in the merge
-  dialog); the durable fix — repo setting: default squash message = "Pull request title" — is GH #90.
-- ⚠️ Related config drift: deploy.yml still pins `--memory=512Mi`, reverting the 2Gi OOM fix on every
-  deploy — GH #89 (see bugs.md 2026-07-02).
+## CI/CD note (deploy anomaly, 2026-06-17, RESOLVED — durable fix applied 2026-07-12)
+- Root cause (diagnosed 2026-06-22, bugs.md): `[skip ci]` from branch commits leaked into squash-merge
+  bodies, and GitHub skips ALL push workflows when a skip directive appears anywhere in the HEAD commit
+  message. **Durable fix applied 2026-07-12 (GH #90): repo setting → squash title = PR title, message =
+  blank** — commit bodies no longer enter merge commits. Recovery for an already-skipped merge remains
+  manual `workflow_dispatch` of "Deploy to Cloud Run".
+- The related #89 drift (deploy.yml pinning 512Mi) was fixed the same day: deploy.yml now pins
+  `--memory=2Gi` (see the Deploys bullet above).
 
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.

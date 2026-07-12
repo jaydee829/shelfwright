@@ -131,6 +131,12 @@ gcloud and the proxy binary live on the WSL host from the Lift 0 run).
     # pass: all three tables; null user_id rows: 0; users: [('jaydee829@gmail.com', True)]
     ```
 
+**Since ADR-058**, the startup migration guard tolerates a migrated-ahead DB: old
+revisions keep cold-starting normally during this migrate→deploy window (their
+`alembic_version` is merely unknown to them, not behind). A DB genuinely *behind* the
+deploying image still fails the new revision's startup. Emergency bypass if the guard
+misfires: `MIGRATION_GUARD=off`.
+
 ## §4 Merge → auto-deploy
 
 Merge the PR. `.github/workflows/deploy.yml` deploys with `SIGNUP_MODE=invite` and

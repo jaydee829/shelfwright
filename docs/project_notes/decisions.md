@@ -996,6 +996,10 @@ This file documents key architectural decisions, their context, and trade-offs.
   cold starts, and the in-runner docker smoke boots with a bogus DATABASE_URL by design.
 - `MIGRATION_GUARD=off|0|false` is the emergency bypass (e.g. deploying the fix for a bad
   migration). The test suite defaults it off in conftest; the guard's unit tests re-enable it.
+- DB **ahead** (version unknown to the image) → warn + continue — preserves the runbook's
+  migrate-before-merge window (old-revision cold starts keep serving after prod is migrated)
+  and lets an older image roll back after a migration without `MIGRATION_GUARD=off`; only
+  DB **behind** (known non-head revision) fails the revision.
 **Consequences:**
 - Migrations stay manual; the mismatch is now loud and self-rolls-back instead of silent 500s.
 - Any deploy path is covered (workflow or manual gcloud), with no DB credentials in CI.
