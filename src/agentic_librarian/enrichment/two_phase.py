@@ -19,8 +19,10 @@ import logging
 from uuid import UUID
 
 from sqlalchemy import func
+from sqlalchemy import text as sa_text
 
 from agentic_librarian.core.user_context import get_required_user_id
+from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import collect_embedding_texts, persist_enriched_work
@@ -123,6 +125,13 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
     _warm_embeddings(row)
 
     with db_manager.get_session() as session:
+        if session.get_bind().dialect.name == "postgresql":
+            # GH #95: works can't carry a cross-table unique (title+author spans tables) —
+            # serialize concurrent same-book creators instead. xact-scoped: released on commit.
+            session.execute(
+                sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                {"k": f"{_normalize(title)}|{_normalize(author)}"},
+            )
         existing = _find_existing(session)  # dedup re-check (#94/#95)
         if existing:
             return existing.id, False
@@ -147,11 +156,9 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
         )
         if any(r.date_completed == completed for r in prior_reads):
             return {"read_number": len(prior_reads), "already_logged": True}
-        edition = session.query(Edition).filter_by(work_id=work_id, format=fmt).first()
-        if not edition:
-            edition = Edition(work_id=work_id, format=fmt)
-            session.add(edition)
-            session.flush()
+        # GH #95: uq_editions_work_format backstops this get-then-create against a
+        # concurrent add_read_event/persist race for the same (work_id, format).
+        edition, _created = get_or_create(session, Edition, work_id=work_id, format=fmt)
         session.add(
             ReadingHistory(
                 edition_id=edition.id,
