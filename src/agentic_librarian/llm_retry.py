@@ -21,7 +21,13 @@ RETRY_OPTIONS = types.HttpRetryOptions(
     http_status_codes=[429, 500, 502, 503, 504],
 )
 
+# Client-side request timeout in MILLISECONDS (HttpOptions.timeout unit — NOT seconds;
+# the requests-based scouts use seconds, don't copy values between the two). 120s
+# accommodates grounded deep-scout generations that legitimately run ~a minute; without
+# it a hung Gemini call pins its thread + DB connection until Cloud Run kills the request.
+GENAI_TIMEOUT_MS = 120_000
+
 
 def genai_http_options() -> types.HttpOptions:
-    """HttpOptions carrying the shared retry config, for `genai.Client(http_options=...)`."""
-    return types.HttpOptions(retry_options=RETRY_OPTIONS)
+    """HttpOptions carrying the shared retry config + timeout, for `genai.Client(http_options=...)`."""
+    return types.HttpOptions(retry_options=RETRY_OPTIONS, timeout=GENAI_TIMEOUT_MS)

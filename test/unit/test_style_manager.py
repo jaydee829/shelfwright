@@ -1,8 +1,9 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from agentic_librarian.db.models import Style
+from agentic_librarian.scouts import utils
 from agentic_librarian.scouts.style_manager import StyleManager
 
 
@@ -12,14 +13,17 @@ def mock_session():
 
 
 @pytest.fixture
-def mock_genai_client():
-    with patch("agentic_librarian.scouts.style_manager.genai.Client") as mock:
-        client_inst = mock.return_value
-        # Default embedding return
-        mock_embedding = MagicMock()
-        mock_embedding.values = [0.1] * 1536
-        client_inst.models.embed_content.return_value.embeddings = [mock_embedding]
-        yield client_inst
+def mock_genai_client(monkeypatch):
+    # Mock the shared genai client in utils to avoid actual network calls
+    utils.get_cached_embedding.cache_clear()
+    mock_client = MagicMock()
+    # Default embedding return
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.1] * 1536
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+    monkeypatch.setattr("agentic_librarian.scouts.utils._shared_client", mock_client)
+    yield mock_client
+    utils.get_cached_embedding.cache_clear()
 
 
 def test_standardize_style_exact_match(mock_session, mock_genai_client):

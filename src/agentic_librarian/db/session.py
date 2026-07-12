@@ -65,7 +65,19 @@ class DatabaseManager:
         if ssl_mode:
             connect_args["sslmode"] = ssl_mode
 
-        self._engine = create_engine(db_url, connect_args=connect_args)
+        pool_kwargs = {}
+        if not db_url.startswith("sqlite"):
+            # GH #102: pre_ping heals stale connections after Cloud SQL restarts/idle;
+            # recycle beats server-side idle kills. INTERIM sizing: sessions are still
+            # held across external LLM/scout calls until #94 (PR-B) lands, and the mcp/
+            # two_phase/worker paths now share THIS pool — max_overflow=10 keeps a bulk
+            # import (4 enrich + 5 import queue-concurrent long sessions) from starving
+            # auth's per-request query. Revert to max_overflow=2 in PR-B when sessions
+            # no longer idle across external calls (2×15=30 peak vs db-f1-micro's ~25 is
+            # tolerable because overflow connections close on release; steady state ≤10).
+            # sqlite (tests) uses its own pool class that rejects QueuePool kwargs.
+            pool_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 10}
+        self._engine = create_engine(db_url, connect_args=connect_args, **pool_kwargs)
         self._SessionFactory = sessionmaker(bind=self._engine)
 
     @property

@@ -8,6 +8,7 @@ from sqlalchemy import text
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor, WorkTrope
 from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.scouts import utils
 from agentic_librarian.scouts.trope_manager import TropeManager
 
 
@@ -61,13 +62,15 @@ def test_trope_manager_real_db(db_url):
         # Ensure pgvector extension is available in the test environment
         session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-        # Mock the Gemini client to avoid external API dependency
-        with patch("agentic_librarian.scouts.trope_manager.genai.Client") as mock_genai:
-            mock_client = mock_genai.return_value
-            mock_response = MagicMock()
-            mock_response.embeddings = [MagicMock(values=[0.1] * 1536)]
-            mock_client.models.embed_content.return_value = mock_response
+        # Mock the shared Gemini client (scouts.utils, #101) to avoid external API
+        # dependency; clear the process-global LRU so no cached vector leaks in/out.
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.embeddings = [MagicMock(values=[0.1] * 1536)]
+        mock_client.models.embed_content.return_value = mock_response
 
+        utils.get_cached_embedding.cache_clear()
+        with patch.object(utils, "_shared_client", mock_client):
             tm = TropeManager(session=session, api_key="fake_key")
 
             # 1. Create a new trope
@@ -91,3 +94,4 @@ def test_trope_manager_real_db(db_url):
             saved_link = session.query(WorkTrope).filter_by(work_id=work.id, trope_id=trope.id).first()
             assert saved_link is not None
             assert saved_link.work.title == work.title
+        utils.get_cached_embedding.cache_clear()

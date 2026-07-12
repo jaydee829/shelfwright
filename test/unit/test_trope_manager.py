@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from agentic_librarian.db.models import Trope
+from agentic_librarian.scouts import utils
 from agentic_librarian.scouts.trope_manager import TropeManager
 
 
@@ -12,9 +13,13 @@ def mock_session():
 
 
 @pytest.fixture
-def mock_genai_client():
-    with patch("agentic_librarian.scouts.trope_manager.genai.Client") as mock:
-        yield mock.return_value
+def mock_genai_client(monkeypatch):
+    # Mock the shared genai client in utils to avoid actual network calls
+    utils.get_cached_embedding.cache_clear()
+    mock_client = MagicMock()
+    monkeypatch.setattr("agentic_librarian.scouts.utils._shared_client", mock_client)
+    yield mock_client
+    utils.get_cached_embedding.cache_clear()
 
 
 @pytest.fixture
