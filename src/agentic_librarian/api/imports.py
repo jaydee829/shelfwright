@@ -3,6 +3,7 @@ re-uploads the small CSV); per-row Cloud Tasks do the work. Firebase-gated like 
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -75,6 +76,18 @@ def _preview_row(p: parsing.ParsedRow) -> dict:
     }
 
 
+def _enqueue_rows(row_ids: list[str]) -> None:
+    """Sequential Cloud Tasks enqueues — sync gRPC calls, so callers on the event loop
+    run this via asyncio.to_thread (GH #93: up to MAX_ROWS calls blocked the loop for
+    minutes). A failed enqueue leaves the row 'pending'; the stale-pending retry (#99)
+    recovers it."""
+    for rid in row_ids:
+        try:
+            enqueue_import_row(rid)
+        except Exception:  # noqa: BLE001 - see docstring
+            logger.exception("import-row enqueue failed for row %s", rid)
+
+
 @router.post("/import/preview")
 async def preview(
     file: UploadFile = File(...),  # noqa: B008
@@ -145,11 +158,7 @@ async def commit(
         enqueue_ids = [str(row.id) for row in to_enqueue]
         job_id = str(job.id)
 
-    for rid in enqueue_ids:
-        try:
-            enqueue_import_row(rid)
-        except Exception:  # noqa: BLE001 - a failed enqueue leaves the row 'pending' for retry
-            logger.exception("import-row enqueue failed for row %s", rid)
+    await asyncio.to_thread(_enqueue_rows, enqueue_ids)
 
     return {"import_job_id": job_id, "total_rows": len(parsed), "enqueued": len(enqueue_ids)}
 
@@ -239,9 +248,5 @@ def retry(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  #
             row.error_detail = None
             retry_ids.append(str(row.id))
 
-    for rid in retry_ids:
-        try:
-            enqueue_import_row(rid)
-        except Exception:  # noqa: BLE001
-            logger.exception("retry enqueue failed for row %s", rid)
+    _enqueue_rows(retry_ids)
     return {"retried": len(retry_ids)}
