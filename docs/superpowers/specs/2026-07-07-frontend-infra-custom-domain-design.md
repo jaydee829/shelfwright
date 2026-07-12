@@ -16,7 +16,7 @@ CDN/performance and retiring the #78 proxy are explicitly **not** drivers here.
 
 ## Decision
 
-Adopt **Cloud Run custom domain mapping** (Option B): map a subdomain (e.g. `app.<domain>`) directly onto the existing Cloud Run service. Document the **Load Balancer + serverless NEG** path (Option C) as a costed, trigger-based future upgrade. This will be recorded as a new ADR (ADR-056).
+Adopt **Cloud Run custom domain mapping** (Option B): map a subdomain (e.g. `app.<domain>`) directly onto the existing Cloud Run service. Document the **Load Balancer + serverless NEG** path (Option C) as a costed, trigger-based future upgrade. This will be recorded as a new ADR (ADR-057).
 
 ### Why B over A and C
 
@@ -97,7 +97,7 @@ Cost floor: **~$18.25/mo** (forwarding rule) + $0.008/GiB processed. It preserve
 
 ## Acceptance criteria (from #79)
 
-- ADR recorded (ADR-056) choosing Cloud Run domain mapping over LB/Hosting, with rationale.
+- ADR recorded (ADR-057) choosing Cloud Run domain mapping over LB/Hosting, with rationale.
 - `app.<domain>` mapped + managed SSL ACTIVE.
 - Firebase Authorized domains + Web OAuth redirect URI/origin updated for `app.<domain>`.
 - #78 same-origin proxy **retained** (still same-origin under the custom domain).

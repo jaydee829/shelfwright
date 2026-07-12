@@ -239,7 +239,7 @@ Ships through the usual review → merge → deploy.
 - [ ] `curl -sI https://shelfwright.app/__/auth/iframe.js` → `200`, JS content-type
 - [ ] Repo is `jaydee829/shelfwright`; manual `workflow_dispatch` deploy green
 - [ ] `pip install shelfwright` installs the 0.0.1 stub
-- [ ] UI shows Shelfwright; ADR-056 recorded
+- [ ] UI shows Shelfwright; ADR-057 recorded
 - [ ] Hand out `https://shelfwright.app` 🎉
 
 ## Rollback

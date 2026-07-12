@@ -47,7 +47,7 @@ Then per the base spec, unchanged:
 4. GCP Web OAuth 2.0 client: add redirect URI `https://shelfwright.app/__/auth/handler`
    and JS origin `https://shelfwright.app`. Keep both `run.app` handlers registered
    through the transition.
-5. Record **ADR-056** (Cloud Run domain mapping over LB/Hosting, apex host, rationale).
+5. Record **ADR-057** (Cloud Run domain mapping over LB/Hosting, apex host, rationale).
 
 **www redirect (new):** in Cloudflare, add a proxied (orange-cloud) placeholder DNS
 record for `www` and a redirect rule `www.shelfwright.app/*` → `https://shelfwright.app/$1`
@@ -108,7 +108,7 @@ All four workstreams are independent. Order chosen to overlap the domain's wait 
 2. Repo rename + WIF fix + deploy verification
 3. PyPI stub PR + upload
 4. Branding PR
-5. When cert is ACTIVE: Firebase/OAuth registrations → live verification → ADR-056 →
+5. When cert is ACTIVE: Firebase/OAuth registrations → live verification → ADR-057 →
    hand out `shelfwright.app`
 
 ## Operator runbook
@@ -125,7 +125,7 @@ Step-by-step operator guide (what/why/how/done-when for every console and accoun
 
 ## Acceptance criteria
 
-- ADR-056 recorded.
+- ADR-057 recorded.
 - `https://shelfwright.app` serves the app with managed SSL ACTIVE; new-user Google
   sign-in verified fresh-incognito; SSE `/chat` streams; `run.app` hosts still work.
 - `https://www.shelfwright.app` 301-redirects to the apex.

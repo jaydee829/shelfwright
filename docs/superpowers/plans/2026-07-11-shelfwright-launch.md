@@ -207,7 +207,7 @@ git commit -m "feat(frontend): Shelfwright product branding, Librarian persona r
 
 ---
 
-### Task 3: ADR-056 + branch rename + PR
+### Task 3: ADR-057 + branch rename + PR
 
 **Files:**
 - Modify: `docs/project_notes/decisions.md` (append after ADR-055)
@@ -216,10 +216,10 @@ git commit -m "feat(frontend): Shelfwright product branding, Librarian persona r
 - Consumes: nothing; documents decisions from the spec.
 - Produces: the PR that carries Tasks 1–3 + the already-committed spec/runbook.
 
-- [ ] **Step 1: Append ADR-056** (match the existing `### ADR-0NN: Title (date)` / **Context:** / **Decision:** / **Consequences:** format used by ADR-054/055):
+- [ ] **Step 1: Append ADR-057** (match the existing `### ADR-0NN: Title (date)` / **Context:** / **Decision:** / **Consequences:** format used by ADR-054/055):
 
 ```markdown
-### ADR-056: Canonical host via Cloud Run domain mapping on apex shelfwright.app (2026-07-11)
+### ADR-057: Canonical host via Cloud Run domain mapping on apex shelfwright.app (2026-07-11)
 **Context:**
 - #78 (ADR-055) set `authDomain = window.location.host`, so every serving hostname must be
   registered on the Web OAuth client or new users hit `redirect_uri_mismatch` (prod incident
@@ -249,7 +249,7 @@ git commit -m "feat(frontend): Shelfwright product branding, Librarian persona r
 
 ```bash
 git add docs/project_notes/decisions.md
-git commit -m "docs(adr): ADR-056 — canonical host via Cloud Run apex domain mapping (#79)"
+git commit -m "docs(adr): ADR-057 — canonical host via Cloud Run apex domain mapping (#79)"
 ```
 
 - [ ] **Step 3: Rename the branch and push**
@@ -262,7 +262,7 @@ git push -u origin feat/shelfwright-launch
 - [ ] **Step 4: Open the PR**
 
 ```bash
-gh pr create --title "feat: Shelfwright launch — PyPI stub, UI branding, ADR-056 + domain spec/runbook (#79)" --body "..."
+gh pr create --title "feat: Shelfwright launch — PyPI stub, UI branding, ADR-057 + domain spec/runbook (#79)" --body "..."
 ```
 Body: summarize the four workstreams, link the spec + runbook, note that domain/rename/upload steps are operator ops tracked in the runbook, and that persona strings are intentionally unchanged. End with the standard generated-with footer. Expected: PR opens against `main`; Gemini review follows per repo convention (reply with commit hashes, squash-merge).
 
@@ -351,4 +351,4 @@ Expected: `0.0.1`. Gate: https://pypi.org/project/shelfwright/ live.
 - [ ] `https://www.shelfwright.app` → 301 → apex
 - [ ] Repo `jaydee829/shelfwright`; post-rename `workflow_dispatch` deploy green
 - [ ] `pip install shelfwright` → 0.0.1
-- [ ] UI: Shelfwright product name, Librarian persona intact; ADR-056 in decisions.md; PR squash-merged
+- [ ] UI: Shelfwright product name, Librarian persona intact; ADR-057 in decisions.md; PR squash-merged
