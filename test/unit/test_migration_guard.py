@@ -58,3 +58,16 @@ def test_missing_config_raises(monkeypatch, sqlite_manager):
     monkeypatch.setenv("MIGRATION_GUARD", "on")
     with pytest.raises(Exception):  # noqa: B017 - any failure loading alembic config must be loud (packaging bug)
         check_migrations(sqlite_manager, config_path="does-not-exist.ini")
+
+
+def test_lifespan_calls_guard(monkeypatch):
+    """The app lifespan must run the guard before serving (ADR-058)."""
+    from fastapi.testclient import TestClient
+
+    from agentic_librarian.api import main as main_mod
+
+    calls = []
+    monkeypatch.setattr(main_mod, "check_migrations", lambda mgr: calls.append(mgr))
+    with TestClient(main_mod.app):
+        pass
+    assert len(calls) == 1

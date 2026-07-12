@@ -38,6 +38,11 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
+# Migration metadata for the startup guard (ADR-058): the guard reads the expected
+# head from alembic/ at boot. NOT used to run migrations (those stay operator-manual).
+COPY alembic.ini ./
+COPY alembic ./alembic
+
 # The built SPA, served same-origin by FastAPI (see api/main.py spa_catch_all).
 COPY --from=spa-build /spa/dist /app/static
 

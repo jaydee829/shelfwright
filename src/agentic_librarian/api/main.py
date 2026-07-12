@@ -26,6 +26,7 @@ from agentic_librarian.api.recommendations import router as recommendations_rout
 from agentic_librarian.chat import stream, transcript
 from agentic_librarian.core import usage
 from agentic_librarian.core.user_context import as_user
+from agentic_librarian.db.migration_guard import check_migrations
 from agentic_librarian.db.models import (
     Edition,
     ReadingHistory,
@@ -54,6 +55,10 @@ async def lifespan(app: FastAPI):
     Tests that use TestClient WITHOUT a `with` block skip lifespan and keep their own
     monkeypatched managers."""
     shared = DatabaseManager()
+    # ADR-058 (#92): refuse to serve when the DB schema is behind this code's migration
+    # head — the failed revision keeps traffic on the previous one. Unreachable DB only
+    # warns (cold-start protection); MIGRATION_GUARD=off is the emergency bypass.
+    check_migrations(shared)
     app.state.db_manager = shared
     set_db_manager(shared)
     auth.set_db_manager(shared)

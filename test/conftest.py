@@ -6,6 +6,11 @@ from sqlalchemy import create_engine, text
 
 load_dotenv()
 
+# ADR-058: the startup migration guard is opt-in for tests. Any test that runs the app
+# lifespan (TestClient used as a context manager) would otherwise probe a real DB.
+# The guard's own unit tests monkeypatch MIGRATION_GUARD back on explicitly.
+os.environ.setdefault("MIGRATION_GUARD", "off")
+
 
 def _server_components():
     user = os.getenv("POSTGRES_USER", "librarian")
