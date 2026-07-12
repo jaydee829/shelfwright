@@ -23,9 +23,16 @@ _retry() {
 #    01-project.sh enable-list predates it. (Idempotent; ~30s to propagate.)
 gcloud services enable cloudtasks.googleapis.com
 
-# 1) The queue the fast /books pass enqueues onto (create only if absent).
-gcloud tasks queues describe "${TASKS_QUEUE_NAME}" --location="${REGION}" >/dev/null 2>&1 \
-  || gcloud tasks queues create "${TASKS_QUEUE_NAME}" --location="${REGION}"
+# 1) The queue the fast /books pass enqueues onto. Rates are pinned to the ADR-051 OOM
+#    remediation (deep scouts ≈ ½GiB each; 4 concurrent fits the 2Gi service): defaults
+#    (1000 concurrent / 500 per sec) caused the 2026-06-23 OOM storm. The update branch
+#    converges a pre-existing queue (created with defaults or hand-tuned) to the same state.
+ENRICH_QUEUE_FLAGS=(--max-concurrent-dispatches=4 --max-dispatches-per-second=5)
+if gcloud tasks queues describe "${TASKS_QUEUE_NAME}" --location="${REGION}" >/dev/null 2>&1; then
+  gcloud tasks queues update "${TASKS_QUEUE_NAME}" --location="${REGION}" "${ENRICH_QUEUE_FLAGS[@]}"
+else
+  gcloud tasks queues create "${TASKS_QUEUE_NAME}" --location="${REGION}" "${ENRICH_QUEUE_FLAGS[@]}"
+fi
 
 # 1b) The queue the bulk-import per-row worker enqueues onto — SEPARATE from the enrich queue
 #     so a large import burst can't starve interactive deep-enrich (Spec 2026-06-18 D7). The

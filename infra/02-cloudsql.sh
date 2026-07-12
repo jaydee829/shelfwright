@@ -10,9 +10,15 @@ gcloud sql instances create "${SQL_INSTANCE}" \
   --tier=db-f1-micro \
   --region="${REGION}" \
   --storage-size=10GB \
-  --storage-type=SSD
+  --storage-type=SSD \
+  --backup-start-time=09:00 \
+  --enable-point-in-time-recovery
 
 gcloud sql databases create "${DB_NAME}" --instance="${SQL_INSTANCE}"
 
 echo "Connection name (needed for the GCP_CLOUDSQL_CONNECTION GitHub variable):"
 gcloud sql instances describe "${SQL_INSTANCE}" --format='value(connectionName)'
+
+# Backups (GH #91): nightly automated backups at 09:00 UTC + PITR (7-day WAL default).
+# For a PRE-EXISTING instance apply the same with:
+#   gcloud sql instances patch "${SQL_INSTANCE}" --backup-start-time=09:00 --enable-point-in-time-recovery
