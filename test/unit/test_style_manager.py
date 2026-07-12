@@ -12,14 +12,15 @@ def mock_session():
 
 
 @pytest.fixture
-def mock_genai_client():
-    with patch("agentic_librarian.scouts.style_manager.genai.Client") as mock:
-        client_inst = mock.return_value
-        # Default embedding return
-        mock_embedding = MagicMock()
-        mock_embedding.values = [0.1] * 1536
-        client_inst.models.embed_content.return_value.embeddings = [mock_embedding]
-        yield client_inst
+def mock_genai_client(monkeypatch):
+    # Mock the shared genai client in utils to avoid actual network calls
+    mock_client = MagicMock()
+    # Default embedding return
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.1] * 1536
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+    monkeypatch.setattr("agentic_librarian.scouts.utils._shared_client", mock_client)
+    yield mock_client
 
 
 def test_standardize_style_exact_match(mock_session, mock_genai_client):

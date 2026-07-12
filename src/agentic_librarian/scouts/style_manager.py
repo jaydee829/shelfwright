@@ -1,10 +1,8 @@
 import os
 
-from google import genai
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import Style
-from agentic_librarian.llm_retry import genai_http_options
 from agentic_librarian.scouts.utils import get_cached_embedding
 
 
@@ -16,12 +14,11 @@ class StyleManager:
         self._api_key = api_key or os.environ.get("GOOGLE_SEARCH_API_KEY")
         if not self._api_key:
             raise ValueError("Google API key not set for StyleManager.")
-        self.client = genai.Client(api_key=self._api_key, http_options=genai_http_options())
         self.model_name = "gemini-embedding-001"  # Current GA Gemini embedding model
 
     def _get_embedding(self, text: str) -> list[float]:
-        """Fetch embedding from Gemini. Uses shared module-level cache."""
-        return get_cached_embedding(self.client, self.model_name, text)
+        """Fetch embedding from Gemini via the shared module-level client + cache (#101)."""
+        return get_cached_embedding(self.model_name, text)
 
     def find_similar_style(self, embedding: list[float], category: str, threshold: float = 0.85) -> Style | None:
         """Find an existing style in the same category with cosine similarity above threshold using SQL-level search."""

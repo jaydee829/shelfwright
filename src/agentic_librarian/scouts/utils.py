@@ -36,13 +36,37 @@ def _throttle_embedding() -> None:
         time.sleep(wait)
 
 
+# Process-wide genai client (GH #101). One client per process means the lru_cache below
+# keys purely on (model_name, text) and actually hits across manager instances / tool
+# calls — previously each TropeManager/StyleManager built its own client and the client
+# identity in the cache key defeated the cache. Double-checked lock: build at most one
+# client under concurrency (same pattern api/analysis_style.py pioneered).
+_shared_client: genai.Client | None = None
+_client_lock = threading.Lock()
+
+
+def get_shared_genai_client() -> genai.Client:
+    global _shared_client
+    if _shared_client is None:
+        with _client_lock:
+            if _shared_client is None:
+                from agentic_librarian.llm_retry import genai_http_options
+
+                key = os.environ.get("GOOGLE_SEARCH_API_KEY")
+                if not key:
+                    raise ValueError("GOOGLE_SEARCH_API_KEY is not set — cannot build the shared genai client.")
+                _shared_client = genai.Client(api_key=key, http_options=genai_http_options())
+    return _shared_client
+
+
 @lru_cache(maxsize=128)
-def get_cached_embedding(client: genai.Client, model_name: str, text: str) -> list[float]:
-    """Shared helper to safely cache embeddings without leaking self. task_type
-    SEMANTIC_SIMILARITY keeps stored vectors and query vectors in one representation space:
-    this is the single embed chokepoint for both ETL ingestion and the recommendation flow,
-    so both sides match. Changing task_type invalidates previously-stored vectors."""
+def get_cached_embedding(model_name: str, text: str) -> list[float]:
+    """Shared embed chokepoint for ETL ingestion, MCP tools, and the recommendation flow.
+    Cached on (model_name, text) so identical tags embed over the network once per process
+    (GH #101). task_type SEMANTIC_SIMILARITY keeps stored vectors and query vectors in one
+    representation space; changing task_type invalidates previously-stored vectors."""
     _throttle_embedding()
+    client = get_shared_genai_client()
     response = client.models.embed_content(
         model=model_name,
         contents=text,

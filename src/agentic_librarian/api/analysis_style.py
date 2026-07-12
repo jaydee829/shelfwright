@@ -96,7 +96,6 @@ class _StyleLike(Protocol):
 # Module-level anchor cache: axis -> (low_vec, high_vec). Filled once per process.
 # Guarded by _lock so concurrent requests don't double-embed or read a half-filled cache.
 _anchor_cache: dict[str, tuple[list[float], list[float]]] = {}
-_genai_client: object | None = None  # genai.Client; typed as object to avoid an import-time genai dependency
 _lock = threading.Lock()
 
 
@@ -119,20 +118,9 @@ def get_anchor_vectors(embed: Callable[[str], list[float]]) -> dict[str, tuple[l
 def default_embedder() -> Callable[[str], list[float]] | None:
     """Real embedder using the same model/space as the stored Style vectors, or
     None when no API key is configured (radar then degrades to all-null)."""
-    global _genai_client
-    key = os.environ.get("GOOGLE_SEARCH_API_KEY")
-    if not key:
+    if not os.environ.get("GOOGLE_SEARCH_API_KEY"):
         return None
-    if _genai_client is None:
-        with _lock:  # double-checked: build at most one client under concurrency
-            if _genai_client is None:
-                from google import genai
-
-                from agentic_librarian.llm_retry import genai_http_options
-
-                _genai_client = genai.Client(api_key=key, http_options=genai_http_options())
-    client = _genai_client
-    return lambda text: get_cached_embedding(client, _EMBED_MODEL, text)
+    return lambda text: get_cached_embedding(_EMBED_MODEL, text)
 
 
 def aggregate_radar(

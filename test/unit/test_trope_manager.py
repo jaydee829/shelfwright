@@ -12,9 +12,11 @@ def mock_session():
 
 
 @pytest.fixture
-def mock_genai_client():
-    with patch("agentic_librarian.scouts.trope_manager.genai.Client") as mock:
-        yield mock.return_value
+def mock_genai_client(monkeypatch):
+    # Mock the shared genai client in utils to avoid actual network calls
+    mock_client = MagicMock()
+    monkeypatch.setattr("agentic_librarian.scouts.utils._shared_client", mock_client)
+    yield mock_client
 
 
 @pytest.fixture
