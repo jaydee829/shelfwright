@@ -16,7 +16,7 @@ class WorkContributor(Base):
     __tablename__ = "work_contributors"
 
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True)
-    author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True)
+    author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True, index=True)
     role: Mapped[str] = mapped_column(String, default="Primary", primary_key=True)
 
     work: Mapped["Work"] = relationship(back_populates="contributors")
@@ -28,7 +28,7 @@ edition_narrators = Table(
     "edition_narrators",
     Base.metadata,
     Column("edition_id", ForeignKey("editions.id"), primary_key=True),
-    Column("narrator_id", ForeignKey("narrators.id"), primary_key=True),
+    Column("narrator_id", ForeignKey("narrators.id"), primary_key=True, index=True),
 )
 
 
@@ -36,6 +36,9 @@ class Author(Base):
     __tablename__ = "authors"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    # GH #95: uq_authors_name_lower — CREATE UNIQUE INDEX ... ON authors (lower(name)),
+    # NULLS NOT DISTINCT-free functional unique; expressible only as raw DDL, see the
+    # 48e3762d6c0c migration.
     name: Mapped[str] = mapped_column(String, nullable=False)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -53,6 +56,10 @@ class Work(Base):
     genres: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
     moods: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 
+    # GH #97: stamped when a deep-enrichment pass completes (including confirmed-empty);
+    # NULL means never deep-enriched. See etl/enrichment_sweep.py's requeue predicate.
+    deep_enriched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     contributors: Mapped[list["WorkContributor"]] = relationship(back_populates="work", cascade="all, delete-orphan")
     editions: Mapped[list["Edition"]] = relationship(back_populates="work")
     tropes: Mapped[list["WorkTrope"]] = relationship(back_populates="work")
@@ -64,6 +71,8 @@ class Narrator(Base):
     __tablename__ = "narrators"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
+    # GH #95: uq_narrators_name_lower — functional unique on lower(name), raw DDL in the
+    # 48e3762d6c0c migration (same shape as Author.name above).
     name: Mapped[str] = mapped_column(String, nullable=False)
 
     styles: Mapped[list["NarratorStyle"]] = relationship(back_populates="narrator", cascade="all, delete-orphan")
@@ -89,7 +98,7 @@ class AuthorStyle(Base):
     __tablename__ = "author_styles"
 
     author_id: Mapped[UUID] = mapped_column(ForeignKey("authors.id"), primary_key=True)
-    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True, index=True)
     attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'pacing', 'tone', 'style', 'humor', etc.
 
     author: Mapped["Author"] = relationship(back_populates="styles")
@@ -100,7 +109,7 @@ class NarratorStyle(Base):
     __tablename__ = "narrator_styles"
 
     narrator_id: Mapped[UUID] = mapped_column(ForeignKey("narrators.id"), primary_key=True)
-    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True, index=True)
     attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'voice_differentiation', etc.
 
     narrator: Mapped["Narrator"] = relationship(back_populates="styles")
@@ -111,7 +120,7 @@ class WorkStyle(Base):
     __tablename__ = "work_styles"
 
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True)
-    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True)
+    style_id: Mapped[UUID] = mapped_column(ForeignKey("styles.id"), primary_key=True, index=True)
     attribute_type: Mapped[str] = mapped_column(String, primary_key=True)  # 'perspective', 'interiority', etc.
 
     work: Mapped["Work"] = relationship(back_populates="styles")
@@ -133,7 +142,7 @@ class WorkTrope(Base):
     __tablename__ = "work_tropes"
 
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True, nullable=False)
-    trope_id: Mapped[UUID] = mapped_column(ForeignKey("tropes.id"), primary_key=True, nullable=False)
+    trope_id: Mapped[UUID] = mapped_column(ForeignKey("tropes.id"), primary_key=True, nullable=False, index=True)
     relevance_score: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -145,8 +154,10 @@ class Edition(Base):
     __tablename__ = "editions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False, index=True)
     isbn_13: Mapped[str | None] = mapped_column(String, nullable=True)
+    # GH #95: uq_editions_work_format — UNIQUE (work_id, format) NULLS NOT DISTINCT (raw
+    # DDL in the 48e3762d6c0c migration; not expressible via mapped_column/UniqueConstraint).
     format: Mapped[str | None] = mapped_column(String, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -161,9 +172,12 @@ class ReadingHistory(Base):
     __tablename__ = "reading_history"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    edition_id: Mapped[UUID] = mapped_column(ForeignKey("editions.id"), nullable=False)
+    edition_id: Mapped[UUID] = mapped_column(ForeignKey("editions.id"), nullable=False, index=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     date_started: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # GH #95: uq_reading_history_user_edition_date — UNIQUE (user_id, edition_id,
+    # date_completed), raw DDL in the 48e3762d6c0c migration (kept here, not on user_id
+    # above, since the constraint is composite).
     date_completed: Mapped[date] = mapped_column(Date, nullable=False)
     user_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -175,9 +189,14 @@ class Suggestions(Base):
     __tablename__ = "suggestions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
+    # GH #95: uq_suggestions_active — partial UNIQUE (user_id, work_id) WHERE
+    # status = 'Suggested', raw DDL in the 48e3762d6c0c migration (not expressible via
+    # mapped_column/UniqueConstraint).
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False, index=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
-    suggested_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    suggested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     context: Mapped[str | None] = mapped_column(Text, nullable=True)
     justification: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, default="Suggested", nullable=False)
@@ -196,9 +215,14 @@ class Conversation(Base):
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
 
     messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
@@ -213,7 +237,9 @@ class Message(Base):
     conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
 
@@ -229,7 +255,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)  # lowercased; the invite key
     firebase_uid: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class Usage(Base):
@@ -246,9 +274,11 @@ class Usage(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     conversation_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True
+        PG_UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True, index=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class UserCredential(Base):
@@ -262,9 +292,14 @@ class UserCredential(Base):
     vendor: Mapped[str] = mapped_column(String, primary_key=True)
     encrypted_key: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     kms_key_name: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
 
 
@@ -280,7 +315,9 @@ class UserLibrary(Base):
     library_slug: Mapped[str] = mapped_column(String, primary_key=True)
     display_name: Mapped[str] = mapped_column(String, nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class AvailabilityCache(Base):
@@ -296,7 +333,7 @@ class AvailabilityCache(Base):
     norm_author: Mapped[str] = mapped_column(String, primary_key=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False
+        DateTime(timezone=True), nullable=False
     )  # caller always supplies the fetch time; no default by design
 
 
@@ -311,7 +348,9 @@ class ImportJob(Base):
     source: Mapped[str] = mapped_column(String, nullable=False)  # 'goodreads' | 'generic'
     original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
     total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
 
 
 class ImportRow(Base):
@@ -341,7 +380,12 @@ class ImportRow(Base):
         PG_UUID(as_uuid=True), nullable=True
     )  # resolved Work; soft reference, no FK by design (import_rows are a transient staging/audit log)
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
