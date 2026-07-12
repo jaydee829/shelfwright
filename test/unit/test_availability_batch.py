@@ -49,3 +49,25 @@ def test_batch_availability_thunder_error_degrades_to_none(monkeypatch):
     monkeypatch.setattr(service.overdrive, "fetch_media", boom)
     out = service.batch_availability(fake_db, [{"slug": "l", "name": "L"}], [("T", "A")])
     assert out[("l", "T", "A")] is None  # ALWAYS-200 contract: badge degrades, links unaffected
+
+
+def test_batch_availability_write_back_failure_still_returns_results(monkeypatch):
+    calls = {"n": 0}
+
+    class FakeSessionCtx:
+        def __enter__(self):
+            calls["n"] += 1
+            m = MagicMock()
+            m.get.return_value = None
+            if calls["n"] == 2:  # phase-3 write session
+                m.flush.side_effect = RuntimeError("duplicate key")
+            return m
+
+        def __exit__(self, *a):
+            return False
+
+    fake_db = MagicMock()
+    fake_db.get_session = lambda: FakeSessionCtx()
+    monkeypatch.setattr(service.overdrive, "fetch_media", lambda slug, title: [])
+    out = service.batch_availability(fake_db, [{"slug": "l", "name": "L"}], [("T", "A")])
+    assert out[("l", "T", "A")] == []  # fetched result survives the failed write-back

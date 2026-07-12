@@ -25,3 +25,33 @@ def test_resolve_runs_in_worker_thread_and_contextvar_set_in_coroutine(monkeypat
     result, ctx_value = asyncio.run(_run())
     assert seen["thread"] != threading.main_thread().name  # resolve ran off-loop
     assert ctx_value == result.id  # ContextVar visible in the coroutine's context
+
+
+def test_firebase_init_race_is_serialized(monkeypatch):
+    """Two threads racing _ensure_firebase_app must not surface ValueError (spurious 401)."""
+    import threading as _threading
+
+    calls = []
+
+    def fake_get_app():
+        raise ValueError("no app")
+
+    def fake_initialize_app():
+        calls.append(1)
+        if len(calls) > 1:
+            raise ValueError("The default Firebase app already exists")
+
+    monkeypatch.setattr(auth_mod.firebase_admin, "get_app", fake_get_app)
+    monkeypatch.setattr(auth_mod.firebase_admin, "initialize_app", fake_initialize_app)
+    errors = []
+
+    def _run():
+        try:
+            auth_mod._ensure_firebase_app()
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [_threading.Thread(target=_run) for _ in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert errors == []

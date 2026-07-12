@@ -68,11 +68,14 @@ class DatabaseManager:
         pool_kwargs = {}
         if not db_url.startswith("sqlite"):
             # GH #102: pre_ping heals stale connections after Cloud SQL restarts/idle;
-            # recycle beats server-side idle kills; 5+2 per engine × max-instances=2 = 14
-            # connections, safely under db-f1-micro's ~25-connection budget. Viable since
-            # #94: sessions no longer idle across external LLM/scout/Thunder calls.
+            # recycle beats server-side idle kills. 5+5 per engine × max-instances=2 = 20
+            # peak vs db-f1-micro's ~25. Overflow headroom is deliberate: #94 removed
+            # scout/LLM/Thunder calls from sessions, but embedding calls still run inside
+            # them (search tools + persist-time standardize_trope/style) — under a Gemini
+            # 429 burst those sessions stretch to minutes. Tighten to 5+2 once embeds are
+            # hoisted out of sessions (follow-up issue).
             # sqlite (tests) uses its own pool class that rejects QueuePool kwargs.
-            pool_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 2}
+            pool_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800, "pool_size": 5, "max_overflow": 5}
         self._engine = create_engine(db_url, connect_args=connect_args, **pool_kwargs)
         self._SessionFactory = sessionmaker(bind=self._engine)
 

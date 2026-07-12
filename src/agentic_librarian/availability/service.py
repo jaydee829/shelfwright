@@ -143,25 +143,29 @@ def batch_availability(db_manager, libs: list[dict], items: list[tuple[str, str]
         fetched[(lib["slug"], title, author)] = _shape_formats(items_raw, title, author)
 
     if fetched:
-        with db_manager.get_session() as session:
-            for (slug, title, author), formats in fetched.items():
-                nt, na = _normalize(title), _normalize(author)
-                row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
-                payload = {"formats": formats}
-                if row is None:
-                    session.add(
-                        AvailabilityCache(
-                            provider=_PROVIDER,
-                            library_slug=slug,
-                            norm_title=nt,
-                            norm_author=na,
-                            payload=payload,
-                            fetched_at=now,
+        try:
+            with db_manager.get_session() as session:
+                for (slug, title, author), formats in fetched.items():
+                    nt, na = _normalize(title), _normalize(author)
+                    row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
+                    payload = {"formats": formats}
+                    if row is None:
+                        session.add(
+                            AvailabilityCache(
+                                provider=_PROVIDER,
+                                library_slug=slug,
+                                norm_title=nt,
+                                norm_author=na,
+                                payload=payload,
+                                fetched_at=now,
+                            )
                         )
-                    )
-                else:
-                    row.payload = payload
-                    row.fetched_at = now
-                session.flush()
+                    else:
+                        row.payload = payload
+                        row.fetched_at = now
+                    session.flush()
+        except Exception as exc:  # noqa: BLE001 - cache write-back is best-effort (ALWAYS-200)
+            # GH #110 covers the durable upsert; until then write-back is best-effort
+            logger.warning("availability cache write-back failed (concurrent insert?): %s", exc)
         results.update(fetched)
     return results
