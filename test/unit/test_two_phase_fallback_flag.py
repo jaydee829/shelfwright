@@ -3,27 +3,21 @@ from uuid import uuid4
 from agentic_librarian.enrichment import two_phase
 
 
-def test_scout_and_persist_forwards_fallback_flag(monkeypatch):
-    captured = {}
-
-    def fake_persist(session, row, tm, sm):
-        captured.update(row)
-        return object()
-
-    monkeypatch.setattr(two_phase, "persist_enriched_work", fake_persist)
-    monkeypatch.setattr(two_phase, "TropeManager", lambda session: None)
-    monkeypatch.setattr(two_phase, "StyleManager", lambda session: None)
+def test_run_scouts_forwards_fallback_flag(monkeypatch):
     mgr = type("M", (), {"enrich": lambda self, **k: {"genres": ["x"], "moods": []}})()
 
-    two_phase._scout_and_persist(None, mgr, title="T", author="A", fmt="ebook", write_fallback_tropes=False)
-    assert captured["write_fallback_tropes"] is False
+    row = two_phase._run_scouts(mgr, title="T", author="A", fmt="ebook", write_fallback_tropes=False)
+    assert row["write_fallback_tropes"] is False
 
 
 def test_enrich_fast_opts_out_of_fallback_tropes(monkeypatch):
     seen = {}
 
-    def fake_sap(session, manager, *, title, author, fmt, write_fallback_tropes=True):
+    def fake_run_scouts(manager, *, title, author, fmt, write_fallback_tropes=True):
         seen["wft"] = write_fallback_tropes
+        return {"write_fallback_tropes": write_fallback_tropes}
+
+    def fake_persist_row(session, row):
         return type("W", (), {"id": uuid4()})()
 
     class _Sess:
@@ -48,7 +42,8 @@ def test_enrich_fast_opts_out_of_fallback_tropes(monkeypatch):
         def flush(self):
             pass
 
-    monkeypatch.setattr(two_phase, "_scout_and_persist", fake_sap)
+    monkeypatch.setattr(two_phase, "_run_scouts", fake_run_scouts)
+    monkeypatch.setattr(two_phase, "_persist_row", fake_persist_row)
     monkeypatch.setattr(two_phase, "create_fast_scout_manager", lambda: None)
     two_phase.set_db_manager(type("M", (), {"get_session": lambda s: _Sess()})())
 
