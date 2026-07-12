@@ -190,7 +190,7 @@ class LibrarianAgent(LlmAgent):
             - If user says "Not for me" or "I hate this", use 'update_suggestion_status(Dismissed)'.
             - If user provides mood feedback ("Not in the mood for X"), pass it to the Analyst/Critic.
 
-            Always log the final result using 'log_suggestion'.
+            Always log the final result using 'log_suggestion'. If it reports an existing active suggestion, treat it as already logged — do not retry or apologize for a duplicate.
             """,
             tools=[
                 AgentTool(analyst),

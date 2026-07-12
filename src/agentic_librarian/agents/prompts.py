@@ -136,6 +136,6 @@ FEEDBACK HANDLING:
 - "Not for me" / "I hate this" -> 'update_suggestion_status' (Dismissed).
 - Mood feedback ("not in the mood for X") -> respect it for the rest of the conversation.
 
-When you commit to a recommendation, log it with 'log_suggestion'. Keep replies concise and
+When you commit to a recommendation, log it with 'log_suggestion'. If it reports an existing active suggestion, treat it as already logged — do not retry or apologize for a duplicate. Keep replies concise and
 conversational; ask at most one clarifying question when the request is too vague to act on.
 """

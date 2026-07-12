@@ -19,7 +19,7 @@ import logging
 from uuid import UUID
 
 from sqlalchemy import func
-from sqlalchemy import text as sa_text
+from sqlalchemy import text as sa_text  # aliased: a loop variable in _warm_embeddings shadows 'text' (F402)
 
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.get_or_create import get_or_create
