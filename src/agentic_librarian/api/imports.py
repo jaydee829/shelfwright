@@ -197,7 +197,9 @@ def get_status(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)
             .select_from(ImportRow)
             .filter(
                 ImportRow.import_job_id == job_id,
-                ImportRow.status == "processing",
+                # Rows a retry will re-drive (#99): stale 'processing' (worker died) AND
+                # stale 'pending' (the enqueue RPC failed, so no task exists for the row).
+                ImportRow.status.in_(("processing", "pending")),
                 ImportRow.updated_at < datetime.now(UTC) - STALLED_AFTER,
             )
             .scalar()
@@ -225,7 +227,10 @@ def retry(job_id: UUID, user: AuthenticatedUser = Depends(get_current_user)):  #
             session.query(ImportRow)
             .filter(
                 ImportRow.import_job_id == job_id,
-                (ImportRow.status == "failed") | ((ImportRow.status == "processing") & (ImportRow.updated_at < cutoff)),
+                (ImportRow.status == "failed")
+                # Stale processing (worker died) or stale pending (enqueue failed, #99) —
+                # re-enqueueing is safe: the worker's status machine is idempotent.
+                | (ImportRow.status.in_(("processing", "pending")) & (ImportRow.updated_at < cutoff)),
             )
             .all()
         )
