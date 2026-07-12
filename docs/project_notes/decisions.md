@@ -978,3 +978,26 @@ This file documents key architectural decisions, their context, and trade-offs.
   (Firebase Authorized domains + Web OAuth redirect URI/JS origin).
 - Accepts Cloud Run domain mapping's "Preview" status at friends-and-family scale.
 - Rollback = delete the mapping; `run.app` never stops serving.
+
+### ADR-058: Startup migration guard — a schema-behind deploy fails the revision (2026-07-12)
+**Context:**
+- deploy.yml has no alembic step by design (migrations are operator-manual, lift1 runbook), but
+  nothing enforced the migrate-before-merge ordering: a merged migration PR deployed against an
+  un-migrated prod DB → runtime 500s the /health smoke can't see (GH #92, 2026-07-02 review).
+- Alternatives: a workflow-side DB query (hands prod DB credentials to CI) or a
+  /health/migrations smoke assertion (checks only after traffic has shifted; and the deployer
+  cannot mint Firebase tokens to pass the auth gate).
+**Decision:**
+- `db/migration_guard.py`, called in the FastAPI lifespan: compare the DB's `alembic_version`
+  to the image's migration head (`alembic/` + `alembic.ini` now ship in the prod image). On
+  mismatch (or missing alembic_version table, or ≠1 heads) the container exits → the Cloud Run
+  revision never goes ready → the deploy fails while traffic keeps serving the old revision.
+- DB **unreachable** only warns and continues: transient DB blips must not kill scale-from-zero
+  cold starts, and the in-runner docker smoke boots with a bogus DATABASE_URL by design.
+- `MIGRATION_GUARD=off|0|false` is the emergency bypass (e.g. deploying the fix for a bad
+  migration). The test suite defaults it off in conftest; the guard's unit tests re-enable it.
+**Consequences:**
+- Migrations stay manual; the mismatch is now loud and self-rolls-back instead of silent 500s.
+- Any deploy path is covered (workflow or manual gcloud), with no DB credentials in CI.
+- A forgotten alembic COPY in Dockerfile.api fails the runner smoke test (guard raises on a
+  missing script dir), so the guard cannot silently vanish from the image.

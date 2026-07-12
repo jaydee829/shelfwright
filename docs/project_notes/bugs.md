@@ -72,8 +72,11 @@ This file tracks project bugs, their root causes, solutions, and prevention stra
   already-merged-but-skipped commit = manual `workflow_dispatch` of "Deploy to Cloud Run" on `main` (as
   done for `3d2dafe`, run 27723605516).
 - **Prevention** (future merges — do NOT let `[skip ci]` reach a deployable squash-merge body):
-  1. At squash-merge, **edit the squash commit message** in GitHub's merge dialog and delete the
-     `* …[skip ci]` bullets before confirming.
+  1. ~~At squash-merge, **edit the squash commit message** in GitHub's merge dialog and delete the
+     `* …[skip ci]` bullets before confirming.~~ **DURABLE FIX APPLIED 2026-07-12 (GH #90):** repo
+     setting changed to squash title = PR title, squash message = blank — commit bodies no longer
+     enter the merge commit, so nothing can leak. Verified by the Phase 6.1 PR's own squash-merge
+     auto-deploying.
   2. Don't put `[skip ci]` in commit **subjects** that will be squashed into a deploying merge; reserve
      `[skip ci]` for standalone docs-only **direct-to-main** commits (e.g. `9aeef38`, `e2602b9`), whose
      own subject carries it intentionally.

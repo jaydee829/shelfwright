@@ -75,9 +75,13 @@ This file tracks important project configuration, constants, and environment det
   and verified (326 works / 335 editions / 331 reading_history / 230 authors; 556
   tropes + 508 styles fully embedded). App connects via the `librarian-db-url` secret
   (full `DATABASE_URL`, Cloud SQL unix socket); schema managed by Alembic (Lift 1+).
+  Nightly automated backups (09:00 UTC) + 7-day PITR enabled 2026-07-12 (GH #91; codified in
+  `infra/02-cloudsql.sh`).
 - **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
   `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.
+  deploy.yml pins `--memory=2Gi` (ADR-051/GH #89 — was 512Mi drift) and the lifespan migration
+  guard (ADR-058) fails the revision if prod's alembic_version is behind the image's head.
 - **Async enrichment scaling** (ADR-051, tuned 2026-06-23 after an OOM storm on the first real bulk
   import): Cloud Run `librarian-api` memory = **2Gi** (was 512Mi — too small for the deep LLM scouts);
   Cloud Tasks `librarian-enrich` queue = **max-concurrent-dispatches=4 / max-dispatches-per-second=5**
