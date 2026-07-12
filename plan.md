@@ -42,7 +42,7 @@
     -   Build prompt templates that anchor final recommendations in retrieved trope **names and descriptions** for evidence-based grounding.
 
 ## Phase 4: Web Interface & Analysis
-**Goal**: Visualize the reading history and interact with the Librarian.
+**Goal**: Visualize the reading history and interact with the Librarian. [COMPLETED — GH #13 closed 2026-07-12: SPA + chat (#43/#44), Analysis dashboard (#74, #86), VI v2 (#59)]
 *   **Order of Work**:
     1.  Initialize Vite/React frontend.
     2.  Build "Trope Cloud" and "Author Style" radar charts using Recharts.
@@ -61,6 +61,11 @@
 **Goal**: Close the reliability, cost, and data-integrity gaps found by the 2026-07-02 full-codebase
 review before growing past friends-and-family. All items are GitHub issues filed 2026-07-02
 (work-log entry in `docs/project_notes/issues.md`; fits between ADR-046's beta and Lift 3 productization).
+
+**Status (2026-07-12)**: not started — all 27 issues (#89–#115) remain open; #89 (deploy.yml still
+pins 512Mi) and #91 (no Cloud SQL backups) are still the act-first prod risks. The intervening work
+was the Shelfwright launch (canonical domain + rebrand, GH #79 → PRs #117/#118, ADR-057), which
+closed the redirect_uri_mismatch bug class but is orthogonal to this phase.
 
 ### 6.1 Prod-risk hotfixes (do immediately, tiny diffs)
 1.  **#89** deploy.yml pins `--memory=512Mi` — codify the 2Gi OOM fix + enrich-queue rates in infra/08; verify live memory.

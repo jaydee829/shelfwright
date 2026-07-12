@@ -12,13 +12,28 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-07-12 - LAUNCH: Shelfwright rebrand + canonical domain (GH #79) — SHIPPED; issue scrub
+- **Status**: Completed — live and verified.
+- **Description**: Product renamed **Shelfwright**; https://shelfwright.app is the canonical host
+  (Cloud Run apex domain mapping, ADR-057; `www` 301s to apex at Cloudflare). Repo renamed to
+  `jaydee829/shelfwright` (WIF provider condition + deployer-SA binding updated — GitHub's rename
+  redirect does NOT cover OIDC claims; post-rename deploy verified green). PyPI name claimed
+  (`shelfwright` 0.0.1 stub from `packaging/pypi-stub/`). UI branding = Shelfwright; "the Librarian"
+  stays as the chat persona. Fresh-user sign-in verified on the new domain — a single canonical host
+  permanently closes the #116 redirect_uri_mismatch bug class.
+- **URL**: PRs #117 (launch) + #118 (rename follow-ups); operator runbook `docs/runbooks/shelfwright-launch.md`
+- **Notes**: Issue scrub done the same day: closed #79 (this launch), #13 (Phase 4 web/analysis —
+  shipped via #43/#44/#74/#86/#59), #8 (Phase 1 infra, long complete). Verified still open before
+  keeping: #89 (deploy.yml still pins 512Mi) and #90 (squash-merge setting still `COMMIT_MESSAGES`).
+  All 27 scaling-review issues (#89–#115) remain open — Phase 6 not started.
+
 ### 2026-07-02 - REVIEW: full-codebase scaling review (beta → dozens of users) — 27 issues filed (#89–#115)
 - **Status**: Review completed; all findings filed as GitHub issues; fixes not yet started.
 - **Description**: Five-track review (backend API, DB/core, enrichment pipeline, frontend, infra/CI) of
   `origin/main` (`96d1000`) focused on bugs, architecture, and handful→dozens scaling. 27 issues filed
   (#89–#115) + a root-cause comment on #88 (duplicate Picks = `log_suggestion` never dedups). Roadmap:
   new "Phase 6 — Scaling Hardening" section in `plan.md` prioritizes them.
-- **URL**: https://github.com/jaydee829/agentic_librarian/issues (filter `created:2026-07-02`)
+- **URL**: https://github.com/jaydee829/shelfwright/issues (filter `created:2026-07-02`)
 - **Notes**:
   - **Act first (prod risk)**: #89 deploy.yml still pins 512Mi — every deploy reverts the OOM fix (verify
     live memory NOW); #91 no Cloud SQL automated backups; #90 durable `[skip ci]` squash fix (repo setting).
