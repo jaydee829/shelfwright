@@ -224,6 +224,27 @@ def test_update_reading_status_validates_title_author_shape(db_url):
     assert "Error" in mcp_server.update_reading_status(title="x" * 501, author="A", status="read")
 
 
+@pytest.mark.db_integration
+def test_update_reading_status_dup_guard_same_resolved_date(db_url, seeded_work_id):
+    """GH #112: calling update_reading_status twice with the SAME resolved completion
+    date (here, the same year -> same Jan-1 convention date) must log only ONE
+    ReadingHistory row — the add_read_event dup guard, inherited for free."""
+    with mcp_server.db_manager.get_session() as session:
+        work = session.get(Work, UUID(seeded_work_id))
+        title = work.title
+        author = work.contributors[0].author.name
+
+    out1 = mcp_server.update_reading_status(title=title, author=author, status="read", year=2019)
+    assert "Successfully updated" in out1
+    out2 = mcp_server.update_reading_status(title=title, author=author, status="read", year=2019)
+    assert "already logged" in out2
+
+    with mcp_server.db_manager.get_session() as session:
+        rows = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == UUID(seeded_work_id)).all()
+        assert len(rows) == 1
+        assert rows[0].date_completed.isoformat() == "2019-01-01"
+
+
 # ---------------------------------------------------------------------------
 # add_book_to_history tests
 # ---------------------------------------------------------------------------

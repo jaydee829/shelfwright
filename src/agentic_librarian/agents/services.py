@@ -184,6 +184,9 @@ class LibrarianAgent(LlmAgent):
 
             FEEDBACK HANDLING:
             - If user says "I read that", use 'update_reading_status' AND 'update_suggestion_status(Already Read)'.
+              If they indicate it was a while ago ("years ago", "back in college"), ask roughly when —
+              a year is enough — and pass it as 'year'; without a date the entry is logged as today,
+              which wrongly blocks re-read suggestions for 2 years.
             - If user says "Not for me" or "I hate this", use 'update_suggestion_status(Dismissed)'.
             - If user provides mood feedback ("Not in the mood for X"), pass it to the Analyst/Critic.
 
