@@ -46,6 +46,26 @@ def _seed_job(manager, statuses):
         return job.id
 
 
+def _seed_row(manager, status, minutes_old):
+    from datetime import UTC, datetime, timedelta
+
+    with manager.get_session() as s:
+        job = ImportJob(user_id=DEFAULT_USER_ID, source="goodreads", total_rows=1)
+        s.add(job)
+        s.flush()
+        s.add(
+            ImportRow(
+                import_job_id=job.id,
+                user_id=DEFAULT_USER_ID,
+                destination="history",
+                status=status,
+                updated_at=datetime.now(UTC) - timedelta(minutes=minutes_old),
+            )
+        )
+        s.flush()
+        return job.id
+
+
 def test_progress_is_derived_from_rows(client):
     c, manager = client
     job_id = _seed_job(manager, ["done", "done", "failed", "pending"])
@@ -98,6 +118,38 @@ def test_stalled_processing_rows_are_counted(client):
         )
         s.flush()
         job_id = job.id
+    body = c.get(f"/import/{job_id}").json()
+    assert body["stalled"] == 1
+    assert body["complete"] is False
+
+
+def test_retry_re_enqueues_stranded_pending_rows(client, monkeypatch):
+    """A row whose enqueue RPC failed stays 'pending' with no task behind it (#99)."""
+    c, manager = client
+    job_id = _seed_row(manager, "pending", minutes_old=30)
+    enq = []
+    monkeypatch.setattr(imports_mod, "enqueue_import_row", lambda rid: enq.append(rid) or True)
+    r = c.post(f"/import/{job_id}/retry")
+    assert r.status_code == 200
+    assert r.json()["retried"] == 1
+    assert len(enq) == 1
+
+
+def test_retry_ignores_fresh_pending_rows(client, monkeypatch):
+    """Fresh pending rows are normally in-flight — retry must not double-enqueue them."""
+    c, manager = client
+    job_id = _seed_row(manager, "pending", minutes_old=0)
+    enq = []
+    monkeypatch.setattr(imports_mod, "enqueue_import_row", lambda rid: enq.append(rid) or True)
+    r = c.post(f"/import/{job_id}/retry")
+    assert r.json()["retried"] == 0
+    assert enq == []
+
+
+def test_stalled_counts_stale_pending_rows(client):
+    """'stalled' = rows a retry will re-drive: stale processing + stale pending (#99)."""
+    c, manager = client
+    job_id = _seed_row(manager, "pending", minutes_old=30)
     body = c.get(f"/import/{job_id}").json()
     assert body["stalled"] == 1
     assert body["complete"] is False
