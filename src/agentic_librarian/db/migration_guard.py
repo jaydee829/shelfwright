@@ -89,8 +89,7 @@ def check_migrations(db_manager, config_path: str = "alembic.ini") -> None:
         raise
     except Exception as exc:
         logger.warning(
-            "migration guard: could not read alembic_version at startup — skipping check "
-            "(code head %s): %s",
+            "migration guard: could not read alembic_version at startup — skipping check (code head %s): %s",
             head,
             exc,
         )
