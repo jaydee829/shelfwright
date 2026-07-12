@@ -48,6 +48,19 @@ def test_add_book_message_mentions_background_analysis(monkeypatch):
     assert "Dune" in msg
 
 
+def test_add_book_enqueue_failure_omits_background_note(monkeypatch):
+    wid = uuid.uuid4()
+    monkeypatch.setattr(mcp_server, "get_required_user_id", lambda: uuid.uuid4())
+    with (
+        patch.object(mcp_server.two_phase, "enrich_fast", return_value=(wid, True)),
+        patch.object(mcp_server, "enqueue_enrichment", return_value=False),
+        patch.object(mcp_server.two_phase, "add_read_event", return_value={"read_number": 1, "already_logged": False}),
+    ):
+        msg = mcp_server.add_book_to_history(title="Dune", author="Frank Herbert")
+    assert "background" not in msg.lower()
+    assert "Added" in msg
+
+
 def test_add_book_existing_work_has_no_background_note(monkeypatch):
     wid = uuid.uuid4()
     monkeypatch.setattr(mcp_server, "get_required_user_id", lambda: uuid.uuid4())

@@ -180,9 +180,9 @@ Mechanics (no frontend changes):
 
 - PR-B touches the chat hot path. Mitigations: behavior pinned by the CI integration
   suites; PR-A lands first and deploys independently; post-merge smoke on prod chat.
-- to_thread moves tool bodies onto the default executor (cap ~32 threads) — fine at
-  dozens-of-users scale; the enrich/import queues (4/5 concurrent) remain the heavy-work
-  throttles.
+- to_thread moves tool bodies onto the default executor, pinned to 32 workers in the API
+  lifespan (Python's own default would be ~5-6 threads at 1 vCPU) — fine at dozens-of-users
+  scale; the enrich/import queues (4/5 concurrent) remain the heavy-work throttles.
 - Pool sizing: 7 connections per instance shared by more concurrent threads than before —
   `pool_timeout` defaults (30s) apply; the #94 session-shortening is what makes the
   smaller pool viable (sessions no longer idle for minutes).

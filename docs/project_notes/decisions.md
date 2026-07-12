@@ -1031,5 +1031,7 @@ This file documents key architectural decisions, their context, and trade-offs.
 - One user's enrichment can no longer brown out the instance; chat adds return in seconds.
 - The deep pass now re-scouts outside any transaction: a late transient failure re-pays
   nothing already persisted, and dedup re-checks close the widened race window.
-- to_thread runs tool bodies on the default executor (~32 threads) — the enrich/import
-  queues (4/5 concurrent) remain the heavy-work throttles.
+- to_thread runs on the loop's default executor, pinned to 32 workers in the API lifespan
+  (Python's own default is min(32, cpus+4) ≈ 5-6 on Cloud Run's 1 vCPU — too small once
+  every auth resolve and tool body shares it); the enrich/import queues (4/5 concurrent)
+  remain the heavy-work throttles.

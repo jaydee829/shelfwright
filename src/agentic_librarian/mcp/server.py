@@ -342,7 +342,11 @@ def check_availability(title: str, author: str) -> dict:
         ]
     if not libs:
         note = "No libraries saved — the reader can add theirs in Settings."
-    availability = availability_service.batch_availability(db_manager, libs, [(title, author)])
+    try:
+        availability = availability_service.batch_availability(db_manager, libs, [(title, author)])
+    except Exception as exc:  # noqa: BLE001 - never throw into the agent loop
+        logger.warning("check_availability batch lookup failed for %r by %r: %s", title, author, exc)
+        availability = {(lib["slug"], title, author): None for lib in libs}
     for lib in libs:
         formats = availability.get((lib["slug"], title, author))
         if formats is None:
@@ -523,9 +527,10 @@ def add_book_to_history(
     if resolved is None:
         return f"Error: could not resolve '{title}' by {author} — check the spelling, or the scouts found nothing."
     work_id, created = resolved
+    enqueued = False
     if created:
         try:
-            enqueue_enrichment(str(work_id))
+            enqueued = enqueue_enrichment(str(work_id))
         except Exception:  # noqa: BLE001 - deep pass is best-effort
             logger.exception("deep-enrichment enqueue failed for work %s", work_id)
 
@@ -536,7 +541,7 @@ def add_book_to_history(
     if logged["already_logged"]:
         return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
     msg = f"Added '{title}' to your reading history (work {work_id}, read #{logged['read_number']})."
-    if created:
+    if created and enqueued:
         msg += (
             " I'm still analyzing this book in the background (~1-2 minutes) — its tropes and"
             " styles will be ready on your next turn, so tell the user that and don't draw"
