@@ -38,6 +38,14 @@ _API_RETRY = Retry(
     respect_retry_after_header=False,
 )
 
+# Shared session for raw page scrapes (AudiobookScout extends LLMScout, which has no
+# APIScout session/timeout machinery — GH #103). Same retry policy as the API scouts;
+# timeout in SECONDS (requests convention — the genai HttpOptions timeout is milliseconds).
+_PAGE_TIMEOUT = 15
+_page_session = requests.Session()
+_page_session.mount("https://", HTTPAdapter(max_retries=_API_RETRY))
+_page_session.mount("http://", HTTPAdapter(max_retries=_API_RETRY))
+
 _gbooks_nokey_warned = False
 
 
@@ -353,7 +361,7 @@ class AudiobookScout(LLMScout):
             raise ValueError(f"No Audible link found for title: {title}")
 
         headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36"}
-        response = requests.get(url, headers=headers)
+        response = _page_session.get(url, headers=headers, timeout=_PAGE_TIMEOUT)
         soup = BeautifulSoup(response.content, "html.parser")
         for script in soup(["script", "style"]):
             script.extract()
