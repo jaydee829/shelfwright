@@ -1046,3 +1046,103 @@ This file documents key architectural decisions, their context, and trade-offs.
   `_safe_standardize` (bounded: enrich queue is 4-concurrent; PR-D's requeue sweep is the
   recovery), and `/analysis` embeds ~24 radar anchor texts inside its session once per
   process (first call only, then module-cached).
+
+### ADR-060: Constraint-backed get-or-create + advisory-lock works dedup + gated backfill (2026-07-12)
+**Context:**
+- Every "look up or create" site in the codebase was a bare SELECT-then-INSERT with no DB
+  backstop — a race between two concurrent writers (two chat sessions adding the same book,
+  a bulk import overlapping a fast-add) could both miss the SELECT and both INSERT,
+  producing duplicate Authors/Narrators/Editions/reading_history/suggestions rows. `log_suggestion`
+  (mcp) had ZERO dedup while the import worker's `_upsert_suggestion` was idempotent — this
+  asymmetry is #88's likely root cause. Editions had three get-or-create sites, one
+  (`etl/ingest.py`'s `to_models` generator) entirely unguarded. The corrected #69 fallback-trope
+  predicate (structural: clean-name ⊆ genres∪moods, case-folded) had already taught the
+  project's hardest lesson about backfills — never trust a sometimes-populated column as a
+  class label; group on real relationships or normalized values instead.
+- Works have no natural cross-table unique key (title+author spans the Work/Author/
+  WorkContributor tables), so a DB-level unique constraint isn't directly expressible the
+  way it is for Authors/Narrators/Editions.
+- Spec: `docs/superpowers/specs/2026-07-12-phase6-3-data-integrity-design.md` (PR-D design,
+  "Dedup backfill (THE USER GATE)"); user ground rule (2026-07-12): prod backfills/migrations
+  require a dry-run report + user approval before applying.
+**Decision:**
+- **Five unique indexes** added in migration `48e3762d6c0c`: `uq_authors_name_lower`
+  (`lower(name)`), `uq_narrators_name_lower` (`lower(name)`), `uq_editions_work_format`
+  (`work_id, format` with `NULLS NOT DISTINCT`, PG16), `uq_reading_history_user_edition_date`
+  (`user_id, edition_id, date_completed`), `uq_suggestions_active` (`user_id, work_id` WHERE
+  `status = 'Suggested'` — partial, so historical non-active suggestions can repeat).
+- **`db/get_or_create.py`** — two helpers, both SAVEPOINT-scoped (`session.begin_nested()`)
+  so a rolled-back insert doesn't kill the caller's outer transaction: `get_or_create`
+  (query → insert → on `IntegrityError` re-query with the SAME `filter_by(**filters)`
+  predicate — correct when the DB constraint matches the filter 1:1, e.g. editions,
+  reading_history, suggestions) and `insert_or_requery` (for sites where the constraint is
+  NOT an exact-match predicate, e.g. authors/narrators' `lower(name)` unique fires on a
+  case-variant that an exact `filter_by(name=...)` re-query would miss — callers keep their
+  existing case-insensitive first-query and supply a matching `requery` callable for the
+  recovery path). Adopted at: authors/narrators and all edition sites in `persist.py`,
+  `two_phase.add_read_event`, reading_history (date-guard plus the constraint as backstop),
+  suggestions (worker's `_upsert_suggestion` AND `log_suggestion`, which gains dedup for the
+  first time — closes #88's root cause).
+- **Works dedup = advisory lock, not a unique constraint**: `enrich_fast`'s write session
+  runs `SELECT pg_advisory_xact_lock(hashtext(:k))` (key = normalized `title|author`,
+  Postgres-only, skipped on sqlite test URLs) before its dedup re-check, serializing
+  concurrent same-book creators without needing a cross-table DB constraint. Xact-scoped —
+  released on commit.
+- **The gated backfill** (`etl/dedup_backfill.py` + `scripts/clean_catalog.py
+  --dedup-for-constraints`): a `plan_dedup`/`apply_dedup` split, read-only plan then apply-
+  exactly-what-was-planned (never re-derived at apply time, so a row that vanished between
+  plan and apply is skipped and counted, not silently re-planned). Seven structural
+  classes — duplicate authors/narrators (survivor = most-linked row, ties broken by lowest
+  id; Author/Narrator have no `created_at` so "oldest" isn't available), duplicate editions
+  (per `(work_id, COALESCE(format,''))`), exact-duplicate reading_history and Suggested
+  suggestions (keep oldest), orphan authors (zero `work_contributors` AND zero
+  `author_styles` — computed against CURRENT state, not simulated against this run's own
+  not-yet-applied author merges, by design), and `duplicate_works_report_only` (normalized
+  title+author collisions — REPORT ONLY, never applied; work merges are complex enough that
+  the operator triages case by case). Every class groups on real relationships or
+  normalized values — never a sometimes-populated column — the #69 lesson made structural
+  policy here, not just a one-off fix.
+- **Apply-time drift cross-check** (added after PR-D's own dedup-planner review surfaced
+  the gap): `--apply` is a separate invocation from the reviewed dry-run and re-plans from
+  scratch against prod's live state. `plan_id_set`/`plan_delta` turn a plan into a per-class,
+  **operation-tagged** id set (`merge:`/`repoint:`/`delete:`/`report:` prefixes, so an id
+  whose operation flipped between the reviewed report and the fresh plan — e.g. a concurrent
+  write turns a reviewed `repoint` into a `delete` — surfaces as a new token, not an
+  unchanged bare id) and the CLI refuses `--apply` outright if the fresh plan contains
+  anything the operator's reviewed report doesn't cover, writing a fresh report for
+  re-review instead of proceeding. Ids that only vanished (rows deleted/changed since
+  review) are fine and apply normally under ordinary `skipped_stale` accounting.
+- Full rollout mechanics (pg_dump, dry-run review, apply, `alembic upgrade head`, merge,
+  post-checks): `docs/runbooks/phase6-3-schema-rollout.md`.
+**Alternatives Considered:**
+- A cross-table unique constraint on works (normalized title+author) → rejected: the
+  natural key spans Work/Author/WorkContributor, so it isn't expressible as a single-table
+  index the way editions/authors/narrators are; the advisory lock plus a report-only sweep
+  covers the concurrency risk without a schema contortion.
+- Simulating orphan-author detection ahead of this run's own not-yet-applied merges →
+  rejected: would make the plan's ids depend on the plan's own outcome, breaking "apply
+  exactly what plan showed"; a documented re-run-until-clean loop is simpler and honest
+  about the ordering.
+- Trusting the dry-run's in-memory plan at apply time (no re-plan, no drift check) →
+  rejected during PR-D's own review: the two invocations are minutes apart in practice and
+  live traffic could create genuinely new duplicates in the gap: applying blind would defeat
+  the user-gate's purpose.
+**Consequences:**
+- `IntegrityError` on a get-or-create race is now a recoverable re-query, not a crash or (in
+  request-serving code) a 500 — the exact bug class the SELECT-then-INSERT pattern always
+  risked.
+- `log_suggestion` deduplicates for the first time, closing #88's likely root cause; note
+  left on #88 when closing.
+- The gate refuses to apply a stale or drifted plan rather than silently including duplicates
+  the operator never reviewed — the review step is load-bearing, not decorative.
+- `etl/ingest.py`'s `to_models()` generator remains intentionally unguarded: it's exercised
+  only by `test_ingest.py`, has no live call site (the real ETL write path is
+  `enriched_metadata` → `persist_enriched_work`, already constraint-backed), and is
+  adjudicated dead code rather than retrofitted — a future removal is a cheap, safe cleanup,
+  not urgent.
+- The `duplicate_works_report_only` class is a standing, not-yet-actioned list after this
+  rollout — a genuine work-merge tool is future work if the list proves large enough to
+  matter in practice.
+- Orphan-author counts can recur after any future author-merge (this rollout's own dedup
+  apply included) — the runbook documents a re-run-until-clean loop rather than promising a
+  single pass is sufficient.
