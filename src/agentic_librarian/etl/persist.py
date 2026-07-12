@@ -102,8 +102,25 @@ def persist_enriched_work(
     if not raw_contributors:
         return None
 
-    # Resolve/Create Authors and create WorkContributor objects
-    work_contributors_list = []
+    # 2. Work lookup. Moved above contributor materialization (#96) so the existing-work branch
+    # can merge desired contributors instead of relying on WorkContributor objects built before we
+    # know whether this is a new or existing work. no_autoflush guards this query against
+    # autoflushing other pending session state (e.g. an Author added earlier in this same call for
+    # a prior row in a batch import) mid-lookup.
+    with session.no_autoflush:
+        work = (
+            session.query(Work)
+            .join(WorkContributor)
+            .join(Author)
+            .filter(Work.title == row["Title"])
+            .filter(Author.name == (row.get("Author_1") or row.get("Author")))
+            .first()
+        )
+
+    # Resolve/Create Authors and collect (author, role) pairs to link below. Author creation
+    # happens only for entries that will actually be linked to the work (both the new-work and
+    # existing-work branches below link every desired pair), so no orphan Author rows can result.
+    desired: list[tuple[Author, str]] = []
     author_style_data = row.get("author_style", {})
 
     seen_contributors: set[tuple[str, str]] = set()
@@ -141,7 +158,7 @@ def persist_enriched_work(
                 if not existing_link:
                     session.add(AuthorStyle(author=author, style=standard_style, attribute_type=attr_type))
 
-        work_contributors_list.append(WorkContributor(author=author, role=role))
+        desired.append((author, role))
 
     # Coerce every enrichment/CSV field that pandas may deliver as NaN before it reaches the ORM.
     # Scalars -> None (SQL NULL); list-typed fields -> [] so downstream iteration/set() can't crash
@@ -159,21 +176,10 @@ def persist_enriched_work(
     audio_minutes = _nan_to_none(row.get("audio_minutes"))
     publication_date = _nan_to_none(row.get("publication_date"))
 
-    # 2. Work. no_autoflush: the not-yet-added WorkContributor objects above must not be
-    # cascaded by this query's autoflush (raises a SAWarning and could flush incomplete rows).
-    with session.no_autoflush:
-        work = (
-            session.query(Work)
-            .join(WorkContributor)
-            .join(Author)
-            .filter(Work.title == row["Title"])
-            .filter(Author.name == (row.get("Author_1") or row.get("Author")))
-            .first()
-        )
     if not work:
         work = Work(
             title=row["Title"],
-            contributors=work_contributors_list,
+            contributors=[WorkContributor(author=a, role=r) for a, r in desired],
             original_publication_year=original_publication_year,
             description=description,
             genres=genres,
@@ -187,6 +193,14 @@ def persist_enriched_work(
         work.description = description or work.description
         work.genres = genres or work.genres
         work.moods = moods or work.moods
+        # GH #96: link newly discovered contributors (deep pass / re-import). Previously the
+        # WorkContributor objects dangled off Author.contributions and SQLAlchemy 2.0's removed
+        # backref-cascade silently never flushed them (SAWarning) — co-authors were lost and
+        # their Author rows orphaned. Mirror the narrator merge below.
+        existing_pairs = {(c.author_id, c.role) for c in work.contributors}
+        for author, role in desired:
+            if (author.id, role) not in existing_pairs:
+                work.contributors.append(WorkContributor(author=author, role=role))
 
     # 2.5 Work Styles
     work_style_data = row.get("work_style", {})
