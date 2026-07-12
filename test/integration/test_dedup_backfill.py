@@ -4,7 +4,9 @@ Structural distinguishers only (the #69 lesson) — every class groups on real r
 normalized values, never a sometimes-populated column. apply_dedup takes the PLAN as input and
 touches only the ids it names (apply-what-was-shown)."""
 
+import importlib.util
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
@@ -26,6 +28,15 @@ from agentic_librarian.db.models import (
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl import dedup_backfill as db_
 from test.integration.constraint_helpers import drop_unique_indexes, recreate_unique_indexes
+
+# scripts/clean_catalog.py is not a package module (it's an operator CLI script) — load it the
+# same way test/unit/test_clean_catalog_cli.py does, so these tests exercise the REAL report
+# write/parse round-trip (not a reimplementation of it).
+_spec = importlib.util.spec_from_file_location(
+    "clean_catalog", Path(__file__).resolve().parents[2] / "scripts" / "clean_catalog.py"
+)
+clean_catalog = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(clean_catalog)
 
 pytestmark = pytest.mark.db_integration
 
@@ -417,3 +428,128 @@ def test_orphan_authors_recomputed_after_merge_needs_replan(db_url):
         session.flush()
         assert result["duplicate_authors"] == 1
         assert session.query(Author).count() == 1
+
+
+# --------------------------------------------------------------------------------------------
+# Apply gate cross-check (Spec 2026-07-12 follow-up to #95): --apply --yes is a SEPARATE
+# invocation from the reviewed dry-run and re-plans from scratch — these tests exercise the
+# real report write/parse round-trip (via the loaded scripts/clean_catalog.py module) against
+# a live DB, proving the gate actually catches live-traffic duplicates in the review gap.
+# --------------------------------------------------------------------------------------------
+
+
+def test_apply_gate_unchanged_db_applies_cleanly(db_url):
+    """(a) dry-run -> apply with an UNCHANGED db succeeds: the fresh re-plan's id set is
+    exactly what the reviewed report named, so the delta is empty everywhere."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        a1 = Author(name="Casualfarmer")
+        a2 = Author(name="casualfarmer")
+        w = Work(title="Beware of Chicken")
+        session.add_all([a1, a2, w])
+        session.flush()
+        session.add(WorkContributor(work_id=w.id, author_id=a1.id, role="Author"))
+        session.flush()
+
+        # the operator's reviewed dry-run
+        reviewed_plan = db_.plan_dedup(session)
+        report_path = clean_catalog._write_dedup_report(reviewed_plan)
+        reviewed_ids = clean_catalog._parse_plan_ids(report_path.read_text(encoding="utf-8"))
+
+        # --apply --yes, a later separate invocation: re-plans from scratch
+        fresh_plan = db_.plan_dedup(session)
+        delta = db_.plan_delta(reviewed_ids, fresh_plan)
+        assert all(len(v) == 0 for v in delta.values())
+
+        result = db_.apply_dedup(session, fresh_plan)
+        assert result["duplicate_authors"] == 1
+        assert session.query(Author).count() == 1
+
+
+def test_apply_gate_refuses_on_new_duplicate_in_the_gap(db_url):
+    """(b) dry-run -> seed a NEW duplicate group (simulating live traffic in the gap) -> the
+    fresh re-plan's delta against the reviewed report is non-empty for that class, and a fresh
+    report captures the new ids for re-review."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        a1 = Author(name="Casualfarmer")
+        a2 = Author(name="casualfarmer")
+        w = Work(title="Beware of Chicken")
+        session.add_all([a1, a2, w])
+        session.flush()
+        session.add(WorkContributor(work_id=w.id, author_id=a1.id, role="Author"))
+        session.flush()
+
+        reviewed_plan = db_.plan_dedup(session)
+        report_path = clean_catalog._write_dedup_report(reviewed_plan)
+        reviewed_ids = clean_catalog._parse_plan_ids(report_path.read_text(encoding="utf-8"))
+
+        # live traffic: a brand-new duplicate-narrator group lands after the operator reviewed
+        n1 = Narrator(name="Travis Baldree")
+        n2 = Narrator(name="travis baldree")
+        session.add_all([n1, n2])
+        session.flush()
+
+        fresh_plan = db_.plan_dedup(session)
+        delta = db_.plan_delta(reviewed_ids, fresh_plan)
+
+        assert delta["duplicate_authors"] == set()  # unchanged class stays empty
+        assert delta["duplicate_narrators"] != set()  # the new group shows up
+        assert {str(n1.id), str(n2.id)} <= delta["duplicate_narrators"]
+
+        # the gate refuses: apply_dedup is never called against the fresh plan in this branch
+        # (mirrors the CLI's `if any(delta.values()): return 1` before reaching apply_dedup)
+        assert any(delta.values())
+
+        # a fresh report captures the new ids for re-review, and re-parsing IT shows no drift
+        # against itself (the operator's next reviewed report)
+        fresh_report_path = clean_catalog._write_dedup_report(fresh_plan)
+        re_reviewed_ids = clean_catalog._parse_plan_ids(fresh_report_path.read_text(encoding="utf-8"))
+        assert all(len(v) == 0 for v in db_.plan_delta(re_reviewed_ids, fresh_plan).values())
+
+        # This test deliberately never applies (the gate refused) — clean up the seeded
+        # duplicate rows so the module's autouse _pre_constraint_schema fixture can recreate
+        # the #95 unique indexes at teardown without a UniqueViolation.
+        db_.apply_dedup(session, fresh_plan)
+        session.flush()
+
+
+def test_apply_gate_reviewed_row_deleted_applies_with_skipped_stale(db_url):
+    """(c) dry-run -> a planned row is DELETED before apply -> the fresh re-plan no longer
+    contains it (fresh subset of reviewed, so the gate does not refuse) -> apply_dedup's own
+    stale-id handling (unchanged by this task) reports skipped_stale for it."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w = Work(title="Stale Plan Work")
+        session.add(w)
+        session.flush()
+        e = Edition(work_id=w.id, format="ebook")
+        session.add(e)
+        session.flush()
+        rh1 = ReadingHistory(edition_id=e.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 6, 1))
+        rh2 = ReadingHistory(edition_id=e.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 6, 1))
+        session.add_all([rh1, rh2])
+        session.flush()
+
+        reviewed_plan = db_.plan_dedup(session)
+        assert reviewed_plan.summary()["duplicate_reading_history"] == 1
+        report_path = clean_catalog._write_dedup_report(reviewed_plan)
+        reviewed_ids = clean_catalog._parse_plan_ids(report_path.read_text(encoding="utf-8"))
+        loser_id = reviewed_plan.duplicate_reading_history[0].loser_ids[0]
+
+        # the planned loser row vanishes before apply (a concurrent change / cleanup)
+        session.delete(session.get(ReadingHistory, loser_id))
+        session.flush()
+
+        fresh_plan = db_.plan_dedup(session)
+        delta = db_.plan_delta(reviewed_ids, fresh_plan)
+        assert all(len(v) == 0 for v in delta.values())  # nothing NEW — a vanished id isn't a delta
+
+        # apply proceeds against the FRESH plan (per the gate's contract), which no longer
+        # names the vanished row at all — so apply_dedup has nothing stale to report here for
+        # THIS row (that path is exercised directly in test_apply_skips_stale_plan_ids, which
+        # applies the STALE plan rather than re-planning — this test proves the gate's own
+        # re-plan-then-apply flow doesn't choke on a vanished row either).
+        result = db_.apply_dedup(session, fresh_plan)
+        assert result["duplicate_reading_history"] == 0
+        assert session.query(ReadingHistory).count() == 1

@@ -9,8 +9,11 @@
   python scripts/clean_catalog.py --requeue-unenriched --apply --yes
   python scripts/clean_catalog.py --dedup-for-constraints --dry-run
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes
+  python scripts/clean_catalog.py --dedup-for-constraints --apply --yes --report data/reports/dedup-<ts>.txt
 
-Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost."""
+Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
+--dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
+the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted."""
 
 from __future__ import annotations
 
@@ -27,10 +30,17 @@ from agentic_librarian.etl.tag_backfill import is_prod_url
 
 def _write_dedup_report(plan) -> Path:
     """Every id in the plan, always written (dry-run AND apply) — this file is what the
-    operator reviews before approving --apply (THE USER GATE, Spec 2026-07-12)."""
+    operator reviews before approving --apply (THE USER GATE, Spec 2026-07-12).
+
+    Filename includes microseconds: a scripted dry-run -> apply sequence (or a test) can
+    complete both invocations within the same second, and the apply gate's cross-check
+    (Spec 2026-07-12 follow-up to #95) depends on the dry-run's report file NOT being
+    overwritten by apply's own fresh-plan write before it's read back — a second-resolution
+    timestamp would silently make that overwrite happen and the cross-check trivially pass."""
     reports_dir = Path("data/reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    now = datetime.now(UTC)
+    ts = now.strftime("%Y%m%dT%H%M%S") + f"{now.microsecond:06d}Z"
     path = reports_dir / f"dedup-{ts}.txt"
 
     lines: list[str] = [f"Dedup plan report — {ts}", "=" * 60, ""]
@@ -77,8 +87,57 @@ def _write_dedup_report(plan) -> Path:
         lines.append(f"  key={w.norm_key!r}  work_ids={w.work_ids}  titles={w.titles}")
     lines.append("")
 
+    # Machine-readable section (Spec 2026-07-12 follow-up to #95): the exact per-class id set
+    # this plan is "about", one id per line, sorted for a stable diff-friendly file. --apply
+    # parses this back into a dict[str, set[str]] (see _parse_plan_ids) and cross-checks a
+    # FRESH re-plan against it via dedup_backfill.plan_delta — refusing if anything new shows
+    # up. Keep this block below the human-readable summary above, not instead of it.
+    lines.append("== PLAN IDS ==")
+    id_set = dedup_backfill.plan_id_set(plan)
+    for class_name in dedup_backfill.PLAN_ID_SET_CLASSES:
+        ids = sorted(id_set.get(class_name, set()))
+        lines.append(f"[{class_name}] {len(ids)}")
+        lines.extend(ids)
+    lines.append("== END PLAN IDS ==")
+    lines.append("")
+
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
+
+
+def _parse_plan_ids(report_text: str) -> dict[str, set[str]]:
+    """Parse the '== PLAN IDS ==' block written by _write_dedup_report back into the same
+    per-class id-set shape dedup_backfill.plan_id_set produces, so a fresh plan can be
+    cross-checked against what the operator actually reviewed. Raises ValueError if the block
+    is missing (an old-format report, or the wrong file) — --apply should refuse loudly rather
+    than silently treat a missing section as an empty (i.e. maximally strict) reviewed set."""
+    lines = report_text.splitlines()
+    try:
+        start = lines.index("== PLAN IDS ==")
+    except ValueError as exc:
+        raise ValueError("report has no '== PLAN IDS ==' section — not a dedup report, or an old-format one") from exc
+
+    out: dict[str, set[str]] = {name: set() for name in dedup_backfill.PLAN_ID_SET_CLASSES}
+    current: str | None = None
+    for line in lines[start + 1 :]:
+        if line == "== END PLAN IDS ==":
+            break
+        if line.startswith("[") and "]" in line:
+            current = line[1 : line.index("]")]
+            if current not in out:
+                out[current] = set()
+            continue
+        if current is not None and line:
+            out[current].add(line)
+    return out
+
+
+def _newest_dedup_report() -> Path | None:
+    reports_dir = Path("data/reports")
+    if not reports_dir.is_dir():
+        return None
+    candidates = sorted(reports_dir.glob("dedup-*.txt"))
+    return candidates[-1] if candidates else None
 
 
 def _refuse(args, url, safe) -> int | None:
@@ -124,12 +183,29 @@ def main(argv: list[str] | None = None) -> int:
             "and approves -> --apply --yes -> operator runs `alembic upgrade head` (lands the #95 "
             "unique constraints, now safe) -> merge PR-D -> deploy. Every id in the plan is always "
             "written to data/reports/dedup-<UTC timestamp>.txt for review, on both dry-run and "
-            "apply. See docs/runbooks/phase6-3-schema-rollout.md."
+            "apply. See docs/runbooks/phase6-3-schema-rollout.md. IMPORTANT: --apply --yes is a "
+            "SEPARATE invocation that RE-PLANS from scratch — it does not reuse the dry-run's "
+            "in-memory plan. To keep the review meaningful, --apply cross-checks the fresh plan's "
+            "id set against the reviewed report (--report) and REFUSES (exit 1) if the fresh plan "
+            "contains any id the operator never reviewed (e.g. a new duplicate from live traffic "
+            "in the gap between dry-run and apply) — it prints the delta and writes a fresh report "
+            "for re-review instead of applying. A plan that lost ids (rows deleted/changed since "
+            "review) is fine and applies normally (ordinary skipped_stale)."
         ),
     )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
+    ap.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help=(
+            "--dedup-for-constraints --apply only: path to the reviewed dry-run report to "
+            "cross-check the fresh plan against (THE USER GATE). Defaults to the newest "
+            "data/reports/dedup-*.txt — the tool prints which one it used."
+        ),
+    )
     args = ap.parse_args(argv)
 
     url = resolve_database_url()
@@ -213,6 +289,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.dedup_for_constraints:
+            # Capture the reviewed report BEFORE this run writes its own — the default
+            # --report resolution must point at the operator's PRIOR reviewed dry-run, never
+            # at the report this same invocation is about to write from the fresh plan below
+            # (which would make the cross-check trivially always pass against itself).
+            existing_report = args.report or _newest_dedup_report()
+
             plan = dedup_backfill.plan_dedup(session)
             summary = plan.summary()
             print("\n=== dedup-for-constraints plan (THE USER GATE) ===")
@@ -247,6 +329,36 @@ def main(argv: list[str] | None = None) -> int:
             early = _refuse(args, url, safe)
             if early is not None:
                 return early
+
+            # THE USER GATE, cross-check half (Spec 2026-07-12 follow-up to #95): --apply is a
+            # separate invocation and just computed a FRESH plan above (`plan`) — re-planned from
+            # scratch against current DB state, not reused from the operator's reviewed dry-run.
+            # Cross-check the fresh plan's id set against the reviewed report's id set; refuse on
+            # any addition rather than silently applying duplicates the operator never saw.
+            report_arg = existing_report
+            if report_arg is None:
+                print("\nREFUSING --apply: no dedup report found (data/reports/dedup-*.txt) — run --dry-run first.")
+                return 1
+            print(f"\ncross-checking fresh plan against reviewed report: {report_arg}")
+            try:
+                reviewed_ids = _parse_plan_ids(report_arg.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                print(f"\nREFUSING --apply: could not read/parse --report {report_arg}: {exc}")
+                return 1
+
+            delta = dedup_backfill.plan_delta(reviewed_ids, plan)
+            if any(delta.values()):
+                print("\nREFUSING --apply: plan changed since review — re-review the new report.")
+                print("New ids present in the fresh plan but NOT in the reviewed report:")
+                for class_name in dedup_backfill.PLAN_ID_SET_CLASSES:
+                    new_ids = sorted(delta.get(class_name, set()))
+                    if new_ids:
+                        print(f"  [{class_name}] +{len(new_ids)}: {new_ids}")
+                # report_path (written unconditionally above, from this SAME fresh plan) already
+                # IS the fresh report the operator needs to re-review — no need to write another.
+                print(f"\nre-review {report_path}, then re-run --apply --yes --report {report_path}")
+                return 1
+
             applied = dedup_backfill.apply_dedup(session, plan)
             print("\napplied:")
             for key, count in applied.items():

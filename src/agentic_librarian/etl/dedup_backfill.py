@@ -12,6 +12,13 @@ plan_dedup is read-only. apply_dedup takes the PLAN — not the session's curren
 touches only the exact ids the plan named ("apply what was shown"). If a planned row vanished
 between plan and apply (e.g. a concurrent write), it is skipped and counted under
 "skipped_stale", never re-derived.
+
+plan_id_set / plan_delta (Spec 2026-07-12 follow-up to #95): --apply is a SEPARATE invocation
+from the reviewed dry-run and re-plans from scratch — new duplicates from live traffic in the
+gap would otherwise be applied without operator review, defeating the gate. plan_id_set turns a
+plan into a per-class id set; plan_delta cross-checks a fresh plan's id set against the ids the
+operator actually reviewed (parsed back from the dry-run report) and returns what's new. See
+scripts/clean_catalog.py's --apply flow for how a non-empty delta refuses.
 """
 
 from __future__ import annotations
@@ -643,3 +650,93 @@ def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
     result["skipped_stale"] += orphan_stats["skipped_stale"]
 
     return result
+
+
+# --------------------------------------------------------------------------------------------
+# Apply-gate cross-check (#95 follow-up, Spec 2026-07-12): --apply must re-plan from scratch
+# (live traffic may have created new duplicates since the operator's reviewed dry-run report),
+# so apply cross-checks the FRESH plan's id set against the REVIEWED report's id set and
+# refuses on any addition. plan_id_set/plan_delta are the pure (DB-free) half of that gate;
+# scripts/clean_catalog.py owns parsing the report file and the refuse/re-report flow.
+# --------------------------------------------------------------------------------------------
+
+# The per-class keys used by both plan_id_set and the report's "== PLAN IDS ==" section — one
+# source of truth so the report format and the gate's classes never drift apart.
+PLAN_ID_SET_CLASSES = (
+    "duplicate_authors",
+    "duplicate_narrators",
+    "duplicate_editions",
+    "duplicate_reading_history",
+    "duplicate_suggestions",
+    "orphan_authors",
+    "duplicate_works_report_only",
+)
+
+
+def plan_id_set(plan: DedupPlan) -> dict[str, set[str]]:
+    """Every id the plan is 'about', per class, stringified — survivor ids included as part of
+    group identity (a group whose survivor changed IS a different plan, even if the loser set
+    is a subset of before), plus every loser/deleted-row/repointed-link identifier. Composite
+    identifiers (e.g. a repoint's (loser_id, pk) pair) are stringified as a single tuple-repr
+    token rather than decomposed, so a link moving between two otherwise-unchanged ids still
+    shows up as a new id in the delta. duplicate_works_report_only is included for a complete,
+    honest diff even though apply_dedup never touches it.
+
+    This is the DB-free half of the apply gate (Spec 2026-07-12 follow-up to #95): the CLI
+    parses this same shape back out of a previously-written report and calls plan_delta to
+    cross-check a fresh re-plan against what the operator actually reviewed."""
+    out: dict[str, set[str]] = {name: set() for name in PLAN_ID_SET_CLASSES}
+
+    for g in plan.duplicate_authors:
+        s = out["duplicate_authors"]
+        s.add(str(g.survivor_id))
+        s.update(str(lid) for lid in g.loser_ids)
+        s.update(str(item) for item in g.repoint_links)
+        s.update(str(item) for item in g.delete_links)
+        s.update(str(item) for item in g.repoint_styles)
+        s.update(str(item) for item in g.delete_styles)
+
+    for g in plan.duplicate_narrators:
+        s = out["duplicate_narrators"]
+        s.add(str(g.survivor_id))
+        s.update(str(lid) for lid in g.loser_ids)
+        s.update(str(item) for item in g.repoint_links)
+        s.update(str(item) for item in g.delete_links)
+        s.update(str(item) for item in g.repoint_styles)
+        s.update(str(item) for item in g.delete_styles)
+
+    for g in plan.duplicate_editions:
+        s = out["duplicate_editions"]
+        s.add(str(g.survivor_id))
+        s.update(str(lid) for lid in g.loser_ids)
+        s.update(str(rh_id) for rh_id in g.repoint_reading_history)
+        s.update(str(rh_id) for rh_id in g.delete_reading_history)
+        s.update(str(item) for item in g.repoint_narrators)
+        s.update(str(item) for item in g.delete_narrators)
+
+    for g in plan.duplicate_reading_history:
+        s = out["duplicate_reading_history"]
+        s.add(str(g.survivor_id))
+        s.update(str(lid) for lid in g.loser_ids)
+
+    for g in plan.duplicate_suggestions:
+        s = out["duplicate_suggestions"]
+        s.add(str(g.survivor_id))
+        s.update(str(lid) for lid in g.loser_ids)
+
+    out["orphan_authors"].update(str(aid) for aid in plan.orphan_authors)
+
+    for w in plan.duplicate_works_report_only:
+        out["duplicate_works_report_only"].update(str(wid) for wid in w.work_ids)
+
+    return out
+
+
+def plan_delta(reviewed: dict[str, set[str]], fresh: DedupPlan) -> dict[str, set[str]]:
+    """Per-class ids present in the FRESH plan but NOT in the REVIEWED id set (from the
+    operator's approved report). Empty everywhere means fresh's id set is a subset of
+    reviewed's — i.e. nothing new appeared since the operator looked at the report, and it is
+    safe to apply the fresh plan (stale reviewed ids that vanished from fresh are fine; that's
+    ordinary `skipped_stale` territory at apply time, not a plan drift)."""
+    fresh_ids = plan_id_set(fresh)
+    return {name: fresh_ids.get(name, set()) - reviewed.get(name, set()) for name in PLAN_ID_SET_CLASSES}
