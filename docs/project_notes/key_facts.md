@@ -99,13 +99,14 @@ This file tracks important project configuration, constants, and environment det
 - This token layer is the **foundation for "Visual Identity v2"** (the planned redesign extends it with
   a real palette + type/spacing scales + component restyle).
 
-## CI/CD note (deploy anomaly, 2026-06-17, OPEN)
-- `Deploy to Cloud Run` (deploy.yml) is **active** with `push: main` (paths src/frontend/pyproject/
-  Dockerfile.api/deploy.yml/.dockerignore) **and** `workflow_dispatch`. It auto-deployed through #49
-  (`3e47830`, 2026-06-15) but then **stopped firing on main pushes** for #50–#54 (no push-triggered runs
-  at all; PR `pull_request` CI unaffected; nothing in those commits touches deploy.yml). Worked around by
-  **manual `workflow_dispatch`** (run 27723605516 deployed `3d2dafe`). Root cause TBD — check the Actions
-  web UI (usage/spending cap? Actions permission change?) so merges auto-deploy again.
+## CI/CD note (deploy anomaly, 2026-06-17, RESOLVED 2026-06-22)
+- The 2026-06-17 "push-to-main stopped auto-deploying" anomaly was root-caused 2026-06-22: `[skip ci]`
+  on spec/plan branch commits leaked into the **squash-merge commit bodies** of #50–#54 (GitHub honors a
+  skip directive anywhere in the HEAD commit message → ALL push workflows skipped). Full write-up in
+  bugs.md (2026-06-17 entry). Current prevention is manual (delete the `[skip ci]` bullets in the merge
+  dialog); the durable fix — repo setting: default squash message = "Pull request title" — is GH #90.
+- ⚠️ Related config drift: deploy.yml still pins `--memory=512Mi`, reverting the 2Gi OOM fix on every
+  deploy — GH #89 (see bugs.md 2026-07-02).
 
 ## Security Guidelines
 - **DO NOT** store real passwords or secrets here.

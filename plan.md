@@ -42,7 +42,7 @@
     -   Build prompt templates that anchor final recommendations in retrieved trope **names and descriptions** for evidence-based grounding.
 
 ## Phase 4: Web Interface & Analysis
-**Goal**: Visualize the reading history and interact with the Librarian.
+**Goal**: Visualize the reading history and interact with the Librarian. [COMPLETED — GH #13 closed 2026-07-12: SPA + chat (#43/#44), Analysis dashboard (#74, #86), VI v2 (#59)]
 *   **Order of Work**:
     1.  Initialize Vite/React frontend.
     2.  Build "Trope Cloud" and "Author Style" radar charts using Recharts.
@@ -56,3 +56,45 @@
     2.  Implement a drift detection script for the `Tropes` table to monitor semantic consistency.
     3.  **E2E Testing**: Initialize `test/e2e/` with Playwright to verify full system flows (e.g., UC3.1, UC6.1).
     4.  Final System E2E test: From raw CSV update to verified recommendation.
+
+## Phase 6: Scaling Hardening (beta → dozens of users)
+**Goal**: Close the reliability, cost, and data-integrity gaps found by the 2026-07-02 full-codebase
+review before growing past friends-and-family. All items are GitHub issues filed 2026-07-02
+(work-log entry in `docs/project_notes/issues.md`; fits between ADR-046's beta and Lift 3 productization).
+
+**Status (2026-07-12)**: not started — all 27 issues (#89–#115) remain open; #89 (deploy.yml still
+pins 512Mi) and #91 (no Cloud SQL backups) are still the act-first prod risks. The intervening work
+was the Shelfwright launch (canonical domain + rebrand, GH #79 → PRs #117/#118, ADR-057), which
+closed the redirect_uri_mismatch bug class but is orthogonal to this phase.
+
+### 6.1 Prod-risk hotfixes (do immediately, tiny diffs)
+1.  **#89** deploy.yml pins `--memory=512Mi` — codify the 2Gi OOM fix + enrich-queue rates in infra/08; verify live memory.
+2.  **#90** Durable `[skip ci]` squash fix: repo setting → squash message = "PR title" (CD anomaly was diagnosed 2026-06-22; discipline-only today).
+3.  **#91** Enable Cloud SQL automated backups (one `gcloud sql instances patch`).
+4.  **#99** Import rows stranded `pending` after failed enqueue (one-line retry-filter fix).
+
+### 6.2 Concurrency & capacity (the "can one instance serve dozens" cluster)
+5.  **#93** Stop blocking the event loop: async-wrap sync MCP tools (`asyncio.to_thread`), auth dependency, import enqueue loop.
+6.  **#94** Don't hold DB sessions across scout/LLM/Thunder calls (fast/deep enrich, chat enrich tool, availability).
+7.  **#102** Pool hygiene: `pool_pre_ping`/`pool_recycle`, deliberate sizing vs db-f1-micro (~25 conns), consolidate the ~6 per-module engines.
+8.  **#101** Fix the defeated embedding LRU cache (cheapest chat-latency + quota win).
+9.  **#103** Outbound timeouts: Gemini `HttpOptions`, Audible fetch.
+
+### 6.3 Data integrity under concurrent users
+10. **#95** Unique constraints + advisory lock behind every get-or-create (works/authors/editions/history/suggestions; feeds #88).
+11. **#96** Contributor-drop on existing works (verified bug).
+12. **#98** Garbage/hallucinated titles must not enter the communal catalog (dead 404 path; trope-scout unknown-book escape).
+13. **#97** Deep-enrichment failure visibility: retryable 5xx on empty yield, status column, reconciliation sweep (extends DEBT-035).
+14. **#108** timestamptz migration · **#109** FK indexes · **#110** availability_cache upsert+eviction · **#111** shared real-vs-fallback trope predicate · **#112** `update_reading_status` date/dedup/normalization.
+
+### 6.4 Cost & abuse guards (prerequisite for onboarding dozens)
+15. **#100** Meter enrichment LLM calls; per-user chat/import budgets + message length cap; paid-tier decision; deep-queue fairness (bulk vs interactive).
+16. **#113** Cap chat history reseeded per turn.
+
+### 6.5 Frontend resilience (cold-start-proofing the UX)
+17. **#104** Shared load/error/retry hook; auth-gate retry; Settings save-gating (data loss).
+18. **#105** Chat + library-search races · **#106** import-view resume/poll-cap/file-input · **#107** history search.
+
+### 6.6 Ops maturity
+19. **#114** Uptime check + 5xx/memory/queue-depth alerts; rollback runbook; min-instances decision.
+20. **#115** Low-severity sweep checklist (batch opportunistically).

@@ -12,6 +12,50 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-07-12 - LAUNCH: Shelfwright rebrand + canonical domain (GH #79) — SHIPPED; issue scrub
+- **Status**: Completed — live and verified.
+- **Description**: Product renamed **Shelfwright**; https://shelfwright.app is the canonical host
+  (Cloud Run apex domain mapping, ADR-057; `www` 301s to apex at Cloudflare). Repo renamed to
+  `jaydee829/shelfwright` (WIF provider condition + deployer-SA binding updated — GitHub's rename
+  redirect does NOT cover OIDC claims; post-rename deploy verified green). PyPI name claimed
+  (`shelfwright` 0.0.1 stub from `packaging/pypi-stub/`). UI branding = Shelfwright; "the Librarian"
+  stays as the chat persona. Fresh-user sign-in verified on the new domain — a single canonical host
+  permanently closes the #116 redirect_uri_mismatch bug class.
+- **URL**: PRs #117 (launch) + #118 (rename follow-ups); operator runbook `docs/runbooks/shelfwright-launch.md`
+- **Notes**: Issue scrub done the same day: closed #79 (this launch), #13 (Phase 4 web/analysis —
+  shipped via #43/#44/#74/#86/#59), #8 (Phase 1 infra, long complete). Verified still open before
+  keeping: #89 (deploy.yml still pins 512Mi) and #90 (squash-merge setting still `COMMIT_MESSAGES`).
+  All 27 scaling-review issues (#89–#115) remain open — Phase 6 not started.
+
+### 2026-07-02 - REVIEW: full-codebase scaling review (beta → dozens of users) — 27 issues filed (#89–#115)
+- **Status**: Review completed; all findings filed as GitHub issues; fixes not yet started.
+- **Description**: Five-track review (backend API, DB/core, enrichment pipeline, frontend, infra/CI) of
+  `origin/main` (`96d1000`) focused on bugs, architecture, and handful→dozens scaling. 27 issues filed
+  (#89–#115) + a root-cause comment on #88 (duplicate Picks = `log_suggestion` never dedups). Roadmap:
+  new "Phase 6 — Scaling Hardening" section in `plan.md` prioritizes them.
+- **URL**: https://github.com/jaydee829/shelfwright/issues (filter `created:2026-07-02`)
+- **Notes**:
+  - **Act first (prod risk)**: #89 deploy.yml still pins 512Mi — every deploy reverts the OOM fix (verify
+    live memory NOW); #91 no Cloud SQL automated backups; #90 durable `[skip ci]` squash fix (repo setting).
+  - **Scaling blockers**: #93 event-loop blocking (sync MCP tools inline in chat — one enrichment freezes
+    the instance for all users); #94 sessions held across LLM calls; #95 no unique constraints behind
+    get-or-create (dup works/authors under concurrent import); #102 pool config vs db-f1-micro (~25 conns).
+  - **Verified bugs**: #96 contributor-drop on existing works (SAWarning repro); #98 ScoutManager never
+    returns falsy → garbage titles become communal Works (the 404 path is dead code); #99 import rows
+    stranded `pending` after failed enqueue; #97 deep pass returns success on total failure (extends DEBT-035).
+  - **Cost/quota**: #100 enrichment is unmetered on the shared Gemini key, no per-user caps; deep-queue
+    drain math ≈ 3-5 works/min → 3000-task backlog ≈ 10-17 h; paid tier is a prerequisite for dozens of users.
+  - **Frontend**: #104 systemic missing error/retry (eternal "Loading…" on cold start; Settings can wipe
+    saved libraries); #105 races; #106 import-view resilience; #107 history search.
+  - **DB hygiene**: #108 tz-naive datetimes, #109 FK indexes, #110 availability_cache race/eviction,
+    #111 `has_real_trope` reuses the unsafe `justification` distinguisher #69 corrected, #112/#113 MCP-tool
+    data-quality fixes; #114 monitoring/alerts/rollback; #115 low-severity checklist.
+  - Reviewer calibration: multi-tenancy discipline, `/internal` OIDC gate, SSE lifecycle, import state
+    machine, and WIF/deploy gating were all verified **solid** — the gaps are concentrated in blocking-I/O
+    architecture, config drift, and missing enforcement (constraints/quotas/alerts), not in auth or tenancy.
+  - Note: the CD anomaly root cause (#90) was independently re-derived by the review; bugs.md had already
+    diagnosed it 2026-06-22 — key_facts.md's stale OPEN note (fixed in this PR) caused the false "unsolved" state.
+
 ### 2026-06-26 - Safari-mobile sign-in fix: same-origin Firebase auth helper (#78) — SHIPPED + DEPLOYED
 - **Status**: Completed — merged + deployed; prod proxy verified live. (Remaining: a human Safari-device sign-in test.)
 - **Description**: Safari-mobile users couldn't load the app (Firebase Auth "missing initial state" — storage partitioning, because `authDomain` `firebaseapp.com` ≠ the same-origin Cloud Run app host). Fix = reverse-proxy Firebase's `/__/auth/*` helper through FastAPI + runtime `authDomain = window.location.host`, so the helper is first-party. Option A of the brainstorm. Implemented via subagent-driven execution (backend + frontend each spec+quality reviewed + final whole-branch review).
