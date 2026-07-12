@@ -495,7 +495,8 @@ def test_apply_gate_refuses_on_new_duplicate_in_the_gap(db_url):
 
         assert delta["duplicate_authors"] == set()  # unchanged class stays empty
         assert delta["duplicate_narrators"] != set()  # the new group shows up
-        assert {str(n1.id), str(n2.id)} <= delta["duplicate_narrators"]
+        # tokens are tagged with their operation (`merge:` for survivor+loser group identity)
+        assert {f"merge:{n1.id}", f"merge:{n2.id}"} <= delta["duplicate_narrators"]
 
         # the gate refuses: apply_dedup is never called against the fresh plan in this branch
         # (mirrors the CLI's `if any(delta.values()): return 1` before reaching apply_dedup)

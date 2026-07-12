@@ -33,10 +33,17 @@ def _write_dedup_report(plan) -> Path:
     operator reviews before approving --apply (THE USER GATE, Spec 2026-07-12).
 
     Filename includes microseconds: a scripted dry-run -> apply sequence (or a test) can
-    complete both invocations within the same second, and the apply gate's cross-check
-    (Spec 2026-07-12 follow-up to #95) depends on the dry-run's report file NOT being
-    overwritten by apply's own fresh-plan write before it's read back — a second-resolution
-    timestamp would silently make that overwrite happen and the cross-check trivially pass."""
+    complete both invocations within the same second. With a second-resolution timestamp, both
+    writes would resolve to the IDENTICAL path, so apply's fresh-plan write would overwrite the
+    dry-run's report file on disk before it's ever read back — the second write clobbers the
+    first file, full stop, not a "which one is newest" lookup ambiguity: the path to read back
+    is captured (`existing_report = args.report or _newest_dedup_report()`, in main() below) up
+    front, BEFORE this same invocation's fresh write happens, so at read-back time there is only
+    ever one candidate path in play. Microsecond resolution avoids the collision at its root by
+    keeping the two filenames from ever being identical in the first place, making the
+    apply gate's cross-check (Spec 2026-07-12 follow-up to #95) compare the dry-run's real
+    reviewed content against the fresh plan instead of trivially comparing the fresh plan
+    against itself."""
     reports_dir = Path("data/reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
@@ -108,21 +115,33 @@ def _write_dedup_report(plan) -> Path:
 def _parse_plan_ids(report_text: str) -> dict[str, set[str]]:
     """Parse the '== PLAN IDS ==' block written by _write_dedup_report back into the same
     per-class id-set shape dedup_backfill.plan_id_set produces, so a fresh plan can be
-    cross-checked against what the operator actually reviewed. Raises ValueError if the block
-    is missing (an old-format report, or the wrong file) — --apply should refuse loudly rather
-    than silently treat a missing section as an empty (i.e. maximally strict) reviewed set."""
+    cross-checked against what the operator actually reviewed.
+
+    Fail-closed is an explicit, tested contract here, not an accident of subtraction semantics
+    (an empty/partial reviewed set would otherwise make plan_delta look "safe" just because
+    there's nothing to diff against): raises ValueError if the '== PLAN IDS ==' start marker is
+    missing (an old-format report, or the wrong file); if the '== END PLAN IDS ==' terminator is
+    missing (a truncated report — e.g. a write that got cut off mid-file); or if a line that
+    looks like a class header (starts with '[') doesn't actually parse as one (a malformed
+    header must not be silently absorbed as a plain id token). --apply catches this ValueError
+    and refuses rather than proceeding against a corrupt or incomplete reviewed set."""
     lines = report_text.splitlines()
     try:
         start = lines.index("== PLAN IDS ==")
     except ValueError as exc:
         raise ValueError("report has no '== PLAN IDS ==' section — not a dedup report, or an old-format one") from exc
 
+    try:
+        end = lines.index("== END PLAN IDS ==", start + 1)
+    except ValueError as exc:
+        raise ValueError("report has no '== END PLAN IDS ==' terminator — truncated or corrupt report") from exc
+
     out: dict[str, set[str]] = {name: set() for name in dedup_backfill.PLAN_ID_SET_CLASSES}
     current: str | None = None
-    for line in lines[start + 1 :]:
-        if line == "== END PLAN IDS ==":
-            break
-        if line.startswith("[") and "]" in line:
+    for line in lines[start + 1 : end]:
+        if line.startswith("["):
+            if "]" not in line:
+                raise ValueError(f"malformed class-header line in PLAN IDS block: {line!r}")
             current = line[1 : line.index("]")]
             if current not in out:
                 out[current] = set()

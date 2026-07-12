@@ -19,6 +19,11 @@ gap would otherwise be applied without operator review, defeating the gate. plan
 plan into a per-class id set; plan_delta cross-checks a fresh plan's id set against the ids the
 operator actually reviewed (parsed back from the dry-run report) and returns what's new. See
 scripts/clean_catalog.py's --apply flow for how a non-empty delta refuses.
+
+Every token in that id set is TAGGED with its operation (`merge:` / `repoint:` / `delete:` /
+`report:`, see plan_id_set's docstring) so an operation FLIP on the same underlying id between
+the reviewed dry-run and the fresh apply-time plan (e.g. a concurrent write turns a reviewed
+repoint into a delete) is visible as a new token, not hidden behind an unchanged bare id.
 """
 
 from __future__ import annotations
@@ -674,60 +679,71 @@ PLAN_ID_SET_CLASSES = (
 
 
 def plan_id_set(plan: DedupPlan) -> dict[str, set[str]]:
-    """Every id the plan is 'about', per class, stringified — survivor ids included as part of
-    group identity (a group whose survivor changed IS a different plan, even if the loser set
-    is a subset of before), plus every loser/deleted-row/repointed-link identifier. Composite
-    identifiers (e.g. a repoint's (loser_id, pk) pair) are stringified as a single tuple-repr
-    token rather than decomposed, so a link moving between two otherwise-unchanged ids still
-    shows up as a new id in the delta. duplicate_works_report_only is included for a complete,
-    honest diff even though apply_dedup never touches it.
+    """Every id the plan is 'about', per class, stringified AND TAGGED with the operation it
+    belongs to — `merge:` for survivor+losers group identity, `repoint:` for a link/row being
+    re-pointed onto a survivor, `delete:` for a link/row/id being deleted outright, `report:`
+    for the never-applied duplicate_works_report_only class. The prefix is load-bearing, not
+    cosmetic: without it, the SAME id appearing under a different operation (e.g. a row X that
+    was `repoint:X` in the reviewed plan comes back as `delete:X` in the fresh plan — a
+    concurrent write flipped which case applied) would diff as "unchanged" under a bare id
+    comparison, because set-difference only sees the id, not what's about to happen to it. With
+    the tag riding along as part of the token, a flip removes the old tagged token and adds a
+    new one, so it surfaces as an addition in plan_delta and the existing refuse-on-addition
+    policy catches it.
+
+    Composite identifiers (e.g. a repoint's (loser_id, pk) pair) are stringified as
+    `<op>:<tuple-repr>` rather than decomposed, so a link moving between two otherwise-unchanged
+    ids still shows up as a new token in the delta. duplicate_works_report_only is included for
+    a complete, honest diff even though apply_dedup never touches it.
 
     This is the DB-free half of the apply gate (Spec 2026-07-12 follow-up to #95): the CLI
     parses this same shape back out of a previously-written report and calls plan_delta to
-    cross-check a fresh re-plan against what the operator actually reviewed."""
+    cross-check a fresh re-plan against what the operator actually reviewed. Tokens are opaque
+    strings on both the write and read side — the report writer/parser never interprets the
+    prefix, only carries it through unchanged."""
     out: dict[str, set[str]] = {name: set() for name in PLAN_ID_SET_CLASSES}
 
     for g in plan.duplicate_authors:
         s = out["duplicate_authors"]
-        s.add(str(g.survivor_id))
-        s.update(str(lid) for lid in g.loser_ids)
-        s.update(str(item) for item in g.repoint_links)
-        s.update(str(item) for item in g.delete_links)
-        s.update(str(item) for item in g.repoint_styles)
-        s.update(str(item) for item in g.delete_styles)
+        s.add(f"merge:{g.survivor_id}")
+        s.update(f"merge:{lid}" for lid in g.loser_ids)
+        s.update(f"repoint:{item}" for item in g.repoint_links)
+        s.update(f"delete:{item}" for item in g.delete_links)
+        s.update(f"repoint:{item}" for item in g.repoint_styles)
+        s.update(f"delete:{item}" for item in g.delete_styles)
 
     for g in plan.duplicate_narrators:
         s = out["duplicate_narrators"]
-        s.add(str(g.survivor_id))
-        s.update(str(lid) for lid in g.loser_ids)
-        s.update(str(item) for item in g.repoint_links)
-        s.update(str(item) for item in g.delete_links)
-        s.update(str(item) for item in g.repoint_styles)
-        s.update(str(item) for item in g.delete_styles)
+        s.add(f"merge:{g.survivor_id}")
+        s.update(f"merge:{lid}" for lid in g.loser_ids)
+        s.update(f"repoint:{item}" for item in g.repoint_links)
+        s.update(f"delete:{item}" for item in g.delete_links)
+        s.update(f"repoint:{item}" for item in g.repoint_styles)
+        s.update(f"delete:{item}" for item in g.delete_styles)
 
     for g in plan.duplicate_editions:
         s = out["duplicate_editions"]
-        s.add(str(g.survivor_id))
-        s.update(str(lid) for lid in g.loser_ids)
-        s.update(str(rh_id) for rh_id in g.repoint_reading_history)
-        s.update(str(rh_id) for rh_id in g.delete_reading_history)
-        s.update(str(item) for item in g.repoint_narrators)
-        s.update(str(item) for item in g.delete_narrators)
+        s.add(f"merge:{g.survivor_id}")
+        s.update(f"merge:{lid}" for lid in g.loser_ids)
+        s.update(f"repoint:{rh_id}" for rh_id in g.repoint_reading_history)
+        s.update(f"delete:{rh_id}" for rh_id in g.delete_reading_history)
+        s.update(f"repoint:{item}" for item in g.repoint_narrators)
+        s.update(f"delete:{item}" for item in g.delete_narrators)
 
     for g in plan.duplicate_reading_history:
         s = out["duplicate_reading_history"]
-        s.add(str(g.survivor_id))
-        s.update(str(lid) for lid in g.loser_ids)
+        s.add(f"merge:{g.survivor_id}")
+        s.update(f"delete:{lid}" for lid in g.loser_ids)
 
     for g in plan.duplicate_suggestions:
         s = out["duplicate_suggestions"]
-        s.add(str(g.survivor_id))
-        s.update(str(lid) for lid in g.loser_ids)
+        s.add(f"merge:{g.survivor_id}")
+        s.update(f"delete:{lid}" for lid in g.loser_ids)
 
-    out["orphan_authors"].update(str(aid) for aid in plan.orphan_authors)
+    out["orphan_authors"].update(f"delete:{aid}" for aid in plan.orphan_authors)
 
     for w in plan.duplicate_works_report_only:
-        out["duplicate_works_report_only"].update(str(wid) for wid in w.work_ids)
+        out["duplicate_works_report_only"].update(f"report:{wid}" for wid in w.work_ids)
 
     return out
 
