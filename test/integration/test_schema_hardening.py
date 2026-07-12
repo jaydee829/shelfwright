@@ -60,3 +60,50 @@ def test_works_deep_enriched_at(db_url):
     insp = inspect(DatabaseManager(db_url).engine)
     cols = {c["name"] for c in insp.get_columns("works")}
     assert "deep_enriched_at" in cols
+
+
+def test_deep_enriched_at_backfill_semantics(db_url):
+    """The migration's own `op.execute` backfill (works.deep_enriched_at = now() WHERE the
+    work has any work_tropes row) can't be exercised directly here: this suite's
+    `_create_test_database` fixture (test/conftest.py) runs `alembic upgrade head` against
+    an EMPTY database, so by the time this migration's upgrade() executes, `work_tropes` has
+    no rows for it to match — there's no way to seed a work+trope pair BEFORE the migration
+    runs within this test chain. What's actually verifiable post-migration is the semantics
+    contract the backfill establishes going forward: a work seeded WITH a trope link and no
+    explicit stamp behaves like a work the migration's backfill would have stamped (picked
+    up by plan_requeue only under "no_real_trope" if its tropes are all fallback, never under
+    "never_deep_enriched"), while a work with zero trope links and no stamp is
+    "never_deep_enriched" — exactly the reason class the runbook says the first sweep should
+    now report only real gaps for. See test/integration/test_enrichment_sweep.py for the
+    plan_requeue-level assertions of this contract, and the migration file's inline comment /
+    docs/runbooks/phase6-3-schema-rollout.md for the backfill itself."""
+    from datetime import UTC, datetime
+
+    from agentic_librarian.db.models import Trope, Work, WorkTrope
+    from agentic_librarian.db.session import DatabaseManager
+    from agentic_librarian.etl.enrichment_sweep import plan_requeue
+
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as s:
+        # Simulates what the migration's backfill stamps: a work with a real trope link,
+        # deep_enriched_at set (as the backfill would set it).
+        stamped = Work(title="Backfill-Equivalent Work", deep_enriched_at=datetime.now(UTC))
+        s.add(stamped)
+        s.flush()
+        trope = Trope(name="Found Family")
+        s.add(trope)
+        s.flush()
+        s.add(WorkTrope(work_id=stamped.id, trope_id=trope.id))
+
+        # A work the backfill correctly leaves NULL: zero trope links.
+        never_touched = Work(title="No Trope Links At All", deep_enriched_at=None)
+        s.add(never_touched)
+        s.flush()
+        stamped_id, never_touched_id = stamped.id, never_touched.id
+
+    with manager.get_session() as s:
+        plan = plan_requeue(s)
+
+    by_id = {c.work_id: c for c in plan}
+    assert stamped_id not in by_id  # backfill-equivalent stamp + real trope -> excluded
+    assert by_id[never_touched_id].reason == "never_deep_enriched"

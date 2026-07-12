@@ -82,6 +82,13 @@ def upgrade() -> None:
 
     op.add_column("works", sa.Column("deep_enriched_at", sa.DateTime(timezone=True), nullable=True))
 
+    # Backfill: works that already carry ANY trope link were built by the full ETL/deep
+    # pipeline — stamp them so the first --requeue-unenriched sweep is signal, not the
+    # whole catalog. Works with zero trope links stay NULL (genuinely never deep-enriched);
+    # fallback-only works are stamped here but correctly surface under the sweep's
+    # no_real_trope reason (the predicate runs in app code, not here).
+    op.execute("UPDATE works SET deep_enriched_at = now() WHERE id IN (SELECT DISTINCT work_id FROM work_tropes)")
+
     for table, column in FK_INDEXES:
         op.create_index(f"ix_{table}_{column}", table, [column])
 

@@ -1071,6 +1071,11 @@ This file documents key architectural decisions, their context, and trade-offs.
   (`work_id, format` with `NULLS NOT DISTINCT`, PG16), `uq_reading_history_user_edition_date`
   (`user_id, edition_id, date_completed`), `uq_suggestions_active` (`user_id, work_id` WHERE
   `status = 'Suggested'` — partial, so historical non-active suggestions can repeat).
+- **`works.deep_enriched_at` backfill** — the same migration structurally stamps
+  `deep_enriched_at = now()` for every work with any `work_tropes` row (evidence it already
+  went through the deep pipeline) immediately after adding the column, so the #97
+  `--requeue-unenriched` sweep's first run reports only genuine gaps instead of the entire
+  pre-existing catalog.
 - **`db/get_or_create.py`** — two helpers, both SAVEPOINT-scoped (`session.begin_nested()`)
   so a rolled-back insert doesn't kill the caller's outer transaction: `get_or_create`
   (query → insert → on `IntegrityError` re-query with the SAME `filter_by(**filters)`

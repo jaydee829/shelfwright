@@ -233,9 +233,11 @@ docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gate
   `user_libraries.created_at`, `availability_cache.fetched_at`, `import_jobs.created_at`,
   `import_rows.created_at`/`updated_at`. (`availability_cache.fetched_at` deliberately
   keeps NO column default — don't be alarmed it's the one without.)
-- **`works.deep_enriched_at`** — new nullable `timestamptz` column, NULL for every
-  pre-existing row (they haven't been (re)stamped by a deep pass since this landed; the
-  step 6 requeue report is exactly the tool for backfilling that).
+- **`works.deep_enriched_at`** — new nullable `timestamptz` column. The migration itself
+  backfills it to `now()` for every pre-existing work with at least one `work_tropes` row
+  (evidence it already went through the full deep pipeline); only works with zero trope
+  links stay NULL. The step 6 requeue report surfaces those NULLs plus any stamped work
+  whose only tropes are fallback/junk — see step 6 for what to expect.
 
 **Since ADR-058**, the startup migration guard tolerates a migrated-ahead DB during this
 window — the still-running old revision keeps cold-starting normally (its
@@ -295,18 +297,22 @@ for the works that need a deep pass (re)run.
      python scripts/clean_catalog.py --requeue-unenriched --dry-run
    ```
 
-   Expect every pre-existing work to show up under `never_deep_enriched` (the new column
-   is NULL for all of them — that's expected, not a bug; it doesn't mean their tropes were
-   lost, just that `deep_enriched_at` didn't exist to be stamped before now). Works that
-   already have real tropes from before this migration are still fine to leave as-is —
-   `--apply --yes` re-enqueues deep enrichment via Cloud Tasks (`CLOUD_TASKS_QUEUE`,
-   `ENRICH_TARGET_BASE_URL`, `ENRICH_INVOKER_SA` — already set in the prod container env,
-   nothing extra to configure), which is a live decision for you: applying it against the
-   full catalog re-runs deep enrichment (LLM cost) for every work, which may or may not be
-   worth it purely to backfill the timestamp. Recommendation: treat this first report as
-   informational baseline, and reserve `--apply` for the `no_real_trope` subset (the actual
-   poison-task recovery #97 exists for) unless you specifically want a full re-enrichment
-   pass.
+   The migration's `upgrade()` backfills `deep_enriched_at = now()` for every work that
+   already carries at least one `work_tropes` row (the structural signal that it was built
+   by the full ETL/deep pipeline before this column existed — see the migration's inline
+   comment) — so this first report should be SMALL, not the whole catalog. Expect only:
+   - **`never_deep_enriched`**: works with zero trope links at all (never ran through the
+     deep pass, or a #123-style warm failure that skipped every embedding).
+   - **`no_real_trope`**: works the backfill stamped (they had *a* trope link) but every
+     linked trope is fallback/junk per the #111 predicate — a poison task that exhausted
+     Cloud Tasks retries without ever landing a genuine narrative trope.
+
+   Both classes are genuinely actionable — this is the actual #97 poison-task recovery list,
+   not a baseline artifact to set aside. `--apply --yes` re-enqueues deep enrichment via
+   Cloud Tasks (`CLOUD_TASKS_QUEUE`, `ENRICH_TARGET_BASE_URL`, `ENRICH_INVOKER_SA` — already
+   set in the prod container env, nothing extra to configure) for exactly these works; it is
+   safe to apply directly against the full report rather than reserving it for a subset,
+   since the backfill already excluded already-enriched works from appearing at all.
 3. **Close the issues** — after acceptance, close #95 #96 #97 #98 #108 #109 #110 #111 #112
    with references to the resolving PRs (#124 for PR-C's #96/#98/#110/#111/#112/#123; this
    PR for #95/#97/#108/#109), and comment on #88 noting `log_suggestion` dedup closes its
