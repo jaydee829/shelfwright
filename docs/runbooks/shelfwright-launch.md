@@ -66,6 +66,17 @@ gcloud beta run domain-mappings create \
 The command prints the DNS records to create — for an apex domain that's **4 `A` records
 and 4 `AAAA` records** (Google's frontend IPs). Copy them exactly as printed.
 
+**If it says "Domain mapping to [shelfwright.app] already exists in this region":** this
+step is already done — the mapping was created (it's created once, ever). To re-print the
+DNS records from the existing mapping, use `describe` instead:
+
+```bash
+gcloud beta run domain-mappings describe \
+  --domain shelfwright.app --region us-central1 \
+  --project agentic-librarian-prod \
+  --format='table(status.resourceRecords.type, status.resourceRecords.rrdata)'
+```
+
 **Done when:** the command succeeds and you have the list of A/AAAA records in hand.
 
 ### Step 1.3 — Publish the DNS records in Cloudflare **[You]**
