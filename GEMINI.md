@@ -13,7 +13,7 @@ This project maintains institutional knowledge in `docs/project_notes/` for cons
 ## Memory-Aware Protocols
 
 **Before starting implementation:**
-- Review [testing_strategy.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/docs/testing_strategy.md) to ensure adherence to TDD, coverage, and the **Anti-Hardcoding** mandate.
+- Review [testing_strategy.md](docs/testing_strategy.md) to ensure adherence to TDD, coverage, and the **Anti-Hardcoding** mandate.
 - **NEVER** implement logic that only satisfies specific test inputs; logic must be generalized and verified with parameterized tests.
 - **Single With Statements**: Always combine multiple context managers into a single `with` statement (e.g., `with A, B:`) to avoid SIM117 errors.
 - **No Broad Except-Pass**: Never use `except Exception: pass`. Handle specific exceptions or log errors to ensure visibility of failures.
