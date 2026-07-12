@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "shelfwright"
+version = "0.0.1"
+description = "Shelfwright — an agentic reading companion. Placeholder release; the project lives at https://shelfwright.app"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.urls]
+Homepage = "https://shelfwright.app"
+Repository = "https://github.com/jaydee829/shelfwright"

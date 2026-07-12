@@ -22,3 +22,10 @@ describe('TopBar theme toggle', () => {
     expect(screen.getByRole('button', { name: /switch to light mode/i })).toBeInTheDocument()
   })
 })
+
+describe('TopBar branding', () => {
+  it('shows the Shelfwright product name', () => {
+    render(<TopBar />)
+    expect(screen.getByText('Shelfwright')).toBeInTheDocument()
+  })
+})

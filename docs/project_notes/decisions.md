@@ -953,3 +953,28 @@ This file documents key architectural decisions, their context, and trade-offs.
 - One new runtime dep (scoped d3 modules, not full d3). Drop-in: `<WordCloud items={Ranked[]} />` contract unchanged; both call sites + `AnalysisView` untouched.
 - **`useWordCloud@1.3.0` silently ignores a `random` option** (it neither destructures nor forwards it to d3-cloud's `computeWords`), so a seeded layout isn't available via the hook — placement uses `Math.random` (fresh arrangement per page load; fine for a cloud). See bugs.md 2026-06-26. **Layout stability across re-renders/theme toggles instead comes from MEMOISING the hook inputs** (the mapped words + `useCallback`'d accessors) so the layout effect only re-fires on a real word/width change — not a seed.
 - jsdom can't run d3-cloud's canvas, so the component degrades to a `role="img"` aria-summary that unit tests assert on; real visual proof is the QC harness (mobile + desktop, both themes).
+
+### ADR-057: Canonical host via Cloud Run domain mapping on apex shelfwright.app (2026-07-11)
+**Context:**
+- #78 (ADR-055) set `authDomain = window.location.host`, so every serving hostname must be
+  registered on the Web OAuth client or new users hit `redirect_uri_mismatch` (prod incident
+  2026-07-06, bugs.md). Cloud Run exposes ≥2 hostnames; the durable fix is ONE canonical host.
+- The product is now named Shelfwright; the operator registered `shelfwright.app` (Cloudflare).
+- Options costed in the 2026-07-07 #79 spec: Firebase Hosting (~$1/mo, but splits the
+  single-origin app and routes SSE through Hosting rewrites), Cloud Run domain mapping
+  (~$1/mo, least change), LB + serverless NEG (~$19–20/mo floor).
+**Decision:**
+- **Cloud Run domain mapping on the apex `shelfwright.app`** (service `librarian-api`,
+  `us-central1`). Single origin preserved — the #78 auth proxy and SSE `/chat` are untouched;
+  `authDomain` simply resolves to the canonical host. `www` 301s to the apex at Cloudflare
+  (proxied record + redirect rule; never reaches Cloud Run). Apex records are grey-cloud
+  (DNS only) — orange-cloud blocks Google's managed-cert issuance.
+- `run.app` hosts stay registered and serving through the transition; only
+  `shelfwright.app` is handed out.
+- **LB + serverless NEG documented as the trigger-based upgrade path** (SLA / unsupported
+  region / CDN / custom TLS policy), additive swap — see the #79 spec.
+**Consequences:**
+- New-user OAuth registration churn ends: one canonical host, registered once
+  (Firebase Authorized domains + Web OAuth redirect URI/JS origin).
+- Accepts Cloud Run domain mapping's "Preview" status at friends-and-family scale.
+- Rollback = delete the mapping; `run.app` never stops serving.

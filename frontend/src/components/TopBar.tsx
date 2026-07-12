@@ -15,7 +15,7 @@ export default function TopBar() {
 
   return (
     <header className="topbar">
-      <span className="topbar-title">The Librarian</span>
+      <span className="topbar-title">Shelfwright</span>
       <div className="topbar-right">
         <button
           className="theme-toggle"
