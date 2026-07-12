@@ -41,11 +41,24 @@ def test_missing_alembic_version_table_raises(monkeypatch, sqlite_manager):
         check_migrations(sqlite_manager)
 
 
-def test_version_mismatch_raises(monkeypatch, sqlite_manager):
+def test_behind_known_revision_raises(monkeypatch, sqlite_manager):
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    monkeypatch.setenv("MIGRATION_GUARD", "on")
+    script = ScriptDirectory.from_config(Config("alembic.ini"))
+    head = script.get_current_head()
+    non_head = next(r.revision for r in script.walk_revisions() if r.revision != head)
+    _stamp(sqlite_manager, non_head)
+    with pytest.raises(MigrationMismatchError, match=non_head):
+        check_migrations(sqlite_manager)
+
+
+def test_unknown_revision_ahead_warns_and_continues(monkeypatch, sqlite_manager, caplog):
     monkeypatch.setenv("MIGRATION_GUARD", "on")
     _stamp(sqlite_manager, "0000deadbeef")
-    with pytest.raises(MigrationMismatchError, match="0000deadbeef"):
-        check_migrations(sqlite_manager)
+    check_migrations(sqlite_manager)  # must not raise
+    assert any("ahead" in r.message for r in caplog.records)
 
 
 def test_matching_version_passes(monkeypatch, sqlite_manager):

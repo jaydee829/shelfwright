@@ -1,6 +1,6 @@
 """Derived progress + retry, scoped to the owner (Spec 2026-06-18, ADR-048)."""
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -47,8 +47,6 @@ def _seed_job(manager, statuses):
 
 
 def _seed_row(manager, status, minutes_old):
-    from datetime import UTC, datetime, timedelta
-
     with manager.get_session() as s:
         job = ImportJob(user_id=DEFAULT_USER_ID, source="goodreads", total_rows=1)
         s.add(job)
@@ -99,8 +97,6 @@ def test_report_lists_skipped_rows(client):
 
 
 def test_stalled_processing_rows_are_counted(client):
-    from datetime import UTC, datetime, timedelta
-
     c, manager = client
     with manager.get_session() as s:
         job = ImportJob(user_id=DEFAULT_USER_ID, source="goodreads", total_rows=1)
