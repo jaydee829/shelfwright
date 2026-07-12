@@ -169,7 +169,7 @@ if the SA isn't ready immediately; that is normal.
 
 **Workload Identity Federation:** instead of a long-lived JSON key for CI, the
 workflow exchanges a short-lived GitHub OIDC token for GCP credentials at runtime.
-The pool is pinned to exactly `jaydee829/agentic_librarian` via an
+The pool is pinned to exactly `jaydee829/shelfwright` via an
 `attribute.repository` condition — a fork or another repo cannot impersonate the
 deployer SA. Nothing to rotate, nothing to leak.
 

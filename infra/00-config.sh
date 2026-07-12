@@ -19,7 +19,7 @@ export DEPLOYER_SA_NAME="github-deployer"
 export RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 export DEPLOYER_SA="${DEPLOYER_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 export SERVICE="librarian-api"
-export GITHUB_REPO="jaydee829/agentic_librarian"
+export GITHUB_REPO="jaydee829/shelfwright"
 export DUMP_FILE="agentic_librarian_FINAL_20260605_014912.sql.gz"
 
 # --- Lift 2 Stage 4: async enrichment (Cloud Tasks) + deep-scout key secrets ---
