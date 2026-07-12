@@ -21,6 +21,12 @@ logger = logging.getLogger(__name__)
 db_manager = DatabaseManager()
 
 
+def set_db_manager(new_manager: DatabaseManager) -> None:
+    """Override the module db_manager (tests / shared-pool lifespan) — mcp/server.py pattern."""
+    global db_manager
+    db_manager = new_manager
+
+
 def _upsert_suggestion(session, *, work_id: UUID, user_id: UUID, context: str) -> bool:
     """Get-or-create the user's wishlist suggestion. Returns True if created, False if it
     already existed (re-import safe — mirrors add_read_event's idempotency)."""

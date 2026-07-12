@@ -25,8 +25,8 @@ from agentic_librarian.orchestration.definitions import (
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 
-# Per-module lazy pool (the recommendations.py/analysis.py Stage 2 pattern). Pool
-# consolidation across the API modules is deferred to Stage 4.
+# Module-level fallback pool for non-API processes; the API lifespan injects its shared
+# manager via set_db_manager (GH #102 consolidation — the old "deferred to Stage 4" note was stale).
 db_manager = DatabaseManager()
 
 

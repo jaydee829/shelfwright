@@ -36,6 +36,9 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
+from agentic_librarian.enrichment import two_phase
+from agentic_librarian.imports import worker as imports_worker
+from agentic_librarian.mcp import server as mcp_server
 
 db_manager = DatabaseManager()
 
@@ -50,10 +53,11 @@ def set_db_manager(new_manager: DatabaseManager) -> None:
 async def lifespan(app: FastAPI):
     """Build ONE DatabaseManager at startup and inject it into the API-request-path
     modules that each owned a lazy pool (main, auth, transcript, usage, recommendations,
-    analysis) — Lift 2 Stage 4 consolidation. enrichment/two_phase keeps its own pool
-    (separate path/test seam). Lazy construction means no DB connection happens here.
-    Tests that use TestClient WITHOUT a `with` block skip lifespan and keep their own
-    monkeypatched managers."""
+    analysis) — Lift 2 Stage 4 consolidation. mcp/server, enrichment/two_phase, and
+    imports/worker join the fan-out (GH #102); their module-level managers remain as
+    fallbacks for non-API processes (Dagster, CLI). Lazy construction means no DB
+    connection happens here. Tests that use TestClient WITHOUT a `with` block skip
+    lifespan and keep their own monkeypatched managers."""
     shared = DatabaseManager()
     # ADR-058 (#92): refuse to serve when the DB schema is behind this code's migration
     # head — the failed revision keeps traffic on the previous one. Unreachable DB only
@@ -69,6 +73,12 @@ async def lifespan(app: FastAPI):
     imports_api.set_db_manager(shared)
     availability_api.set_db_manager(shared)
     libraries_api.set_db_manager(shared)
+    # GH #102: the in-process chat tools (mcp/server), the enrichment paths
+    # (two_phase), and the import worker previously each held their own lazy pool —
+    # up to ~9 engines/process. One pool per process keeps the connection math sane.
+    mcp_server.set_db_manager(shared)
+    two_phase.set_db_manager(shared)
+    imports_worker.set_db_manager(shared)
     yield
 
 
