@@ -211,7 +211,7 @@ Keep `_lock` (line 100) — the anchor cache still uses it. Delete the `_genai_c
 
 - [ ] **Step 7: Run the tests + affected suites**
 
-Run: `.venv/Scripts/python -m pytest test/unit/test_embedding_cache.py -v` — Expected: 6 passed.
+Run: `.venv/Scripts/python -m pytest test/unit/test_embedding_cache.py -v` — Expected: 5 passed.
 Run: `.venv/Scripts/python -m pytest test/unit -q` — Expected: all pass (analysis-style unit tests exercise `default_embedder`).
 
 - [ ] **Step 8: Lint, format, commit**
