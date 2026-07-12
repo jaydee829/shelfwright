@@ -9,6 +9,7 @@ the same channel the MCP tools read (core/user_context.py).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import NamedTuple
@@ -62,18 +63,11 @@ def _signup_mode() -> str:
     return "open" if os.environ.get("SIGNUP_MODE", "invite").strip().lower() == "open" else "invite"
 
 
-async def get_current_user(authorization: str | None = Header(None)) -> AuthenticatedUser:
-    """FastAPI dependency: verify the Firebase ID token, resolve (or provision) the
-    user row, set the user context, return the identity (ADR-048).
-
-    MUST stay `async def`: a sync dependency runs in a threadpool, and a ContextVar
-    set there is invisible to the endpoint. As a coroutine it shares the request
-    task's context, which Starlette propagates into sync endpoints."""
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token.")
-    token = authorization[7:].strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing bearer token.")
+def _resolve_user(token: str) -> AuthenticatedUser:
+    """Sync body of the auth dependency: verify the Firebase token and resolve (or
+    provision) the user row. Runs via asyncio.to_thread (GH #93) — verify_id_token's
+    JWT check and the DB query/insert otherwise block the event loop on EVERY request.
+    HTTPExceptions raised here propagate through to_thread unchanged."""
     try:
         decoded = _verify_token(token)
     except (ValueError, firebase_auth.InvalidIdTokenError) as e:
@@ -120,6 +114,22 @@ async def get_current_user(authorization: str | None = Header(None)) -> Authenti
             session.add(user)
             session.flush()
         result = AuthenticatedUser(id=user.id, email=user.email)
+    return result
 
+
+async def get_current_user(authorization: str | None = Header(None)) -> AuthenticatedUser:
+    """FastAPI dependency: verify the Firebase ID token, resolve (or provision) the
+    user row, set the user context, return the identity (ADR-048).
+
+    MUST stay `async def`: a sync dependency runs in a threadpool, and a ContextVar
+    set there is invisible to the endpoint. As a coroutine it shares the request
+    task's context, which Starlette propagates into sync endpoints. The blocking
+    verify+DB body runs via to_thread (GH #93); ONLY the ContextVar set lives here."""
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    token = authorization[7:].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    result = await asyncio.to_thread(_resolve_user, token)
     current_user_id.set(result.id)
     return result
