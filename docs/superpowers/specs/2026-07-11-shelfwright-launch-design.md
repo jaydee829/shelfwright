@@ -111,6 +111,11 @@ All four workstreams are independent. Order chosen to overlap the domain's wait 
 5. When cert is ACTIVE: Firebase/OAuth registrations → live verification → ADR-056 →
    hand out `shelfwright.app`
 
+## Operator runbook
+
+Step-by-step operator guide (what/why/how/done-when for every console and account step):
+[`docs/runbooks/shelfwright-launch.md`](../../runbooks/shelfwright-launch.md).
+
 ## Operator prerequisites (needed at execution time)
 
 1. Search Console domain verification (browser, Google account)
