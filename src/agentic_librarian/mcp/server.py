@@ -31,6 +31,7 @@ from agentic_librarian.enrichment.tasks import enqueue_enrichment
 from agentic_librarian.enrichment.two_phase import _normalize, _normalized_col
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
 from mcp.server.fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -90,6 +91,20 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
     """
     Performs a pgvector similarity search across tropes and literary styles.
     """
+    # GH #123: warm the embedding LRU before the session opens so the in-session
+    # _get_embedding calls below are cache hits, not network round-trips held under a
+    # pooled connection (the pool's 5+2 sizing depends on no embed calls inside sessions).
+    for t in target_tropes or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, t)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for trope %r — retrying in-session", t)
+    for s in target_styles or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, s)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for style %r — retrying in-session", s)
+
     with db_manager.get_session() as session:
         tm = TropeManager(session=session)
         sm = StyleManager(session=session)
@@ -191,6 +206,19 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     ranked by similarity to current target vibes.
     """
     user_id = get_required_user_id()
+    # GH #123: warm before the session opens (see search_internal_database above) — a no-op
+    # cache-hit in-session either way if there turn out to be no suggestions to rank.
+    for t in target_tropes or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, t)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for trope %r — retrying in-session", t)
+    for s in target_styles or []:
+        try:
+            get_cached_embedding(EMBED_MODEL, s)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
+            logger.warning("embed warm failed for style %r — retrying in-session", s)
+
     with db_manager.get_session() as session:
         # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
         query = (

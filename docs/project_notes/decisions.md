@@ -1025,10 +1025,9 @@ This file documents key architectural decisions, their context, and trade-offs.
   user-approved contract: the Librarian announces background analysis and never anchors
   trope-based recommendations on a deep-pending work in the same turn. Tool contract
   (`str | None`) unchanged for the pipeline/Claude-backend callers.
-- Pool overflow is 5, not the PR-A interim 10 or a tight 2: embedding calls (search
-  tools, persist-time standardize_trope/style) still run inside sessions, so a Gemini
-  429 burst can stretch sessions to minutes even after #94. Tightening to 2 is tracked
-  by GH #123 (hoist embed calls out of sessions).
+- Pool overflow started at 5, not the PR-A interim 10 or a tight 2: embedding calls
+  (search tools, persist-time standardize_trope/style) still ran inside sessions, so a
+  Gemini 429 burst could stretch sessions to minutes even after #94.
 **Consequences:**
 - One user's enrichment can no longer brown out the instance; chat adds return in seconds.
 - The deep pass now re-scouts outside any transaction: a late transient failure re-pays
@@ -1037,3 +1036,10 @@ This file documents key architectural decisions, their context, and trade-offs.
   (Python's own default is min(32, cpus+4) ≈ 5-6 on Cloud Run's 1 vCPU — too small once
   every auth resolve and tool body shares it); the enrich/import queues (4/5 concurrent)
   remain the heavy-work throttles.
+- GH #123 resolved (2026-07-12): `collect_embedding_texts` (etl/persist.py) warms
+  `get_cached_embedding`'s LRU for every trope/style text a row will standardize BEFORE
+  two_phase's write session opens, and the two mcp search tools warm their target
+  trope/style texts before their read session opens — so persist-time
+  standardize_trope/style and the search tools' `_get_embedding` calls are cache hits,
+  not network round-trips, inside any session. Pool overflow tightened 5 → 2
+  (db/session.py) now that no external call of any kind runs inside a session.

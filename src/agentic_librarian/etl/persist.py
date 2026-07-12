@@ -76,6 +76,39 @@ def _nan_to_list(value):
     return value if isinstance(value, list) else []
 
 
+def collect_embedding_texts(row: dict) -> list[str]:
+    """Every text persist_enriched_work will pass to standardize_trope/standardize_style for
+    this row — trope names, author/work/narrator style strings, plus the cleaned genre∪mood
+    fallback tags IF (and only if) persist would actually fall back to them (no real
+    enriched_tropes AND the caller hasn't opted out via write_fallback_tropes=False). Used to
+    warm the get_cached_embedding LRU BEFORE a write session opens (GH #123) so the in-session
+    standardize_* calls become cache hits instead of network embeds."""
+    texts: list[str] = []
+
+    enriched_tropes = _nan_to_list(row.get("enriched_tropes"))
+    for t_data in enriched_tropes:
+        name = t_data.get("trope_name")
+        if isinstance(name, str) and name.strip():
+            texts.append(name)
+
+    for style_data in (row.get("author_style"), row.get("work_style")):
+        for _attr_type, style_name in _iter_style_items(style_data, "warm"):
+            texts.append(style_name)
+    narrator_styles = row.get("narrator_styles")
+    if isinstance(narrator_styles, dict):
+        for n_style_data in narrator_styles.values():
+            for _attr_type, style_name in _iter_style_items(n_style_data, "warm"):
+                texts.append(style_name)
+
+    if not enriched_tropes and row.get("write_fallback_tropes", True):
+        genres = clean_genres(_nan_to_list(row.get("genres")))
+        moods = clean_moods(_nan_to_list(row.get("moods")))
+        for tag in set(genres) | set(moods):
+            texts.extend(clean_trope_name(tag))
+
+    return texts
+
+
 def persist_enriched_work(
     session: Session, row: dict, trope_manager: TropeManager, style_manager: StyleManager
 ) -> Work | None:

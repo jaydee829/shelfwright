@@ -15,6 +15,7 @@ discovery write tool, left untouched): same persist core, tiered scouts."""
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 from sqlalchemy import func
@@ -22,13 +23,16 @@ from sqlalchemy import func
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.etl.persist import persist_enriched_work
+from agentic_librarian.etl.persist import collect_embedding_texts, persist_enriched_work
 from agentic_librarian.orchestration.definitions import (
     create_deep_scout_manager,
     create_fast_scout_manager,
 )
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
+
+logger = logging.getLogger(__name__)
 
 # Module-level fallback pool for non-API processes; the API lifespan injects its shared
 # manager via set_db_manager (GH #102 consolidation — the old "deferred to Stage 4" note was stale).
@@ -77,6 +81,18 @@ def _persist_row(session, row: dict) -> Work | None:
     return persist_enriched_work(session, row, TropeManager(session=session), StyleManager(session=session))
 
 
+def _warm_embeddings(row: dict) -> None:
+    """GH #123: warm the embedding LRU with every text the persist will standardize, so no
+    network embed happens inside the write session (the pool's 5+2 sizing depends on it).
+    Best-effort — a warm failure just means that item embeds in-session as before
+    (_safe_standardize in etl/persist.py remains the net that degrades gracefully there)."""
+    for text in collect_embedding_texts(row):
+        try:
+            get_cached_embedding(EMBED_MODEL, text)
+        except Exception:  # noqa: BLE001 - warming is best-effort; _safe_standardize degrades in-session
+            logger.warning("embed warm failed for %r — persist will retry in-session", text)
+
+
 def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool] | None:
     """Fast pass: de-dup against the catalog; if new, run the API scouts (no session
     held, #94) and persist in a fresh session that RE-CHECKS the dedup (a concurrent
@@ -103,6 +119,8 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
     row = _run_scouts(create_fast_scout_manager(), title=title, author=author, fmt=fmt, write_fallback_tropes=False)
     if row is None:
         return None
+
+    _warm_embeddings(row)
 
     with db_manager.get_session() as session:
         existing = _find_existing(session)  # dedup re-check (#94/#95)
@@ -165,6 +183,8 @@ def enrich_deep(work_id: UUID) -> bool:
     row = _run_scouts(create_deep_scout_manager(), title=title, author=author, fmt=fmt)
     if row is None:
         return True  # scouts found nothing to add; the task is done, not retryable
+
+    _warm_embeddings(row)
 
     with db_manager.get_session() as session:
         _persist_row(session, row)
