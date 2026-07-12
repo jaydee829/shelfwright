@@ -26,7 +26,8 @@ from agentic_librarian.db.models import (
     WorkTrope,
 )
 from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.etl.persist import persist_enriched_work
+from agentic_librarian.enrichment import two_phase
+from agentic_librarian.enrichment.tasks import enqueue_enrichment
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from mcp.server.fastmcp import FastMCP
@@ -489,9 +490,10 @@ def add_book_to_history(
     notes: str | None = None,
 ) -> str:
     """Add ONE book to the reading history (single-title import). Enriches + persists the
-    work first if it isn't in the catalog (runs the scouts — takes a minute or two), then
-    logs a READ EVENT. History is a log of read events: a re-read (different completion
-    date) inserts a new row; the same work+date is a duplicate and is not double-logged.
+    work first if it isn't in the catalog (fast metadata in seconds; the deep trope/style
+    analysis runs in the background — the return message says when that applies), then logs
+    a READ EVENT. History is a log of read events: a re-read (different completion date)
+    inserts a new row; the same work+date is a duplicate and is not double-logged.
     date_completed defaults to today (the Phase-4 UI will auto-fill it visibly)."""
     if not _valid_name(title):
         return "Error: title must be a non-empty string of at most 500 characters."
@@ -511,43 +513,36 @@ def add_book_to_history(
         return f"Error: rating must be an integer from 1 to 5; got {rating!r}."
     format = (format or "ebook")[:50]
     notes = notes[:2000] if isinstance(notes, str) else None
-    user_id = get_required_user_id()  # before try: unset context must raise, not soft-fail (ADR-048)
+    get_required_user_id()  # before any work: unset context must raise, not soft-fail (ADR-048)
 
-    work_id = enrich_and_persist_work(title=title, author=author, format=format)
-    if work_id is None:
+    resolved = None
+    try:
+        resolved = two_phase.enrich_fast(title, author, format)
+    except Exception as e:  # noqa: BLE001 - tool surface: report, don't crash the agent loop
+        return f"Error enriching '{title}': {e}"
+    if resolved is None:
         return f"Error: could not resolve '{title}' by {author} — check the spelling, or the scouts found nothing."
+    work_id, created = resolved
+    if created:
+        try:
+            enqueue_enrichment(str(work_id))
+        except Exception:  # noqa: BLE001 - deep pass is best-effort
+            logger.exception("deep-enrichment enqueue failed for work %s", work_id)
 
     try:
-        with db_manager.get_session() as session:
-            uuid_obj = _parse_uuid(work_id)
-            # Duplicate guard FIRST (PR #37 review): on the no-op path nothing may be
-            # created — not even an Edition (the session commits on clean exit).
-            prior_reads = (
-                session.query(ReadingHistory)
-                .join(Edition)
-                .filter(Edition.work_id == uuid_obj, ReadingHistory.user_id == user_id)
-                .all()
-            )
-            if any(r.date_completed == completed for r in prior_reads):
-                return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
-            edition = session.query(Edition).filter_by(work_id=uuid_obj, format=format).first()
-            if not edition:
-                edition = Edition(work_id=uuid_obj, format=format)
-                session.add(edition)
-                session.flush()
-            session.add(
-                ReadingHistory(
-                    edition_id=edition.id,
-                    user_id=user_id,
-                    date_completed=completed,
-                    user_rating=rating,
-                    user_notes=notes,
-                )
-            )
-            session.flush()
-            return f"Added '{title}' to your reading history (work {work_id}, read #{len(prior_reads) + 1})."
-    except Exception as e:
-        return f"Error adding to reading history: {str(e)}"
+        logged = two_phase.add_read_event(work_id, completed=completed, rating=rating, notes=notes, fmt=format)
+    except Exception as e:  # noqa: BLE001
+        return f"Error adding to reading history: {e}"
+    if logged["already_logged"]:
+        return f"'{title}' is already logged as completed {completed.isoformat()}. No new entry written."
+    msg = f"Added '{title}' to your reading history (work {work_id}, read #{logged['read_number']})."
+    if created:
+        msg += (
+            " I'm still analyzing this book in the background (~1-2 minutes) — its tropes and"
+            " styles will be ready on your next turn, so tell the user that and don't draw"
+            " trope-based conclusions about it yet."
+        )
+    return msg
 
 
 @mcp.tool()
@@ -683,71 +678,36 @@ def get_work_details(work_id: str) -> dict:
         }
 
 
-def _normalize(s: str) -> str:
-    return " ".join((s or "").strip().lower().split())
-
-
-def _normalized_col(col):
-    """SQL-side equivalent of _normalize: lowercase, collapse internal whitespace, trim — so
-    de-dup matches even when a stored title/name has irregular spacing."""
-    return func.trim(func.regexp_replace(func.lower(col), r"\s+", " ", "g"))
-
-
 @mcp.tool()
 def enrich_and_persist_work(title: str, author: str, format: str = "ebook") -> str | None:
-    """De-dup a web-discovered book against the catalog; if new, enrich it via the ScoutManager
-    and persist it as a Work (no reading history). Returns the work_id, or None if enrichment
-    found nothing. This is the single write surface for discoveries — a future authorization
-    layer (SEC-002) wraps here."""
+    """De-dup a discovered book against the catalog; if new, run the FAST scouts and
+    persist immediately, then queue the deep pass (tropes/styles) via Cloud Tasks —
+    the same two-phase path bulk import uses (GH #93/#94: the old all-scouts inline run
+    blocked the event loop for minutes). Returns the work_id, or None if the title did
+    not resolve. A NEWLY persisted work has no trope/style fingerprint until the deep
+    pass lands (~1-2 min): tell the user you are still investigating it, and do not
+    anchor trope-based recommendations on it this turn. This is the single write
+    surface for discoveries — a future authorization layer (SEC-002) wraps here."""
     # SEC-002: this is a write path fed by web-derived strings — validate shape upfront.
     if not _valid_name(title):
-        print(f"Warning: enrich_and_persist_work rejected invalid title {title!r}")
+        logger.warning("enrich_and_persist_work rejected invalid title %r", title)
         return None
     if not _valid_name(author):
-        print(f"Warning: enrich_and_persist_work rejected invalid author {author!r}")
+        logger.warning("enrich_and_persist_work rejected invalid author %r", author)
         return None
-    format = (format or "ebook")[:50]
     try:
-        with db_manager.get_session() as session:
-            # 1. De-dup (Case 1): match an existing Work by normalized title + author.
-            existing = (
-                session.query(Work)
-                .join(WorkContributor)
-                .join(Author)
-                .filter(_normalized_col(Work.title) == _normalize(title))
-                .filter(_normalized_col(Author.name) == _normalize(author))
-                .first()
-            )
-            if existing:
-                return str(existing.id)
-
-            # 2. Enrich (Case 2): run the scouts, then persist via the shared function.
-            from agentic_librarian.orchestration.definitions import create_scout_manager
-
-            enriched = create_scout_manager().enrich(title=title, author=author, format=format)
-            if not enriched:
-                return None
-
-            row = {
-                "Title": title,
-                "Author_1": author,
-                "format": format,
-                "skip_enrichment": False,
-                "date_completed": None,
-                **enriched,
-                "genres": list(enriched.get("genres") or []),
-                "moods": list(enriched.get("moods") or []),
-            }
-            tm = TropeManager(session=session)
-            sm = StyleManager(session=session)
-            work = persist_enriched_work(session, row, tm, sm)
-            if work is None:
-                return None
-            session.flush()  # ensure work.id is populated
-            # get_session commits on clean exit (matches the other write tools) — no explicit commit.
-            return str(work.id)
-    except Exception as e:  # noqa: BLE001 - degrade gracefully, never crash the pipeline
-        print(f"enrich_and_persist_work error: {e}")
+        resolved = two_phase.enrich_fast(title, author, format or "ebook")
+        if resolved is None:
+            return None
+        work_id, created = resolved
+        if created:
+            try:
+                enqueue_enrichment(str(work_id))
+            except Exception:  # noqa: BLE001 - deep pass is best-effort; fast data already persisted
+                logger.exception("deep-enrichment enqueue failed for work %s", work_id)
+        return str(work_id)
+    except Exception:  # noqa: BLE001 - degrade gracefully, never crash the agent loop
+        logger.exception("enrich_and_persist_work failed for %r by %r", title, author)
         return None
 
 

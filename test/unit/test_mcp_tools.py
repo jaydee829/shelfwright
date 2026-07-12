@@ -232,11 +232,12 @@ def test_normalize_status_matches_case_insensitively():
     assert server._normalize_status(7, allowed) is None
 
 
-def test_enrich_and_persist_work_rejects_invalid_input(capsys):
+def test_enrich_and_persist_work_rejects_invalid_input(caplog):
     from agentic_librarian.mcp import server
 
-    assert server.enrich_and_persist_work(title="", author="A") is None
-    assert server.enrich_and_persist_work(title="T", author="   ") is None
-    assert server.enrich_and_persist_work(title="x" * 501, author="A") is None
-    assert server.enrich_and_persist_work(title="T", author=None) is None  # type: ignore[arg-type]
-    assert "rejected invalid" in capsys.readouterr().out  # visible, not silent (no-silent-except rule)
+    with caplog.at_level("WARNING", logger="agentic_librarian.mcp.server"):
+        assert server.enrich_and_persist_work(title="", author="A") is None
+        assert server.enrich_and_persist_work(title="T", author="   ") is None
+        assert server.enrich_and_persist_work(title="x" * 501, author="A") is None
+        assert server.enrich_and_persist_work(title="T", author=None) is None  # type: ignore[arg-type]
+    assert "rejected invalid" in caplog.text  # visible, not silent (no-silent-except rule)
