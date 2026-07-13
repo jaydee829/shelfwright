@@ -2,7 +2,22 @@ from datetime import UTC, date, datetime
 from uuid import UUID, uuid4
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import ARRAY, Column, Date, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Table, Text
+from sqlalchemy import (
+    ARRAY,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    Table,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -36,14 +51,17 @@ class Author(Base):
     __tablename__ = "authors"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    # GH #95: uq_authors_name_lower — CREATE UNIQUE INDEX ... ON authors (lower(name)),
-    # NULLS NOT DISTINCT-free functional unique; expressible only as raw DDL, see the
-    # 48e3762d6c0c migration.
     name: Mapped[str] = mapped_column(String, nullable=False)
     bio: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     contributions: Mapped[list["WorkContributor"]] = relationship(back_populates="author")
     styles: Mapped[list["AuthorStyle"]] = relationship(back_populates="author", cascade="all, delete-orphan")
+
+    # GH #95/schema-drift: model parity with the 48e3762d6c0c migration's raw-DDL
+    # functional unique index (CREATE UNIQUE INDEX uq_authors_name_lower ON authors
+    # (lower(name))) — must match that DDL exactly (same name) or autogenerate drifts.
+    # Defined after `name` above so func.lower() closes over the real Column, not a string.
+    __table_args__ = (Index("uq_authors_name_lower", func.lower(name), unique=True),)
 
 
 class Work(Base):
@@ -71,11 +89,13 @@ class Narrator(Base):
     __tablename__ = "narrators"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    # GH #95: uq_narrators_name_lower — functional unique on lower(name), raw DDL in the
-    # 48e3762d6c0c migration (same shape as Author.name above).
     name: Mapped[str] = mapped_column(String, nullable=False)
 
     styles: Mapped[list["NarratorStyle"]] = relationship(back_populates="narrator", cascade="all, delete-orphan")
+
+    # GH #95/schema-drift: model parity with the 48e3762d6c0c migration's raw-DDL
+    # functional unique index (same shape as Author.name above) — name must match exactly.
+    __table_args__ = (Index("uq_narrators_name_lower", func.lower(name), unique=True),)
 
 
 class Style(Base):
@@ -159,8 +179,6 @@ class Edition(Base):
     # lookups on work_id alone; a separate single-column index would be redundant.
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
     isbn_13: Mapped[str | None] = mapped_column(String, nullable=True)
-    # GH #95: uq_editions_work_format — UNIQUE (work_id, format) NULLS NOT DISTINCT (raw
-    # DDL in the 48e3762d6c0c migration; not expressible via mapped_column/UniqueConstraint).
     format: Mapped[str | None] = mapped_column(String, nullable=True)
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -170,6 +188,18 @@ class Edition(Base):
     narrators: Mapped[list["Narrator"]] = relationship(secondary=edition_narrators)
     reading_history: Mapped[list["ReadingHistory"]] = relationship(back_populates="edition")
 
+    # GH #95/schema-drift: model parity with the 48e3762d6c0c migration's raw-DDL
+    # UNIQUE (work_id, format) NULLS NOT DISTINCT index — name must match exactly.
+    __table_args__ = (
+        Index(
+            "uq_editions_work_format",
+            work_id,
+            format,
+            unique=True,
+            postgresql_nulls_not_distinct=True,
+        ),
+    )
+
 
 class ReadingHistory(Base):
     __tablename__ = "reading_history"
@@ -178,23 +208,30 @@ class ReadingHistory(Base):
     edition_id: Mapped[UUID] = mapped_column(ForeignKey("editions.id"), nullable=False, index=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     date_started: Mapped[date | None] = mapped_column(Date, nullable=True)
-    # GH #95: uq_reading_history_user_edition_date — UNIQUE (user_id, edition_id,
-    # date_completed), raw DDL in the 48e3762d6c0c migration (kept here, not on user_id
-    # above, since the constraint is composite).
+    # Composite unique below (not on user_id above) since the constraint spans three columns.
     date_completed: Mapped[date] = mapped_column(Date, nullable=False)
     user_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     edition: Mapped["Edition"] = relationship(back_populates="reading_history")
 
+    # GH #95/schema-drift: model parity with the 48e3762d6c0c migration's raw-DDL
+    # UNIQUE (user_id, edition_id, date_completed) index — name must match exactly.
+    __table_args__ = (
+        Index(
+            "uq_reading_history_user_edition_date",
+            user_id,
+            edition_id,
+            date_completed,
+            unique=True,
+        ),
+    )
+
 
 class Suggestions(Base):
     __tablename__ = "suggestions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    # GH #95: uq_suggestions_active — partial UNIQUE (user_id, work_id) WHERE
-    # status = 'Suggested', raw DDL in the 48e3762d6c0c migration (not expressible via
-    # mapped_column/UniqueConstraint).
     work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False, index=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     suggested_at: Mapped[datetime] = mapped_column(
@@ -206,6 +243,19 @@ class Suggestions(Base):
     conversation_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     work: Mapped["Work"] = relationship(back_populates="suggestions")
+
+    # GH #95/schema-drift: model parity with the 48e3762d6c0c migration's raw-DDL
+    # partial UNIQUE (user_id, work_id) WHERE status = 'Suggested' index — name and
+    # predicate text must match exactly.
+    __table_args__ = (
+        Index(
+            "uq_suggestions_active",
+            user_id,
+            work_id,
+            unique=True,
+            postgresql_where=text("status = 'Suggested'"),
+        ),
+    )
 
 
 class Conversation(Base):
