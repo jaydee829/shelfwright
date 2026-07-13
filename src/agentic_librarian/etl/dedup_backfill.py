@@ -155,7 +155,12 @@ def _pick_survivor_by_links(rows: list, link_counts: dict) -> object:
 
 
 def _plan_authors(session: Session) -> list[ContributorMergeGroup]:
-    authors = session.query(Author).all()
+    # Minor 3 (final review): every group query is order_by'd on its pk so dry-run and an
+    # apply-time re-plan against unchanged data classify IDENTICALLY (which collision link goes
+    # to repoint vs delete depends on iteration order when two losers/links race for the same
+    # key) — without this, a Postgres row order that happens to differ between two plans over the
+    # same data can flip a classification and trip the apply-gate's drift-refuse spuriously.
+    authors = session.query(Author).order_by(Author.id).all()
     groups: dict[str, list[Author]] = defaultdict(list)
     for a in authors:
         groups[a.name.lower()].append(a)
@@ -173,7 +178,7 @@ def _plan_authors(session: Session) -> list[ContributorMergeGroup]:
         if len(rows) < 2:
             continue
         survivor = _pick_survivor_by_links(rows, link_counts)
-        losers = [a for a in rows if a.id != survivor.id]
+        losers = sorted((a for a in rows if a.id != survivor.id), key=lambda a: str(a.id))
         group = ContributorMergeGroup(
             survivor_id=survivor.id,
             survivor_name=survivor.name,
@@ -181,13 +186,26 @@ def _plan_authors(session: Session) -> list[ContributorMergeGroup]:
             loser_names=[loser.name for loser in losers],
         )
         survivor_wc_keys = {
-            (wc.work_id, wc.role) for wc in session.query(WorkContributor).filter_by(author_id=survivor.id).all()
+            (wc.work_id, wc.role)
+            for wc in session.query(WorkContributor)
+            .filter_by(author_id=survivor.id)
+            .order_by(WorkContributor.work_id, WorkContributor.role)
+            .all()
         }
         survivor_style_keys = {
-            (st.style_id, st.attribute_type) for st in session.query(AuthorStyle).filter_by(author_id=survivor.id).all()
+            (st.style_id, st.attribute_type)
+            for st in session.query(AuthorStyle)
+            .filter_by(author_id=survivor.id)
+            .order_by(AuthorStyle.style_id, AuthorStyle.attribute_type)
+            .all()
         }
         for loser in losers:
-            for wc in session.query(WorkContributor).filter_by(author_id=loser.id).all():
+            for wc in (
+                session.query(WorkContributor)
+                .filter_by(author_id=loser.id)
+                .order_by(WorkContributor.work_id, WorkContributor.role)
+                .all()
+            ):
                 key = (wc.work_id, wc.role)
                 pk = (wc.work_id, wc.author_id, wc.role)
                 if key in survivor_wc_keys:
@@ -195,7 +213,12 @@ def _plan_authors(session: Session) -> list[ContributorMergeGroup]:
                 else:
                     group.repoint_links.append((loser.id, pk))
                     survivor_wc_keys.add(key)
-            for st in session.query(AuthorStyle).filter_by(author_id=loser.id).all():
+            for st in (
+                session.query(AuthorStyle)
+                .filter_by(author_id=loser.id)
+                .order_by(AuthorStyle.style_id, AuthorStyle.attribute_type)
+                .all()
+            ):
                 key = (st.style_id, st.attribute_type)
                 pk = (st.author_id, st.style_id, st.attribute_type)
                 if key in survivor_style_keys:
@@ -208,7 +231,8 @@ def _plan_authors(session: Session) -> list[ContributorMergeGroup]:
 
 
 def _plan_narrators(session: Session) -> list[ContributorMergeGroup]:
-    narrators = session.query(Narrator).all()
+    # Minor 3 (final review): order_by + sorted losers — see _plan_authors's comment.
+    narrators = session.query(Narrator).order_by(Narrator.id).all()
     groups: dict[str, list[Narrator]] = defaultdict(list)
     for n in narrators:
         groups[n.name.lower()].append(n)
@@ -226,7 +250,7 @@ def _plan_narrators(session: Session) -> list[ContributorMergeGroup]:
         if len(rows) < 2:
             continue
         survivor = _pick_survivor_by_links(rows, link_counts)
-        losers = [n for n in rows if n.id != survivor.id]
+        losers = sorted((n for n in rows if n.id != survivor.id), key=lambda n: str(n.id))
         group = ContributorMergeGroup(
             survivor_id=survivor.id,
             survivor_name=survivor.name,
@@ -236,18 +260,25 @@ def _plan_narrators(session: Session) -> list[ContributorMergeGroup]:
         survivor_edition_ids = {
             row.edition_id
             for row in session.execute(
-                select(edition_narrators.c.edition_id).where(edition_narrators.c.narrator_id == survivor.id)
+                select(edition_narrators.c.edition_id)
+                .where(edition_narrators.c.narrator_id == survivor.id)
+                .order_by(edition_narrators.c.edition_id)
             ).all()
         }
         survivor_style_keys = {
             (st.style_id, st.attribute_type)
-            for st in session.query(NarratorStyle).filter_by(narrator_id=survivor.id).all()
+            for st in session.query(NarratorStyle)
+            .filter_by(narrator_id=survivor.id)
+            .order_by(NarratorStyle.style_id, NarratorStyle.attribute_type)
+            .all()
         }
         for loser in losers:
             loser_edition_ids = [
                 row.edition_id
                 for row in session.execute(
-                    select(edition_narrators.c.edition_id).where(edition_narrators.c.narrator_id == loser.id)
+                    select(edition_narrators.c.edition_id)
+                    .where(edition_narrators.c.narrator_id == loser.id)
+                    .order_by(edition_narrators.c.edition_id)
                 ).all()
             ]
             for eid in loser_edition_ids:
@@ -257,7 +288,12 @@ def _plan_narrators(session: Session) -> list[ContributorMergeGroup]:
                 else:
                     group.repoint_links.append((loser.id, pk))
                     survivor_edition_ids.add(eid)
-            for st in session.query(NarratorStyle).filter_by(narrator_id=loser.id).all():
+            for st in (
+                session.query(NarratorStyle)
+                .filter_by(narrator_id=loser.id)
+                .order_by(NarratorStyle.style_id, NarratorStyle.attribute_type)
+                .all()
+            ):
                 key = (st.style_id, st.attribute_type)
                 pk = (st.narrator_id, st.style_id, st.attribute_type)
                 if key in survivor_style_keys:
@@ -376,7 +412,12 @@ def _apply_contributor_group(session: Session, group: ContributorMergeGroup, *, 
 
 
 def _plan_editions(session: Session) -> list[EditionMergeGroup]:
-    editions = session.query(Edition).all()
+    # Minor 3 (final review): order_by + sorted losers — see _plan_authors's comment. The
+    # per-loser ReadingHistory ordering here is the SAME lever behind the edition x
+    # reading_history intersection this plan defers (_defer_intersecting_groups): which row of
+    # an exact-duplicate date-collision pair gets repoint vs delete depends on this order, so
+    # dry-run and an apply-time re-plan must see the identical order every time.
+    editions = session.query(Edition).order_by(Edition.id).all()
     groups: dict[tuple[UUID, str], list[Edition]] = defaultdict(list)
     for e in editions:
         groups[(e.work_id, e.format or "")].append(e)
@@ -394,31 +435,35 @@ def _plan_editions(session: Session) -> list[EditionMergeGroup]:
         if len(rows) < 2:
             continue
         survivor = _pick_survivor_by_links(rows, link_counts)
-        losers = [e for e in rows if e.id != survivor.id]
+        losers = sorted((e for e in rows if e.id != survivor.id), key=lambda e: str(e.id))
         group = EditionMergeGroup(
             survivor_id=survivor.id, work_id=work_id, fmt=fmt or None, loser_ids=[loser.id for loser in losers]
         )
 
         survivor_dates_by_user: dict[UUID, set] = defaultdict(set)
-        for rh in session.query(ReadingHistory).filter_by(edition_id=survivor.id).all():
+        for rh in session.query(ReadingHistory).filter_by(edition_id=survivor.id).order_by(ReadingHistory.id).all():
             survivor_dates_by_user[rh.user_id].add(rh.date_completed)
 
         survivor_narrator_ids = {
             row.narrator_id
             for row in session.execute(
-                select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == survivor.id)
+                select(edition_narrators.c.narrator_id)
+                .where(edition_narrators.c.edition_id == survivor.id)
+                .order_by(edition_narrators.c.narrator_id)
             ).all()
         }
 
         for loser in losers:
-            for rh in session.query(ReadingHistory).filter_by(edition_id=loser.id).all():
+            for rh in session.query(ReadingHistory).filter_by(edition_id=loser.id).order_by(ReadingHistory.id).all():
                 if rh.date_completed in survivor_dates_by_user.get(rh.user_id, set()):
                     group.delete_reading_history.append(rh.id)
                 else:
                     group.repoint_reading_history.append(rh.id)
                     survivor_dates_by_user[rh.user_id].add(rh.date_completed)
             for row in session.execute(
-                select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == loser.id)
+                select(edition_narrators.c.narrator_id)
+                .where(edition_narrators.c.edition_id == loser.id)
+                .order_by(edition_narrators.c.narrator_id)
             ).all():
                 nid = row.narrator_id
                 if nid in survivor_narrator_ids:
@@ -504,7 +549,10 @@ def _apply_edition_group(session: Session, group: EditionMergeGroup) -> dict[str
 
 
 def _plan_reading_history(session: Session) -> list[KeepDeleteGroup]:
-    rows = session.query(ReadingHistory).all()
+    # Minor 3 (final review): order_by + sorted losers — see _plan_authors's comment. Survivor
+    # selection here is already order-independent (min by str(id)); ordering keeps loser_ids
+    # (and therefore the plan report / plan_id_set tokens) stable across re-plans too.
+    rows = session.query(ReadingHistory).order_by(ReadingHistory.id).all()
     groups: dict[tuple, list[ReadingHistory]] = defaultdict(list)
     for rh in rows:
         groups[(rh.user_id, rh.edition_id, rh.date_completed)].append(rh)
@@ -513,7 +561,7 @@ def _plan_reading_history(session: Session) -> list[KeepDeleteGroup]:
         if len(dup_rows) < 2:
             continue
         survivor = min(dup_rows, key=lambda r: str(r.id))
-        losers = [r for r in dup_rows if r.id != survivor.id]
+        losers = sorted((r for r in dup_rows if r.id != survivor.id), key=lambda r: str(r.id))
         out.append(KeepDeleteGroup(survivor_id=survivor.id, loser_ids=[loser.id for loser in losers], detail=str(key)))
     return out
 
@@ -524,7 +572,10 @@ def _plan_reading_history(session: Session) -> list[KeepDeleteGroup]:
 
 
 def _plan_suggestions(session: Session) -> list[KeepDeleteGroup]:
-    rows = session.query(Suggestions).filter_by(status="Suggested").all()
+    # Minor 3 (final review): order_by + sorted losers — see _plan_authors's comment. Survivor
+    # selection here is already order-independent (min by (suggested_at, str(id))); ordering
+    # keeps loser_ids stable across re-plans too.
+    rows = session.query(Suggestions).filter_by(status="Suggested").order_by(Suggestions.id).all()
     groups: dict[tuple[UUID, UUID], list[Suggestions]] = defaultdict(list)
     for s in rows:
         groups[(s.user_id, s.work_id)].append(s)
@@ -533,7 +584,7 @@ def _plan_suggestions(session: Session) -> list[KeepDeleteGroup]:
         if len(dup_rows) < 2:
             continue
         survivor = min(dup_rows, key=lambda r: (r.suggested_at, str(r.id)))
-        losers = [s for s in dup_rows if s.id != survivor.id]
+        losers = sorted((s for s in dup_rows if s.id != survivor.id), key=lambda s: str(s.id))
         out.append(KeepDeleteGroup(survivor_id=survivor.id, loser_ids=[loser.id for loser in losers], detail=str(key)))
     return out
 

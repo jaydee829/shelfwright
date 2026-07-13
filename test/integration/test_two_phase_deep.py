@@ -80,6 +80,39 @@ def test_enrich_deep_updates_same_work_idempotently(db_url, monkeypatch):
         assert orphans == 0
 
 
+def test_enrich_deep_returns_missing_not_done_when_nothing_was_persisted(db_url, monkeypatch):
+    """Final-review Minor 7 (honesty): if the scouts return a row but persist_enriched_work
+    ends up with NOTHING to attach it to (raw_contributors empties out after the malformed-name
+    filter — e.g. the deep scout's only contributor entry has no usable name), nothing is
+    persisted and deep_enriched_at is never stamped. enrich_deep must report "missing", not lie
+    and say "done" — the caller (api/internal.py) maps "missing" to a non-retryable 404, while
+    "done" would tell Cloud Tasks (and the operator) a pass succeeded when it did nothing at
+    all."""
+    from agentic_librarian.enrichment import two_phase
+
+    manager = DatabaseManager(db_url)
+    monkeypatch.setattr(two_phase, "db_manager", manager)
+    # A deep-scout result with contributors that all fail the malformed-name filter (persist.py's
+    # raw_contributors comprehension drops entries with no usable string name) — this is the
+    # concrete way persist_enriched_work returns None without touching the DB at all, standing in
+    # for "the work's identity vanished mid-pass and nothing could be attached."
+    deep = {
+        "enriched_tropes": [],
+        "narrator_names": [],
+        "contributors": [{"name": None, "role": "Author"}],
+    }
+    monkeypatch.setattr(two_phase, "create_deep_scout_manager", lambda: _FakeManager(deep))
+
+    work_id = _seed_work(manager, title="Vanishing Work", author="Some Author")
+
+    assert two_phase.enrich_deep(work_id) == "missing"
+
+    with manager.get_session() as s:
+        work = s.get(Work, work_id)
+        # nothing was persisted or stamped — the work is exactly as it was seeded
+        assert work.deep_enriched_at is None
+
+
 def test_enrich_deep_returns_false_for_unknown_work(db_url, monkeypatch):
     from uuid import uuid4
 

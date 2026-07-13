@@ -34,9 +34,12 @@ TIMESTAMPTZ_COLUMNS: list[tuple[str, str]] = [
     ("import_rows", "updated_at"),
 ]
 
-# GH #109: FK/join-column indexes missing on the hot query paths.
+# GH #109: FK/join-column indexes missing on the hot query paths. NOTE (final-review Minor 5):
+# editions.work_id deliberately does NOT get its own ix_editions_work_id here — the
+# uq_editions_work_format unique index below is (work_id, format), and a leading column of a
+# composite/multi-column index already serves lookups on that column alone (standard btree
+# behavior), so a separate single-column index would be redundant.
 FK_INDEXES: list[tuple[str, str]] = [
-    ("editions", "work_id"),
     ("reading_history", "edition_id"),
     ("work_tropes", "trope_id"),
     ("work_contributors", "author_id"),

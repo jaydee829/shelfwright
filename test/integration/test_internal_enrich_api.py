@@ -126,6 +126,45 @@ def test_empty_deep_pass_on_work_with_real_trope_returns_200(client, db_url, mon
     assert resp.json() == {"work_id": str(work_id), "status": "already_enriched"}
 
 
+def test_empty_deep_pass_gives_up_after_8_retries_returns_200(client, db_url, monkeypatch):
+    """Important (final review): Cloud Tasks default maxAttempts=100 with ~hourly backoff would
+    otherwise mean ~100 PAID deep passes per poison book. Once Cloud Tasks' own
+    X-CloudTasks-TaskRetryCount header reports >=8 retries AND the work still has no real
+    trope, give up loudly with 200 (not 503) so Cloud Tasks stops retrying — the documented
+    backstop is the operator's --requeue-unenriched sweep, not unbounded paid retries."""
+    manager = DatabaseManager(db_url)
+    work_id = _seed_work(manager, with_real_trope=False)
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
+    monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: "empty")
+
+    resp = client.post(
+        f"/internal/enrich/{work_id}",
+        headers={"Authorization": "Bearer good", "X-CloudTasks-TaskRetryCount": "8"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"work_id": str(work_id), "status": "empty_deep_pass_gave_up"}
+
+
+def test_empty_deep_pass_still_retries_below_give_up_threshold(client, db_url, monkeypatch):
+    """The give-up threshold is >=8, not "any retry count present" — below it, the ordinary
+    retryable 503 path still fires so Cloud Tasks keeps retrying with backoff."""
+    manager = DatabaseManager(db_url)
+    work_id = _seed_work(manager, with_real_trope=False)
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
+    monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: "empty")
+
+    resp = client.post(
+        f"/internal/enrich/{work_id}",
+        headers={"Authorization": "Bearer good", "X-CloudTasks-TaskRetryCount": "3"},
+    )
+    assert resp.status_code == 503
+    assert resp.json() == {"detail": {"work_id": str(work_id), "status": "empty_deep_pass"}}
+
+
 def test_unverified_email_is_forbidden(client, monkeypatch):
     # Mutation guard: a token with the correct SA email but email_verified=False must still 403.
     # Deleting the `not claims.get("email_verified")` check would let this through.

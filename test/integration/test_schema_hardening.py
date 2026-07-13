@@ -24,8 +24,10 @@ def test_fk_indexes_exist(db_url):
     from agentic_librarian.db.session import DatabaseManager
 
     insp = inspect(DatabaseManager(db_url).engine)
+    # Final-review Minor 5: editions.work_id is deliberately NOT in this list (and has no
+    # standalone ix_editions_work_id) — uq_editions_work_format's leading column (work_id,
+    # format) already serves lookups on work_id alone; see test_no_redundant_editions_work_id_index.
     for table, col in [
-        ("editions", "work_id"),
         ("reading_history", "edition_id"),
         ("work_tropes", "trope_id"),
         ("work_contributors", "author_id"),
@@ -38,6 +40,18 @@ def test_fk_indexes_exist(db_url):
     ]:
         names = {i["name"] for i in insp.get_indexes(table)}
         assert f"ix_{table}_{col}" in names, f"missing ix_{table}_{col}"
+
+
+def test_no_redundant_editions_work_id_index(db_url):
+    """Final-review Minor 5: uq_editions_work_format's leading column (work_id, format) already
+    serves lookups on work_id alone (standard btree behavior) — a separate ix_editions_work_id
+    would be redundant, so the migration deliberately does NOT create one."""
+    from agentic_librarian.db.session import DatabaseManager
+
+    insp = inspect(DatabaseManager(db_url).engine)
+    names = {i["name"] for i in insp.get_indexes("editions")}
+    assert "ix_editions_work_id" not in names
+    assert "uq_editions_work_format" in names  # the index that serves work_id lookups instead
 
 
 def test_timestamps_are_timestamptz(db_url):

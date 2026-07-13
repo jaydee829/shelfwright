@@ -11,7 +11,10 @@ re-checks dedup before persisting (the #95 TOCTOU window is back to milliseconds
 of the scouts' full duration).
 
 This is a parallel surface to mcp/server.py's enrich_and_persist_work (the all-scouts
-discovery write tool, left untouched): same persist core, tiered scouts."""
+discovery write tool). enrich_and_persist_work now ROUTES THROUGH enrich_fast (not left
+untouched — corrected, final review Minor 6), so it is covered by enrich_fast's
+pg_advisory_xact_lock dedup guard the same as every other fast-pass caller: same persist
+core, tiered scouts."""
 
 from __future__ import annotations
 
@@ -180,15 +183,20 @@ def enrich_deep(work_id: UUID) -> str:
     call), then re-persist in a fresh session.
 
     Returns one of:
-      "missing" — no Work has that id, or it has no linked Author (non-retryable).
+      "missing" — no Work has that id, or it has no linked Author (non-retryable). Also
+                  returned (final-review Minor 7 honesty fix) if the write session's
+                  persist_enriched_work returns None — nothing was persisted and
+                  deep_enriched_at was never stamped, so "done" would be a lie; "missing" tells
+                  the caller (api/internal.py) this is non-retryable the same way an
+                  already-gone Work is, rather than falsely reporting success.
       "empty"   — the scouts yielded nothing to add this pass. A SHORT session stamps
                   work.deep_enriched_at = now() anyway (GH #97): the timestamp means "the
                   deep pass COMPLETED", including confirmed-empty — the caller (api/internal.py)
                   decides retryability from the work's real-trope state, not from this string
                   alone. An exception raised before this point propagates uncaught, leaving
                   deep_enriched_at unstamped so Cloud Tasks retries the whole pass.
-      "done"    — the scouts found something; the write session persists the row AND stamps
-                  deep_enriched_at on the SAME Work in the SAME session."""
+      "done"    — the scouts found something AND the write session actually persisted +
+                  stamped deep_enriched_at on the SAME Work in the SAME session."""
     with db_manager.get_session() as session:
         work = session.get(Work, work_id)
         if work is None:
@@ -213,7 +221,13 @@ def enrich_deep(work_id: UUID) -> str:
 
     with db_manager.get_session() as session:
         work = _persist_row(session, row)
-        if work is not None:
-            work.deep_enriched_at = datetime.now(UTC)
+        if work is None:
+            # Nothing was persisted (e.g. the scouted row had no usable contributor to attach
+            # to — persist_enriched_work's own "no work" case) and deep_enriched_at was never
+            # stamped. Reporting "done" here would be dishonest: the caller would treat a
+            # no-op as success. "missing" makes it non-retryable the same way an already-gone
+            # Work is (final-review Minor 7).
+            return "missing"
+        work.deep_enriched_at = datetime.now(UTC)
         session.flush()
     return "done"

@@ -72,8 +72,23 @@ def _has_real_trope(work_id: UUID) -> bool:
         return any(is_fallback_trope_name(name, work.genres, work.moods) is False for (name,) in names)
 
 
+# Cloud Tasks' own retry-count header (set by the queue on every redelivery, 0 on the first
+# attempt) — https://cloud.google.com/tasks/docs/creating-http-target-tasks#handler. Cloud
+# Tasks' default maxAttempts is 100 with backoff maxing out around an hour between attempts, so
+# an unbounded empty-pass-503 loop on a genuinely poison book (bad title/author, scouts will
+# NEVER find a real trope for it) would otherwise cost ~100 PAID deep-LLM passes before anyone
+# notices. Giving up loudly at a bounded retry count is cheap insurance: the operator's
+# --requeue-unenriched sweep (etl/enrichment_sweep.py) is the documented backstop for works that
+# gave up here, so nothing is silently lost — it's just no longer an unbounded retry bill.
+GIVE_UP_AFTER_RETRIES = 8
+
+
 @router.post("/internal/enrich/{work_id}")
-def enrich(work_id: UUID, authorization: str | None = Header(None)):  # noqa: B008
+def enrich(
+    work_id: UUID,
+    authorization: str | None = Header(None),  # noqa: B008
+    x_cloudtasks_taskretrycount: str | None = Header(None),  # noqa: B008
+):
     _require_queue_caller(authorization)
     result = two_phase.enrich_deep(work_id)
     if result == "missing":
@@ -84,10 +99,20 @@ def enrich(work_id: UUID, authorization: str | None = Header(None)):  # noqa: B0
             # The work already has a real fingerprint from a prior pass; this empty pass
             # added nothing new but isn't a failure — don't make Cloud Tasks retry forever.
             return {"work_id": str(work_id), "status": "already_enriched"}
-        # No real trope AND this pass found nothing: retryable. Cloud Tasks retries with
-        # backoff; retry exhaustion is the poison-task end state — the requeue sweep
-        # (etl/enrichment_sweep.py, scripts/clean_catalog.py --requeue-unenriched) is the
-        # operator backstop for works that exhaust retries or were never queued at all.
+        try:
+            retry_count = int(x_cloudtasks_taskretrycount) if x_cloudtasks_taskretrycount is not None else 0
+        except ValueError:
+            retry_count = 0
+        if retry_count >= GIVE_UP_AFTER_RETRIES:
+            # Retry bound reached with still no real trope: this is the poison-task end state,
+            # not a transient failure. Return 200 (not 503) so Cloud Tasks STOPS retrying —
+            # the --requeue-unenriched sweep is the operator's backstop for these, not another
+            # 92 paid deep passes at ~hourly backoff.
+            logger.warning("empty deep pass gave up after %d retries (no real trope): work_id=%s", retry_count, work_id)
+            return {"work_id": str(work_id), "status": "empty_deep_pass_gave_up"}
+        # No real trope AND this pass found nothing, and we haven't hit the give-up bound yet:
+        # retryable. Cloud Tasks retries with backoff; the requeue sweep is also the backstop
+        # for works that exhaust retries or were never queued at all.
         raise HTTPException(status_code=503, detail={"work_id": str(work_id), "status": "empty_deep_pass"})
     return {"work_id": str(work_id), "status": "enriched"}
 

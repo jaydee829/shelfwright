@@ -78,7 +78,7 @@ This file tracks important project configuration, constants, and environment det
   Nightly automated backups (09:00 UTC) + 7-day PITR enabled 2026-07-12 (GH #91; codified in
   `infra/02-cloudsql.sh`).
   Engine pools: `pool_pre_ping` + 30-min recycle, 5+2 per engine, one shared engine per API process (GH #102/#94) — 2 instances × 7 = 14 of db-f1-micro's ~25 connections; #123 landed (embeds warmed into the LRU before write/search sessions, so overflow tightened from 5).
-  5 unique indexes (authors/narrators case-insensitive name, editions work+format, reading_history, active suggestions), 10 FK indexes, 13 timestamptz columns, and `works.deep_enriched_at` live as of the Phase 6.3 migration (`48e3762d6c0c`, GH #95/#97/#108/#109) — see ADR-060 and `docs/runbooks/phase6-3-schema-rollout.md`.
+  5 unique indexes (authors/narrators case-insensitive name, editions work+format, reading_history, active suggestions), 9 FK indexes (editions.work_id deliberately excluded — uq_editions_work_format's leading column already serves it), 13 timestamptz columns, and `works.deep_enriched_at` live as of the Phase 6.3 migration (`48e3762d6c0c`, GH #95/#97/#108/#109) — see ADR-060 and `docs/runbooks/phase6-3-schema-rollout.md`.
 - **Deploys**: automatic on merge to `main` touching `src/**`/`pyproject.toml`/
   `Dockerfile.api` (`.github/workflows/deploy.yml`, WIF keyless); manual redeploy via
   the Actions tab (`workflow_dispatch`). Images in Artifact Registry, tags = git SHAs.

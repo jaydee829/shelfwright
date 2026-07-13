@@ -154,7 +154,10 @@ class Edition(Base):
     __tablename__ = "editions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4, nullable=False)
-    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False, index=True)
+    # GH #109/final-review Minor 5: NO index=True here (no standalone ix_editions_work_id) — the
+    # leading column of uq_editions_work_format (work_id, format), just below, already serves
+    # lookups on work_id alone; a separate single-column index would be redundant.
+    work_id: Mapped[UUID] = mapped_column(ForeignKey("works.id"), nullable=False)
     isbn_13: Mapped[str | None] = mapped_column(String, nullable=True)
     # GH #95: uq_editions_work_format — UNIQUE (work_id, format) NULLS NOT DISTINCT (raw
     # DDL in the 48e3762d6c0c migration; not expressible via mapped_column/UniqueConstraint).

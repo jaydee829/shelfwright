@@ -234,10 +234,12 @@ docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gate
 - **5 unique indexes**: `uq_authors_name_lower`, `uq_narrators_name_lower`,
   `uq_editions_work_format`, `uq_reading_history_user_edition_date`,
   `uq_suggestions_active`.
-- **10 new FK indexes** (`ix_<table>_<column>`): `editions.work_id`,
-  `reading_history.edition_id`, `work_tropes.trope_id`, `work_contributors.author_id`,
-  `suggestions.work_id`, `author_styles.style_id`, `work_styles.style_id`,
-  `usage.conversation_id`, `narrator_styles.style_id`, `edition_narrators.narrator_id`.
+- **9 new FK indexes** (`ix_<table>_<column>`): `reading_history.edition_id`,
+  `work_tropes.trope_id`, `work_contributors.author_id`, `suggestions.work_id`,
+  `author_styles.style_id`, `work_styles.style_id`, `usage.conversation_id`,
+  `narrator_styles.style_id`, `edition_narrators.narrator_id`. (No standalone
+  `ix_editions_work_id` — the `uq_editions_work_format` unique index below is
+  `(work_id, format)`, and its leading column already serves lookups on `work_id` alone.)
 - **13 columns converted to timestamptz**: `suggestions.suggested_at`,
   `conversations.created_at`/`updated_at`, `messages.created_at`, `users.created_at`,
   `usage.created_at`, `user_credentials.created_at`/`updated_at`,
@@ -268,6 +270,14 @@ behind DB fails the new revision outright.
 **How:** normal squash-merge via GitHub (title = PR title, blank body — the #90 durable
 fix, no `[skip ci]` risk).
 
+**Proceed to merge promptly after migrating** (final-review Minor 4): in the window between
+step 4 (constraints landed) and this PR's deploy going live, the STILL-DEPLOYED (pre-PR-D)
+code runs against the NEW constraints — its unguarded get-or-create races now hit real
+`IntegrityError`s where they previously silently created duplicate rows. This is SAFE (no
+data corruption; the new unique constraints are exactly what's supposed to reject the race)
+but user-visible (a 500 on an unlucky concurrent write) until PR-D's constraint-backed
+`get_or_create`/`insert_or_requery` code deploys. Don't linger in this window.
+
 **Done when:** merged; the deploy workflow fires automatically (path-filtered on
 `src/**`/`pyproject.toml`/`Dockerfile.api`).
 
@@ -295,7 +305,7 @@ for the works that need a deep pass (re)run.
 **How:**
 
 1. **Constraint sanity** — a `\di` (or equivalent `information_schema.pg_indexes`) listing
-   confirms the 5 unique indexes + 10 FK indexes from step 4 exist with the expected
+   confirms the 5 unique indexes + 9 FK indexes from step 4 exist with the expected
    definitions (`lower(name)` expressions, the `NULLS NOT DISTINCT` composite, the partial
    `WHERE status = 'Suggested'` predicate). No need to attempt actual duplicate-insert
    probes — the migration's own `op.execute`d DDL either applied or the migration would
@@ -324,20 +334,34 @@ for the works that need a deep pass (re)run.
    set in the prod container env, nothing extra to configure) for exactly these works; it is
    safe to apply directly against the full report rather than reserving it for a subset,
    since the backfill already excluded already-enriched works from appearing at all.
-3. **Close the issues** — after acceptance, close #95 #96 #97 #98 #108 #109 #110 #111 #112
+3. **Apply the enrich-queue retry-attempts cap** — `infra/08-cloud-tasks.sh` now pins
+   `--max-attempts=12` on the enrich queue (defense in depth: the internal enrich endpoint
+   already gives up loudly at 8 retries via `X-CloudTasks-TaskRetryCount` and returns 200,
+   so this queue-level cap should rarely if ever bind — it's a backstop, not the primary
+   mechanism). `infra/08-cloud-tasks.sh` is idempotent (`gcloud tasks queues update` when the
+   queue already exists), so simply re-running it applies the new flag to the live queue:
+
+   ```bash
+   ./infra/08-cloud-tasks.sh
+   ```
+
+   **Done when:** `gcloud tasks queues describe "$TASKS_QUEUE_NAME" --location="$REGION"
+   --format='value(rateLimits,retryConfig.maxAttempts)'` reports `maxAttempts: 12`.
+4. **Close the issues** — after acceptance, close #95 #96 #97 #98 #108 #109 #110 #111 #112
    with references to the resolving PRs (#124 for PR-C's #96/#98/#110/#111/#112/#123; this
    PR for #95/#97/#108/#109), and comment on #88 noting `log_suggestion` dedup closes its
    root cause.
 
-**Done when:** index listing confirms all 15 new objects; the first requeue report is
-generated and reviewed; issues closed with PR references.
+**Done when:** index listing confirms all 14 new objects (5 unique + 9 FK indexes); the
+first requeue report is generated and reviewed; the enrich queue's `maxAttempts` reads 12;
+issues closed with PR references.
 
 ---
 
 ## Rollback
 
 - **Migration:** the migration has a symmetric hand-written `downgrade()` — drops the 5
-  unique indexes, drops the 10 FK indexes, drops `deep_enriched_at`, converts the 13
+  unique indexes, drops the 9 FK indexes, drops `deep_enriched_at`, converts the 13
   timestamptz columns back to naive `timestamp` (`AT TIME ZONE 'UTC'` both directions).
   `alembic downgrade -1` from this revision if needed.
 - **Dedup apply (step 3):** not naturally reversible (rows were merged/deleted) — this is

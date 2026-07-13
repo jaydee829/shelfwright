@@ -661,6 +661,68 @@ def test_apply_edition_group_refuses_when_loser_has_unplanned_narrator_link(db_u
         session.flush()
 
 
+# --------------------------------------------------------------------------------------------
+# Planner determinism (final-review Minor 3): every group query is order_by'd on its pk (and
+# losers are sorted) so dry-run and an apply-time re-plan against UNCHANGED data classify
+# collisions identically — otherwise a Postgres row-order difference between two plans over the
+# same rows could flip which loser link is "repoint" vs "delete", spuriously tripping the
+# apply-gate's drift-refuse (plan_delta sees a changed operation tag on an unchanged id).
+# --------------------------------------------------------------------------------------------
+
+
+def test_plan_dedup_is_deterministic_across_repeated_calls(db_url):
+    """Two consecutive plan_dedup calls against the SAME unchanged data must classify every
+    collision identically — same repoint/delete assignment, same loser order — not just the
+    same counts. Seeds two authors and two narrators, each with two losers that both carry a
+    link colliding with the survivor's, so classification depends on loser iteration order."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        a1 = Author(name="Repeat Survivor")  # most-linked -> survivor
+        a2 = Author(name="repeat survivor")  # loser 1
+        a3 = Author(name="REPEAT SURVIVOR")  # loser 2
+        w1 = Work(title="Determinism Work 1")
+        w2 = Work(title="Determinism Work 2")
+        w3 = Work(title="Determinism Work 3")
+        session.add_all([a1, a2, a3, w1, w2, w3])
+        session.flush()
+
+        # a1 (survivor) gets 3 links; a2 and a3 (losers) each get 1 link that collides with the
+        # SAME (work, role) key a1 already has — both should classify as delete_links regardless
+        # of which loser is processed first (this is what "deterministic" is actually testing:
+        # a REPEATABLE outcome across repeated plans, not merely "some" outcome).
+        session.add(WorkContributor(work_id=w1.id, author_id=a1.id, role="Author"))
+        session.add(WorkContributor(work_id=w2.id, author_id=a1.id, role="Author"))
+        session.add(WorkContributor(work_id=w3.id, author_id=a1.id, role="Author"))
+        session.add(WorkContributor(work_id=w1.id, author_id=a2.id, role="Author"))  # collides w1
+        session.add(WorkContributor(work_id=w1.id, author_id=a3.id, role="Author"))  # also collides w1
+        session.flush()
+
+        plan1 = db_.plan_dedup(session)
+        plan2 = db_.plan_dedup(session)
+
+        assert plan1.summary()["duplicate_authors"] == 1
+        assert plan2.summary()["duplicate_authors"] == 1
+        g1, g2 = plan1.duplicate_authors[0], plan2.duplicate_authors[0]
+
+        assert g1.survivor_id == g2.survivor_id == a1.id
+        # loser order must be identical (sorted losers, per Minor 3)
+        assert g1.loser_ids == g2.loser_ids
+        # classification must be identical: same links in delete_links, same in repoint_links,
+        # in the same order, across both plans
+        assert g1.delete_links == g2.delete_links
+        assert g1.repoint_links == g2.repoint_links
+        # both loser links collide with a1's existing w1 link -> both must be delete_links, not
+        # split across repoint/delete depending on processing order
+        assert len(g1.delete_links) == 2
+        assert len(g1.repoint_links) == 0
+
+        # cleanup: apply one of the (identical) plans so no case-duplicate authors remain for
+        # the module's autouse _pre_constraint_schema fixture to recreate uq_authors_name_lower
+        # against at teardown.
+        db_.apply_dedup(session, plan1)
+        session.flush()
+
+
 def test_orphan_authors_recomputed_after_merge_needs_replan(db_url):
     """An author orphaned BY a same-run merge is caught only on a re-run (documented honesty,
     not simulated ahead of time)."""
