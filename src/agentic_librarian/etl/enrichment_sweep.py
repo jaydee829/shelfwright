@@ -15,6 +15,7 @@ etl/trope_backfill.py's plan_fallback_prune."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -31,6 +32,12 @@ class RequeueCandidate:
     work_id: UUID
     title: str
     reason: RequeueReason
+    # Adversarial-pass finding (#95 #97 review): surfaced alongside each candidate so an
+    # operator re-reviewing a REPEAT sweep can see "already re-attempted after X" for a
+    # no_real_trope entry that keeps coming back — see plan_requeue's docstring and the
+    # runbook's step 6 repeat-cost warning. None for never_deep_enriched (that's the whole
+    # point of the class); set for no_real_trope (the prior stamp that didn't help).
+    deep_enriched_at: datetime | None = None
 
 
 def plan_requeue(session: Session) -> list[RequeueCandidate]:
@@ -59,5 +66,5 @@ def plan_requeue(session: Session) -> list[RequeueCandidate]:
         names = trope_names_by_work.get(work.id, [])
         has_real = any(is_fallback_trope_name(n, work.genres, work.moods) is False for n in names)
         if not has_real:
-            out.append(RequeueCandidate(work.id, work.title, "no_real_trope"))
+            out.append(RequeueCandidate(work.id, work.title, "no_real_trope", deep_enriched_at=work.deep_enriched_at))
     return out

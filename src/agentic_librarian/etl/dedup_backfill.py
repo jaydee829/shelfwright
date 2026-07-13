@@ -307,8 +307,17 @@ def _plan_narrators(session: Session) -> list[ContributorMergeGroup]:
 
 def _apply_contributor_group(session: Session, group: ContributorMergeGroup, *, kind: str) -> dict[str, int]:
     """kind: 'author' | 'narrator'. Applies exactly the ids in `group`; anything vanished since
-    planning is skipped and counted under skipped_stale."""
-    stats = {"merged": 0, "skipped_stale": 0}
+    planning is skipped and counted under skipped_stale.
+
+    Belt-and-braces (adversarial pass, GH #95 #97 follow-up): mirrors _apply_edition_group's
+    unplanned-row re-verify. Author.styles / Narrator.styles cascade `all, delete-orphan` — a
+    bare `session.delete(loser)` would silently cascade-delete ANY style row still attached to
+    that loser at delete time, including one a concurrent write attached AFTER this group was
+    planned (this group's own repoint_styles/delete_styles is silent about it, same as the
+    edition case's silence about an unplanned narrator link). Before deleting each loser, check
+    for a style row that survives and was NOT named by this group's own plan for that loser id;
+    if found, refuse the delete and count it under skipped_unsafe instead."""
+    stats = {"merged": 0, "skipped_stale": 0, "skipped_unsafe": 0}
     survivor_id_present = session.get(Author if kind == "author" else Narrator, group.survivor_id) is not None
     if not survivor_id_present:
         stats["skipped_stale"] += 1
@@ -394,11 +403,29 @@ def _apply_contributor_group(session: Session, group: ContributorMergeGroup, *, 
             session.delete(st)
         session.flush()
 
+    # Planned style pks per loser, so the re-verify below can tell "planned, already handled
+    # above" apart from "unplanned, showed up since this group was planned".
+    planned_style_pks_by_loser: dict[UUID, set[tuple]] = defaultdict(set)
+    for loser_id, pk in group.repoint_styles:
+        planned_style_pks_by_loser[loser_id].add(pk)
+    for loser_id, pk in group.delete_styles:
+        planned_style_pks_by_loser[loser_id].add(pk)
+
     model = Author if kind == "author" else Narrator
+    style_model = AuthorStyle if kind == "author" else NarratorStyle
+    style_fk = "author_id" if kind == "author" else "narrator_id"
     for loser_id in group.loser_ids:
         row = session.get(model, loser_id)
         if row is None:
             stats["skipped_stale"] += 1
+            continue
+        remaining_style_pks = {
+            (getattr(st, style_fk), st.style_id, st.attribute_type)
+            for st in session.query(style_model).filter_by(**{style_fk: loser_id}).all()
+        }
+        unplanned = remaining_style_pks - planned_style_pks_by_loser.get(loser_id, set())
+        if unplanned:
+            stats["skipped_unsafe"] += 1
             continue
         session.delete(row)
     session.flush()
@@ -804,8 +831,8 @@ def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
     reading_history, suggestions, orphans. duplicate_works_report_only is NEVER applied.
     Rows that vanished between plan and apply are skipped and counted under skipped_stale.
     Rows that survived but weren't accounted for by the group's own plan (the
-    _apply_edition_group belt-and-braces re-verify — see its docstring) are counted separately
-    under skipped_unsafe, distinct from skipped_stale."""
+    _apply_edition_group / _apply_contributor_group belt-and-braces re-verify — see their
+    docstrings) are counted separately under skipped_unsafe, distinct from skipped_stale."""
     result = {
         "duplicate_authors": 0,
         "duplicate_narrators": 0,
@@ -821,11 +848,13 @@ def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
         stats = _apply_contributor_group(session, group, kind="author")
         result["duplicate_authors"] += stats["merged"]
         result["skipped_stale"] += stats["skipped_stale"]
+        result["skipped_unsafe"] += stats["skipped_unsafe"]
 
     for group in plan.duplicate_narrators:
         stats = _apply_contributor_group(session, group, kind="narrator")
         result["duplicate_narrators"] += stats["merged"]
         result["skipped_stale"] += stats["skipped_stale"]
+        result["skipped_unsafe"] += stats["skipped_unsafe"]
 
     for group in plan.duplicate_editions:
         stats = _apply_edition_group(session, group)

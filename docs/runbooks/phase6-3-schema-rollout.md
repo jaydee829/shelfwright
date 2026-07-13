@@ -127,8 +127,13 @@ Open `data/reports/dedup-<ts>.txt` and check:
   `--apply` (works carry no cross-table unique constraint; see ADR-060 decision 5). Read
   through the listed title/author groups. These are candidates for a future manual/case-by-
   case work merge, not something this rollout touches — just confirm nothing here looks
-  like it should have been blocking (it isn't; the advisory lock in PR-C prevents *new*
-  work duplicates going forward, this list is just visibility into what already exists).
+  like it should have been blocking (it isn't). **Note on timing:** the advisory lock that
+  will prevent *new* work duplicates going forward ships in THIS branch but only starts
+  serving once step 5's deploy is live — during steps 2–4 the still-deployed serving code
+  has only the milliseconds-window TOCTOU re-check PR-C shipped, not the lock. Fresh
+  work-duplicates ARE possible during this window and are harmless (works carry no unique
+  constraint to violate); if you see one appear, it'll just show up in a later
+  `duplicate_works_report_only` list, not a sign of a problem.
 - **Expected, not-a-bug artifacts** (per PR-C's final review, folded into this design):
   - **`orphan_authors` may legitimately be nonzero even post-PR-C.** The Dagster ETL's
     `skip_enrichment=True` branch (operator-curated re-runs only; prod's normal paths
@@ -182,6 +187,14 @@ the flagged new/changed ids), and if it still looks right, re-run step 3 pointin
 `--report` at the new file. This is not a bug — it's the gate doing its job. In a
 quiet-ish window (step 0) this should be rare.
 
+**If `--apply` crashes mid-run** (an `IntegrityError`/`AssertionError` instead of a clean
+exit): a concurrent write landed in the narrow window between the fresh re-plan and this
+run's execution — the exact same race the drift-refuse above is designed to catch, just
+caught later, by the database itself, instead of by the id cross-check. Nothing was
+applied: the whole apply runs in a single transaction, so a mid-run crash rolls back
+completely, not partially. **Loop back to step 2** — re-run the dry-run, review the fresh
+report, and re-apply. Not a sign of data corruption or a bug in the tool.
+
 **Orphan-author note:** a merge in this same run can create a NEW orphan author (e.g. two
 authors merge, and the loser was the only thing keeping some third row's join alive) —
 `_plan_orphan_authors` computes against current state, not simulated ahead of this run's
@@ -228,6 +241,13 @@ docker run --rm -v "$PWD":/app -w /app --add-host=host.docker.internal:host-gate
   -e DATABASE_URL="$PROD_DB_URL" agentic_librarian-app:latest alembic upgrade head
 # expect: now at 48e3762d6c0c
 ```
+
+**If `CREATE UNIQUE INDEX` fails with a duplicate-key error:** this is the KNOWN race — a
+duplicate row was minted between the last clean dry-run/apply pass (step 2/3) and this
+migration by the still-serving PR-C code (its TOCTOU window, same root cause as the step 3
+crash note above). The whole migration is one transaction, so this rolls back cleanly —
+nothing is broken, no partial DDL, no need to downgrade. **Loop back to step 2**: re-run
+the dry-run, review the fresh (now-nonzero) report, re-apply (step 3), then re-run step 4.
 
 **Verify the objects landed** (`\d` output or `information_schema`), expected:
 
@@ -334,6 +354,17 @@ for the works that need a deep pass (re)run.
    set in the prod container env, nothing extra to configure) for exactly these works; it is
    safe to apply directly against the full report rather than reserving it for a subset,
    since the backfill already excluded already-enriched works from appearing at all.
+
+   **Repeat-cost warning (this sweep is not one-and-done):** on REPEAT runs of this same
+   `--requeue-unenriched` dry-run, watch for a `no_real_trope` entry that keeps showing up
+   across multiple applies — each printed candidate now includes its `deep_enriched_at`
+   stamp specifically so you can see this ("already re-attempted after X"). A work that
+   still lands in `no_real_trope` after a prior re-enqueue has already had its shot; it is
+   likely a genuinely unknowable title (garbage/unindexed metadata the deep pass can't work
+   with, not a transient failure) rather than something that'll succeed on attempt N+1.
+   **Fix or remove the work instead of re-enqueuing it again** — every re-enqueue costs up
+   to 9 paid deep passes (the enrich queue's per-task retry budget) for a work that's
+   unlikely to convert.
 3. **Apply the enrich-queue retry-attempts cap** — `infra/08-cloud-tasks.sh` now pins
    `--max-attempts=12` on the enrich queue (defense in depth: the internal enrich endpoint
    already gives up loudly at 8 retries via `X-CloudTasks-TaskRetryCount` and returns 200,

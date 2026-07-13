@@ -317,7 +317,13 @@ def main(argv: list[str] | None = None) -> int:
             candidates = enrichment_sweep.plan_requeue(session)
             print(f"\n{len(candidates)} works would be requeued for deep enrichment.")
             for c in candidates[:80]:
-                print(f"  [{c.reason:20}] {c.title[:60]}  ({c.work_id})")
+                # Adversarial-pass finding (#95 #97): show deep_enriched_at next to no_real_trope
+                # entries so a REPEAT sweep lets the operator see "already re-attempted after X"
+                # — see the runbook's step 6 repeat-cost warning (each re-enqueue costs up to 9
+                # paid deep passes; a persistently-unknowable title should be fixed/removed, not
+                # re-enqueued forever).
+                stamp = f"  (deep_enriched_at={c.deep_enriched_at})" if c.deep_enriched_at else ""
+                print(f"  [{c.reason:20}] {c.title[:60]}  ({c.work_id}){stamp}")
             early = _refuse(args, url, safe)
             if early is not None:
                 return early

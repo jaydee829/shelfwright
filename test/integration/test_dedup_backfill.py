@@ -661,6 +661,114 @@ def test_apply_edition_group_refuses_when_loser_has_unplanned_narrator_link(db_u
         session.flush()
 
 
+def test_apply_contributor_group_refuses_when_loser_author_has_unplanned_style(db_url):
+    """Adversarial-pass finding (GH #95 #97 follow-up): the contributor-delete path lacked the
+    skipped_unsafe guard the edition path has. Author.styles cascades `all, delete-orphan` — a
+    bare `session.delete(loser)` would silently cascade away ANY AuthorStyle row still attached
+    to that loser at delete time, including one a concurrent write attached AFTER this group was
+    planned (the group's own plan is silent about it, mirroring the edition-narrator case).
+    Force-feed a hand-built ContributorMergeGroup whose plan is silent about a style link that
+    exists on the loser author at apply time and assert the delete is refused, not applied."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        survivor = Author(name="Style Survivor")
+        loser = Author(name="style survivor")
+        style = Style(name="Untracked Pacing Style", category="Author")
+        session.add_all([survivor, loser, style])
+        session.flush()
+
+        # loser (about to be force-fed as the loser) carries a style link the plan below is
+        # deliberately silent about — the unsafe state the belt-and-braces check must catch.
+        session.add(AuthorStyle(author_id=loser.id, style_id=style.id, attribute_type="pacing"))
+        session.flush()
+
+        unsafe_group = db_.ContributorMergeGroup(
+            survivor_id=survivor.id,
+            survivor_name=survivor.name,
+            loser_ids=[loser.id],
+            loser_names=[loser.name],
+            repoint_links=[],
+            delete_links=[],
+            repoint_styles=[],  # silent about (loser, style) — the unsafe condition
+            delete_styles=[],
+        )
+
+        stats = db_._apply_contributor_group(session, unsafe_group, kind="author")
+        session.flush()
+
+        # skipped_unsafe fires (distinct from skipped_stale — the row didn't vanish, it was
+        # unaccounted-for); the binding assertion is that the loser author survives with its
+        # unplanned style link intact, not deleted out from under it.
+        # Note: stats["merged"] is unconditionally 1 here too — mirrors _apply_edition_group's
+        # existing convention (see test_apply_edition_group_refuses_when_loser_has_unplanned_
+        # narrator_link above, which likewise doesn't assert merged == 0); "merged" means "this
+        # group was processed", not "every planned row was applied". skipped_unsafe is the
+        # signal that actually distinguishes the refused delete.
+        assert stats.get("skipped_unsafe", 0) == 1
+        assert session.get(Author, loser.id) is not None
+        remaining = session.query(AuthorStyle).filter_by(author_id=loser.id, style_id=style.id).all()
+        assert len(remaining) == 1
+
+        # Cleanup: the refused delete deliberately LEAVES a duplicate lower(name) pair in place
+        # (that's the point of the test), which would violate uq_authors_name_lower when the
+        # module's autouse _pre_constraint_schema fixture recreates it at teardown. Clear the
+        # style link (its being unplanned was the test condition, now proven) and delete the
+        # loser author directly so the schema is clean for the index recreate, mirroring the
+        # edition test's cleanup above.
+        session.delete(
+            session.get(AuthorStyle, {"author_id": loser.id, "style_id": style.id, "attribute_type": "pacing"})
+        )
+        session.delete(session.get(Author, loser.id))
+        session.flush()
+
+
+def test_apply_contributor_group_refuses_when_loser_narrator_has_unplanned_style(db_url):
+    """Narrator-side mirror of the author test above — NarratorStyle also cascades
+    `all, delete-orphan` off Narrator.styles, so the same guard must apply on that branch of
+    _apply_contributor_group (kind="narrator"), which has its own separate code path."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        survivor = Narrator(name="Voice Survivor")
+        loser = Narrator(name="voice survivor")
+        style = Style(name="Untracked Voice Style", category="Narrator")
+        session.add_all([survivor, loser, style])
+        session.flush()
+
+        session.add(NarratorStyle(narrator_id=loser.id, style_id=style.id, attribute_type="voice_differentiation"))
+        session.flush()
+
+        unsafe_group = db_.ContributorMergeGroup(
+            survivor_id=survivor.id,
+            survivor_name=survivor.name,
+            loser_ids=[loser.id],
+            loser_names=[loser.name],
+            repoint_links=[],
+            delete_links=[],
+            repoint_styles=[],  # silent about (loser, style) — the unsafe condition
+            delete_styles=[],
+        )
+
+        stats = db_._apply_contributor_group(session, unsafe_group, kind="narrator")
+        session.flush()
+
+        # Note: stats["merged"] is unconditionally 1 — see the author test's comment above for
+        # why that's not the relevant signal here.
+        assert stats.get("skipped_unsafe", 0) == 1
+        assert session.get(Narrator, loser.id) is not None
+        remaining = session.query(NarratorStyle).filter_by(narrator_id=loser.id, style_id=style.id).all()
+        assert len(remaining) == 1
+
+        # Cleanup: same reasoning as the author test's cleanup above.
+        session.delete(
+            session.get(
+                NarratorStyle,
+                {"narrator_id": loser.id, "style_id": style.id, "attribute_type": "voice_differentiation"},
+            )
+        )
+        session.delete(session.get(Narrator, loser.id))
+        session.flush()
+
+
 # --------------------------------------------------------------------------------------------
 # Planner determinism (final-review Minor 3): every group query is order_by'd on its pk (and
 # losers are sorted) so dry-run and an apply-time re-plan against UNCHANGED data classify
