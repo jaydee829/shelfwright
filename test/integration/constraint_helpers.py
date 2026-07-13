@@ -36,3 +36,19 @@ def recreate_unique_indexes(conn: Connection, names: list[str]) -> None:
     for name in names:
         conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
         conn.execute(text(UNIQUE_INDEX_DDL[name]))
+
+
+def drop_work_deep_enriched_at(conn: Connection) -> None:
+    """Drop works.deep_enriched_at — mirrors the REAL pre-migration prod schema the gate tool
+    (scripts/clean_catalog.py --dedup-for-constraints, etl/dedup_backfill.py) runs against: the
+    gate is designed to run BEFORE `alembic upgrade head` lands migration 48e3762d6c0c, which is
+    what adds this column. Entity-loading Work while this column is absent from the test schema
+    but present on the SQLAlchemy model reproduces the live UndefinedColumn found against prod
+    (GH #95) instead of only ever testing against the POST-migration shape."""
+    conn.execute(text("ALTER TABLE works DROP COLUMN IF EXISTS deep_enriched_at"))
+
+
+def readd_work_deep_enriched_at(conn: Connection) -> None:
+    """Restore works.deep_enriched_at with the exact DDL from migration 48e3762d6c0c, so the
+    schema is unchanged for every other test in the run."""
+    conn.execute(text("ALTER TABLE works ADD COLUMN IF NOT EXISTS deep_enriched_at timestamptz"))

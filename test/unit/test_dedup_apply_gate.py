@@ -285,7 +285,9 @@ def test_parse_plan_ids_raises_on_malformed_class_header():
 
 class _Sess:
     """Minimal fake session — plan_dedup itself is monkeypatched below, so the fake session
-    only needs to satisfy main()'s top-of-loop recency probe (session.query(...).count())."""
+    only needs to satisfy main()'s top-of-loop recency probe (column-explicit
+    session.query(func.count(...)).scalar(), never an entity-load .count() — the probe must
+    work on the pre-migration prod schema, GH #95)."""
 
     def __enter__(self):
         return self
@@ -303,6 +305,9 @@ class _Sess:
         return []
 
     def count(self):
+        return 0
+
+    def scalar(self):
         return 0
 
 

@@ -22,6 +22,8 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import func
+
 from agentic_librarian.db.models import Trope, Work
 from agentic_librarian.db.session import DatabaseManager, resolve_database_url
 from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, trope_backfill
@@ -253,7 +255,15 @@ def main(argv: list[str] | None = None) -> int:
 
     with manager.get_session() as session:
         print(f"DB target: …@{safe}")
-        print(f"recency probe: works={session.query(Work).count()} tropes={session.query(Trope).count()}")
+        # Column-explicit counts, not session.query(Work).count() / session.query(Trope).count()
+        # (entity loads): this probe runs for EVERY mode, including --dedup-for-constraints,
+        # which by design runs BEFORE `alembic upgrade head` lands migration 48e3762d6c0c. An
+        # entity load SELECTs every mapped column, including deep_enriched_at — a column that
+        # migration hasn't added to prod yet — and dies with UndefinedColumn (caught live against
+        # prod, GH #95). func.count(Work.id) never references it.
+        works_count = session.query(func.count(Work.id)).scalar()
+        tropes_count = session.query(func.count(Trope.id)).scalar()
+        print(f"recency probe: works={works_count} tropes={tropes_count}")
 
         if args.inventory:
             inv = contributor_dedup.contributor_inventory(session)

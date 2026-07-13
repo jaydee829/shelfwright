@@ -24,6 +24,16 @@ Every token in that id set is TAGGED with its operation (`merge:` / `repoint:` /
 `report:`, see plan_id_set's docstring) so an operation FLIP on the same underlying id between
 the reviewed dry-run and the fresh apply-time plan (e.g. a concurrent write turns a reviewed
 repoint into a delete) is visible as a new token, not hidden behind an unchanged bare id.
+
+INVARIANT (found live against prod, GH #95): this module runs against the PRE-migration schema
+— the gate precedes `alembic upgrade head` by design, so migration 48e3762d6c0c has NOT landed
+yet when plan_dedup/apply_dedup run. Never entity-load Work here (`session.query(Work)` /
+`session.get(Work, ...)`) — it must not reference post-migration columns (e.g.
+deep_enriched_at), which don't exist on prod's works table at this point and raise
+UndefinedColumn. The one Work reference in this module (_plan_duplicate_works) is already
+column-explicit (`session.query(Work.id, Work.title, Author.name)`) — keep any future Work
+query that shape. Author/Narrator/Edition/ReadingHistory/Suggestions entity loads are safe:
+this migration adds no columns to those tables.
 """
 
 from __future__ import annotations

@@ -7,9 +7,10 @@ touches only the ids it names (apply-what-was-shown)."""
 import importlib.util
 from datetime import date, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, delete
+from sqlalchemy import create_engine, delete, text
 
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
@@ -27,7 +28,12 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl import dedup_backfill as db_
-from test.integration.constraint_helpers import drop_unique_indexes, recreate_unique_indexes
+from test.integration.constraint_helpers import (
+    drop_unique_indexes,
+    drop_work_deep_enriched_at,
+    readd_work_deep_enriched_at,
+    recreate_unique_indexes,
+)
 
 # scripts/clean_catalog.py is not a package module (it's an operator CLI script) — load it the
 # same way test/unit/test_clean_catalog_cli.py does, so these tests exercise the REAL report
@@ -66,6 +72,22 @@ def _pre_constraint_schema(db_url):
     yield
     with engine.begin() as conn:
         recreate_unique_indexes(conn, _DEDUP_UNIQUE_INDEX_NAMES)
+    engine.dispose()
+
+
+@pytest.fixture
+def _drop_deep_enriched_at(db_url):
+    """Additionally drop works.deep_enriched_at — the REAL pre-migration prod schema (GH #95):
+    the gate runs BEFORE `alembic upgrade head` lands migration 48e3762d6c0c, which is what adds
+    this column. Only used by the one test below (not autouse) since every other test in this
+    module is indifferent to the column's presence — narrowing the blast radius of dropping a
+    column to the single test that exists to prove the tool tolerates its absence."""
+    engine = create_engine(db_url)
+    with engine.begin() as conn:
+        drop_work_deep_enriched_at(conn)
+    yield
+    with engine.begin() as conn:
+        readd_work_deep_enriched_at(conn)
     engine.dispose()
 
 
@@ -981,3 +1003,67 @@ def test_apply_gate_reviewed_row_deleted_applies_with_skipped_stale(db_url):
         result = db_.apply_dedup(session, fresh_plan)
         assert result["duplicate_reading_history"] == 0
         assert session.query(ReadingHistory).count() == 1
+
+
+def test_plan_dedup_runs_against_pre_migration_schema_without_deep_enriched_at(db_url, _drop_deep_enriched_at):
+    """The REAL bug (found live against prod, GH #95): --dedup-for-constraints is designed to
+    run BEFORE `alembic upgrade head` lands migration 48e3762d6c0c — but the branch's Work model
+    already carries deep_enriched_at, so any full-entity `session.query(Work)` SELECTs a column
+    prod doesn't have yet and dies with UndefinedColumn. Under the dropped-column fixture (the
+    exact schema the tool meets in prod), seed one small duplicate-author class touching Work
+    rows and prove plan_dedup runs end-to-end and plans correctly with the column ABSENT."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        a1 = Author(name="Casualfarmer")
+        a2 = Author(name="casualfarmer")  # case dup, structural: lower(name) group
+        session.add_all([a1, a2])
+        session.flush()
+
+        # Seed the works via raw SQL, NOT the ORM: an ORM INSERT names every mapped column —
+        # including deep_enriched_at — and would itself die with UndefinedColumn under this
+        # fixture (proving the fixture faithfully mirrors prod, where rows simply already
+        # exist without the column).
+        w1_id, w2_id = uuid4(), uuid4()
+        session.execute(
+            text("INSERT INTO works (id, title) VALUES (:id1, :t1), (:id2, :t2)"),
+            {"id1": w1_id, "t1": "Beware of Chicken", "id2": w2_id, "t2": "Farming Life"},
+        )
+
+        # a1 gets 2 links (most-linked -> survivor); a2 gets 1 (clean repoint)
+        session.add(WorkContributor(work_id=w1_id, author_id=a1.id, role="Author"))
+        session.add(WorkContributor(work_id=w2_id, author_id=a1.id, role="Author"))
+        session.add(WorkContributor(work_id=w2_id, author_id=a2.id, role="Editor"))
+        session.flush()
+
+        plan = db_.plan_dedup(session)
+        assert plan.summary()["duplicate_authors"] == 1
+        group = plan.duplicate_authors[0]
+        assert group.survivor_id == a1.id
+        assert group.loser_ids == [a2.id]
+
+        result = db_.apply_dedup(session, plan)
+        assert result["duplicate_authors"] == 1
+        session.flush()
+
+        assert session.query(Author).count() == 1
+        editor_link = session.query(WorkContributor).filter_by(work_id=w2_id, role="Editor").one()
+        assert editor_link.author_id == a1.id
+
+        # re-plan converges to empty — proves the whole plan/apply round trip, not just plan,
+        # tolerates the column's absence
+        assert db_.plan_dedup(session).summary()["duplicate_authors"] == 0
+
+
+def test_dedup_dry_run_cli_runs_against_pre_migration_schema(db_url, _drop_deep_enriched_at, monkeypatch, tmp_path):
+    """The EXACT prod crash site (GH #95): the CLI's recency probe ran
+    `session.query(Work).count()` — SQLAlchemy renders that as count over a subquery selecting
+    EVERY mapped Work column, including deep_enriched_at, which the pre-migration prod schema
+    doesn't have -> UndefinedColumn before the dry-run ever reached the planner. Run the REAL
+    `--dedup-for-constraints --dry-run` through clean_catalog.main against the dropped-column
+    schema and assert it completes (rc 0)."""
+    monkeypatch.setattr(clean_catalog, "resolve_database_url", lambda: db_url)
+    # _write_dedup_report / _newest_dedup_report use the cwd-relative data/reports — keep the
+    # test's report out of the repo tree.
+    monkeypatch.chdir(tmp_path)
+    rc = clean_catalog.main(["--dedup-for-constraints", "--dry-run"])
+    assert rc == 0
