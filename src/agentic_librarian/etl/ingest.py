@@ -84,7 +84,13 @@ class HistoryIngestor:
             # 2. Work
             work = Work(title=row["Title"], contributors=contributors)
 
-            # 3. Edition
+            # 3. Edition. GH #95: this generator builds bare, unpersisted model instances —
+            # there is no session here to query/get_or_create against (the real ETL write
+            # path is enriched_metadata -> persist_enriched_work, which already goes through
+            # get_or_create/insert_or_requery). to_models() itself is exercised only by
+            # test_ingest.py, not by any live persistence call site, so there is nothing to
+            # guard: whoever eventually adds these objects to a session provides the
+            # constraint backstop via persist_enriched_work, not here.
             edition = Edition(
                 work=work,
                 format=row["format"],

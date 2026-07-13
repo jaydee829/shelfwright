@@ -116,7 +116,7 @@ def availability_for(session: Session, library: dict, title: str, author: str) -
     slug = library["slug"]
     now = datetime.now(UTC)
     row = session.get(AvailabilityCache, (_PROVIDER, slug, nt, na))
-    if row is not None and (now - row.fetched_at.replace(tzinfo=UTC)) < _ttl():
+    if row is not None and (now - row.fetched_at) < _ttl():
         return row.payload.get("formats", [])
 
     try:
@@ -148,7 +148,7 @@ def batch_availability(db_manager, libs: list[dict], items: list[tuple[str, str]
             for title, author in items:
                 nt, na = _normalize(title), _normalize(author)
                 row = session.get(AvailabilityCache, (_PROVIDER, lib["slug"], nt, na))
-                if row is not None and (now - row.fetched_at.replace(tzinfo=UTC)) < _ttl():
+                if row is not None and (now - row.fetched_at) < _ttl():
                     results[(lib["slug"], title, author)] = row.payload.get("formats", [])
                 else:
                     misses.append((lib, title, author))

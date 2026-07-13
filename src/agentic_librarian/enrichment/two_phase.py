@@ -11,16 +11,22 @@ re-checks dedup before persisting (the #95 TOCTOU window is back to milliseconds
 of the scouts' full duration).
 
 This is a parallel surface to mcp/server.py's enrich_and_persist_work (the all-scouts
-discovery write tool, left untouched): same persist core, tiered scouts."""
+discovery write tool). enrich_and_persist_work now ROUTES THROUGH enrich_fast (not left
+untouched — corrected, final review Minor 6), so it is covered by enrich_fast's
+pg_advisory_xact_lock dedup guard the same as every other fast-pass caller: same persist
+core, tiered scouts."""
 
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import func
+from sqlalchemy import text as sa_text  # aliased: a loop variable in _warm_embeddings shadows 'text' (F402)
 
 from agentic_librarian.core.user_context import get_required_user_id
+from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import collect_embedding_texts, persist_enriched_work
@@ -123,6 +129,13 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
     _warm_embeddings(row)
 
     with db_manager.get_session() as session:
+        if session.get_bind().dialect.name == "postgresql":
+            # GH #95: works can't carry a cross-table unique (title+author spans tables) —
+            # serialize concurrent same-book creators instead. xact-scoped: released on commit.
+            session.execute(
+                sa_text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+                {"k": f"{_normalize(title)}|{_normalize(author)}"},
+            )
         existing = _find_existing(session)  # dedup re-check (#94/#95)
         if existing:
             return existing.id, False
@@ -147,11 +160,9 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
         )
         if any(r.date_completed == completed for r in prior_reads):
             return {"read_number": len(prior_reads), "already_logged": True}
-        edition = session.query(Edition).filter_by(work_id=work_id, format=fmt).first()
-        if not edition:
-            edition = Edition(work_id=work_id, format=fmt)
-            session.add(edition)
-            session.flush()
+        # GH #95: uq_editions_work_format backstops this get-then-create against a
+        # concurrent add_read_event/persist race for the same (work_id, format).
+        edition, _created = get_or_create(session, Edition, work_id=work_id, format=fmt)
         session.add(
             ReadingHistory(
                 edition_id=edition.id,
@@ -165,28 +176,66 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
         return {"read_number": len(prior_reads) + 1, "already_logged": False}
 
 
-def enrich_deep(work_id: UUID) -> bool:
+def enrich_deep(work_id: UUID) -> str:
     """Deep pass (Cloud Tasks target): read the Work's identity in a short session, run
     the slow LLM scouts with NO session held (#94 — previously minutes idle-in-transaction
     at enrich-queue concurrency 4, where a late transient failure also re-paid every LLM
-    call), then re-persist in a fresh session. Returns False if no Work has that id."""
+    call), then re-persist in a fresh session.
+
+    Returns one of:
+      "missing" — no Work has that id, or it has no linked Author (non-retryable). Also
+                  returned (final-review Minor 7 honesty fix) if the write session's
+                  persist_enriched_work returns None — nothing was persisted and
+                  deep_enriched_at was never stamped, so "done" would be a lie; "missing" tells
+                  the caller (api/internal.py) this is non-retryable the same way an
+                  already-gone Work is, rather than falsely reporting success. Also returned
+                  (PR #126 review) if the empty-path stamp session finds the Work gone —
+                  it was deleted while the slow scouts were running with no session held.
+      "empty"   — the scouts yielded nothing to add this pass, and the Work still exists. A
+                  SHORT session stamps work.deep_enriched_at = now() anyway (GH #97): the
+                  timestamp means "the deep pass COMPLETED", including confirmed-empty — the
+                  caller (api/internal.py) decides retryability from the work's real-trope
+                  state, not from this string alone. An exception raised before this point
+                  propagates uncaught, leaving deep_enriched_at unstamped so Cloud Tasks
+                  retries the whole pass.
+      "done"    — the scouts found something AND the write session actually persisted +
+                  stamped deep_enriched_at on the SAME Work in the SAME session."""
     with db_manager.get_session() as session:
         work = session.get(Work, work_id)
         if work is None:
-            return False
+            return "missing"
         author = next((c.author.name for c in work.contributors if c.role == "Author"), None)
         if author is None:
-            return False
+            return "missing"
         title = work.title  # scalars captured before close (detached-instance rule)
         fmt = work.editions[0].format if work.editions else "ebook"
 
     row = _run_scouts(create_deep_scout_manager(), title=title, author=author, fmt=fmt)
     if row is None:
-        return True  # scouts found nothing to add; the task is done, not retryable
+        # scouts found nothing to add; the pass is done (not retryable on its own), but
+        # stamp completion so the requeue sweep doesn't treat this work as never-attempted.
+        with db_manager.get_session() as session:
+            w = session.get(Work, work_id)
+            if w is None:
+                # The Work was deleted while the slow scouts were running. Falling through
+                # to "empty" would make the internal endpoint 503 and buy a pointless Cloud
+                # Tasks retry before the next pass 404s anyway -- report "missing" now, same
+                # honesty rule as the other non-retryable cases in this function.
+                return "missing"
+            w.deep_enriched_at = datetime.now(UTC)
+        return "empty"
 
     _warm_embeddings(row)
 
     with db_manager.get_session() as session:
-        _persist_row(session, row)
+        work = _persist_row(session, row)
+        if work is None:
+            # Nothing was persisted (e.g. the scouted row had no usable contributor to attach
+            # to — persist_enriched_work's own "no work" case) and deep_enriched_at was never
+            # stamped. Reporting "done" here would be dishonest: the caller would treat a
+            # no-op as success. "missing" makes it non-retryable the same way an already-gone
+            # Work is (final-review Minor 7).
+            return "missing"
+        work.deep_enriched_at = datetime.now(UTC)
         session.flush()
-    return True
+    return "done"

@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from agentic_librarian.availability import service as availability_service
 from agentic_librarian.availability.links import build_links
 from agentic_librarian.core.user_context import get_required_user_id
+from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -620,16 +621,23 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
             # SEC-002 referent check: a suggestion must point at a real catalog work.
             if session.get(Work, uuid_obj) is None:
                 return f"Error: no work exists with id {work_id}."
-            suggestion = Suggestions(
+            # GH #95 (closes #88's root cause): dedup on the active-suggestion partial
+            # unique (user_id, work_id) WHERE status='Suggested' — get_or_create backstops
+            # the same race the old unconditional INSERT was vulnerable to.
+            _suggestion, created = get_or_create(
+                session,
+                Suggestions,
                 work_id=uuid_obj,
                 user_id=user_id,
-                context=(context or "")[:200],
-                justification=(justification or "")[:2000],
-                conversation_id=_parse_uuid(conversation_id),
                 status="Suggested",
+                defaults={
+                    "context": (context or "")[:200],
+                    "justification": (justification or "")[:2000],
+                    "conversation_id": _parse_uuid(conversation_id),
+                },
             )
-            session.add(suggestion)
-            session.flush()
+            if not created:
+                return f"Already an active suggestion for work {work_id} — not duplicated."
             return f"Logged suggestion for work {work_id}."
     except Exception as e:
         return f"Error logging suggestion: {str(e)}"

@@ -11,6 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from agentic_librarian.core.user_context import get_required_user_id
+from agentic_librarian.db.get_or_create import get_or_create, insert_or_requery
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
@@ -174,9 +175,14 @@ def persist_enriched_work(
         # existing row instead of creating a duplicate Author (complements the dedup backfill).
         author = session.query(Author).filter(func.lower(Author.name) == name.lower()).first()
         if not author:
-            author = Author(name=name)
-            session.add(author)
-            session.flush()
+            # GH #95: uq_authors_name_lower fires on lower(name), which an exact filter_by
+            # would miss for a case-variant race winner — insert_or_requery's recovery path
+            # reuses this same case-insensitive lookup instead.
+            author, _created = insert_or_requery(
+                session,
+                Author(name=name),
+                lambda name=name: session.query(Author).filter(func.lower(Author.name) == name.lower()).first(),
+            )
 
         # Process Author Styles if role is Author
         if role == "Author" and author_style_data:
@@ -284,9 +290,14 @@ def persist_enriched_work(
         # Case-insensitive lookup so a casing variant reuses the existing Narrator row (see above).
         narrator = session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
         if not narrator:
-            narrator = Narrator(name=n_name)
-            session.add(narrator)
-            session.flush()
+            # GH #95: uq_narrators_name_lower — same case-insensitive requery pattern as Author above.
+            narrator, _created = insert_or_requery(
+                session,
+                Narrator(name=n_name),
+                lambda n_name=n_name: (
+                    session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
+                ),
+            )
 
         # Process Narrator Styles
         n_style_data = narrator_styles.get(n_name, {})
@@ -308,16 +319,27 @@ def persist_enriched_work(
         narrator_objs.append(narrator)
 
     if not edition:
-        edition = Edition(
-            work=work,
-            isbn_13=isbn_13,
-            format=row.get("format"),
-            page_count=page_count,
-            audio_minutes=audio_minutes,
-            publication_date=publication_date,
-            narrators=narrator_objs,
+        # GH #95: uq_editions_work_format backstops the SELECT-then-INSERT race above; a
+        # concurrent persist for the same (work_id, format) recovers via requery instead of
+        # a 500. narrators/other creation-only fields only apply on the winning insert — the
+        # loser's edition is re-queried as-is and updated by the existing-edition branch on
+        # its NEXT call (mirrors the pre-#95 eventual-consistency behavior).
+        # work_id= (not work=) so the not-yet-added Edition never lands in work.editions via
+        # the back_populates backref before session.add — that dangling membership is exactly
+        # what trips "Object of type <Edition> not in session" as an SAWarning-promoted error.
+        edition, _created = insert_or_requery(
+            session,
+            Edition(
+                work_id=work.id,
+                isbn_13=isbn_13,
+                format=row.get("format"),
+                page_count=page_count,
+                audio_minutes=audio_minutes,
+                publication_date=publication_date,
+                narrators=narrator_objs,
+            ),
+            lambda: session.query(Edition).filter_by(work_id=work.id, format=row.get("format")).first(),
         )
-        session.add(edition)
         session.flush()  # Ensure edition.id is populated for ReadingHistory check
     else:
         if not row.get("skip_enrichment"):
@@ -337,21 +359,17 @@ def persist_enriched_work(
 
     if date_completed:
         user_id = get_required_user_id()  # per-user: a friend re-reading my book is not a duplicate (ADR-048)
-        existing_history = (
-            session.query(ReadingHistory)
-            .filter_by(edition_id=edition.id, date_completed=date_completed, user_id=user_id)
-            .first()
+        # GH #95: uq_reading_history_user_edition_date backstops this guard against a
+        # concurrent same-read-event race; get_or_create's filters are an exact match for
+        # the constraint's columns, so no case-insensitive requery is needed here.
+        get_or_create(
+            session,
+            ReadingHistory,
+            edition_id=edition.id,
+            date_completed=date_completed,
+            user_id=user_id,
+            defaults={"user_rating": user_rating, "user_notes": user_notes},
         )
-
-        if not existing_history:
-            history_entry = ReadingHistory(
-                edition=edition,
-                user_id=user_id,
-                date_completed=date_completed,
-                user_rating=user_rating,
-                user_notes=user_notes,
-            )
-            session.add(history_entry)
 
     # 5. Tropes (Only if enriched). enriched_tropes/genres/moods were NaN-coerced to lists above,
     # so the truthy check and set() iteration below are safe even when pandas filled them with NaN.

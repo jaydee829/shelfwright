@@ -11,7 +11,7 @@ This document outlines the mandatory testing standards for all agents and contri
     -   Maintain a minimum of **80% code coverage** for all new features.
     -   Critical core logic should target **100% coverage**.
 3.  **Use Case Driven**:
-    -   Tests should be derived from specific use cases defined in [use_cases.md](file:///c:/Users/Justin.Merrick/Python_Code/Projects/agentic_librarian/agentic_librarian/docs/use_cases.md).
+    -   Tests should be derived from specific use cases defined in [use_cases.md](use_cases.md).
 4.  **The Testing Pyramid**:
     -   **Unit Tests (70-80%)**: Fast, isolated logic tests.
     -   **Integration Tests (15-20%)**: Testing interactions between components (DB, Scouts, LLM providers).

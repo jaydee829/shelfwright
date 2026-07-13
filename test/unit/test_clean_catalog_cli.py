@@ -30,6 +30,11 @@ def test_apply_refused_without_yes(monkeypatch, capsys):
         def count(self):
             return 0
 
+        def scalar(self):
+            # the recency probe is column-explicit (func.count(...).scalar(), never an
+            # entity-load .count()) so it works on the pre-migration prod schema (GH #95)
+            return 0
+
     monkeypatch.setattr(
         clean_catalog, "DatabaseManager", lambda url: type("M", (), {"get_session": lambda s: _Sess()})()
     )

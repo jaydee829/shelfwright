@@ -11,6 +11,7 @@ import logging
 from uuid import UUID
 
 from agentic_librarian.core.user_context import as_user
+from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.models import ImportRow, Suggestions
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.enrichment import two_phase
@@ -29,13 +30,19 @@ def set_db_manager(new_manager: DatabaseManager) -> None:
 
 def _upsert_suggestion(session, *, work_id: UUID, user_id: UUID, context: str) -> bool:
     """Get-or-create the user's wishlist suggestion. Returns True if created, False if it
-    already existed (re-import safe — mirrors add_read_event's idempotency)."""
-    existing = session.query(Suggestions).filter_by(work_id=work_id, user_id=user_id, status="Suggested").first()
-    if existing:
-        return False
-    session.add(Suggestions(work_id=work_id, user_id=user_id, status="Suggested", context=context))
-    session.flush()
-    return True
+    already existed (re-import safe — mirrors add_read_event's idempotency).
+
+    GH #95: uq_suggestions_active backstops this get-then-create against a concurrent
+    duplicate-suggestion race (partial unique on (user_id, work_id) WHERE status='Suggested')."""
+    _suggestion, created = get_or_create(
+        session,
+        Suggestions,
+        work_id=work_id,
+        user_id=user_id,
+        status="Suggested",
+        defaults={"context": context},
+    )
+    return created
 
 
 def _finish(row_id: UUID, *, status: str, outcome: str, work_id: UUID | None = None) -> None:

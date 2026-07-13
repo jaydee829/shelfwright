@@ -27,7 +27,14 @@ gcloud services enable cloudtasks.googleapis.com
 #    remediation (deep scouts ≈ ½GiB each; 4 concurrent fits the 2Gi service): defaults
 #    (1000 concurrent / 500 per sec) caused the 2026-06-23 OOM storm. The update branch
 #    converges a pre-existing queue (created with defaults or hand-tuned) to the same state.
-ENRICH_QUEUE_FLAGS=(--max-concurrent-dispatches=4 --max-dispatches-per-second=5)
+#    --max-attempts=12 (final-review Important, defense in depth): the default is 100 attempts
+#    with backoff maxing out around an hour between tries — an unbounded 503 loop on a
+#    genuinely poison book would cost ~100 PAID deep-LLM passes before anyone notices. The
+#    internal enrich endpoint (api/internal.py) already gives up loudly at 8 retries via the
+#    X-CloudTasks-TaskRetryCount header and returns 200, so Cloud Tasks normally never even
+#    reaches attempt 12 — this queue-level cap is a backstop in case that in-app logic is ever
+#    bypassed or misconfigured, not the primary mechanism.
+ENRICH_QUEUE_FLAGS=(--max-concurrent-dispatches=4 --max-dispatches-per-second=5 --max-attempts=12)
 if gcloud tasks queues describe "${TASKS_QUEUE_NAME}" --location="${REGION}" >/dev/null 2>&1; then
   gcloud tasks queues update "${TASKS_QUEUE_NAME}" --location="${REGION}" "${ENRICH_QUEUE_FLAGS[@]}"
 else

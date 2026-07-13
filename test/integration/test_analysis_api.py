@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func
 
 from agentic_librarian.api import analysis as analysis_mod
 from agentic_librarian.api import auth
@@ -79,9 +80,15 @@ def _seed_read(
                     s.add(WorkStyle(work_id=work.id, style_id=st.id, attribute_type=attr))
         edition = Edition(work_id=work.id, format=fmt)
         if narrator:
-            n = Narrator(name=narrator)
-            s.add(n)
-            s.flush()
+            # uq_narrators_name_lower (GH #95): reuse an existing narrator by
+            # case-insensitive name instead of blindly inserting, so callers can pass
+            # the same narrator name across multiple _seed_read calls (e.g. to model
+            # one narrator across two books) without a UniqueViolation.
+            n = s.query(Narrator).filter(func.lower(Narrator.name) == narrator.lower()).one_or_none()
+            if n is None:
+                n = Narrator(name=narrator)
+                s.add(n)
+                s.flush()
             edition.narrators.append(n)
         s.add(edition)
         s.flush()

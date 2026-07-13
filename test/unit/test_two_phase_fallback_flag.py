@@ -42,6 +42,14 @@ def test_enrich_fast_opts_out_of_fallback_tropes(monkeypatch):
         def flush(self):
             pass
 
+        def get_bind(self):
+            # GH #95: enrich_fast's advisory-lock guard checks dialect.name == "postgresql"
+            # before locking; this fake isn't postgres, so it takes the no-lock path.
+            return type("Bind", (), {"dialect": type("Dialect", (), {"name": "sqlite"})()})()
+
+        def execute(self, *a, **k):
+            pass
+
     monkeypatch.setattr(two_phase, "_run_scouts", fake_run_scouts)
     monkeypatch.setattr(two_phase, "_persist_row", fake_persist_row)
     monkeypatch.setattr(two_phase, "create_fast_scout_manager", lambda: None)
