@@ -12,6 +12,35 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-07-13 - PHASE 6.1–6.3 COMPLETE: scaling hardening groupings 1–3 — 19 of 27 issues closed
+- **Status**: Completed — all shipped, deployed, and issue-closed with evidence; prod schema
+  migrated and dedup-gated sequence executed live.
+- **Description**: Three spec→plan→subagent-driven cycles closed #89–#99, #101–#103,
+  #108–#112 (+#123; #88 root-cause-fixed, frontend half open). 6.1 (PR #120): deploy.yml 2Gi
+  pin, durable squash fix, SQL backups+PITR, ADR-058 startup migration guard, stranded-import
+  retry. 6.2 (PRs #121/#122, ADR-059): working embedding cache, outbound timeouts, pool
+  hygiene + consolidation, all mesh tools/auth/enqueues off the event loop, sessions never
+  span external calls, chat add-book re-routed two-phase with the Librarian announcing
+  background analysis. 6.3 (PRs #124/#126, ADR-060): contributor-merge data-loss fix +
+  SAWarning-as-error, shared trope predicate, garbage-title gate, honest reading dates,
+  cache upsert, embeds warmed out of sessions; migration `48e3762d6c0c` (5 uniques, 9 FK
+  indexes, 13 timestamptz, `deep_enriched_at` backfilled 454/454) applied via the operator-
+  gated sequence in `docs/runbooks/phase6-3-schema-rollout.md` — snapshot → dry-run →
+  operator approval → drift-refusing apply (3 duplicate suggestions deleted, prod otherwise
+  clean) → alembic → merge → deploy (rev 00032-lqq).
+- **URL**: PRs #120, #121, #122, #124, #126; ADRs 058–060; CLAUDE.md (verification mentality).
+- **Notes**:
+  - Remaining Phase 6: **6.4 cost guards (#100 — contains the paid-tier decision — and
+    #113)**, 6.5 frontend resilience (#104–#107), 6.6 ops maturity (#114, #115).
+  - Open follow-ups: 3 duplicate work pairs (report-only, operator triage — ids in the
+    2026-07-13 dedup report); first `--requeue-unenriched` post-check not yet run; operator
+    chat smoke recommended; watch pool 5+2 during the next bulk import and deep-scout
+    latency vs the 120s Gemini timeout.
+  - Process note: the review layering (per-task → whole-branch on the most capable model →
+    adversarial pass) caught real bugs at EVERY layer that all previous layers missed —
+    incl. a cold-start auth race, a review-gate bypass, cross-class dedup row loss, and a
+    pre-migration-schema crash found only by running the gate tool against live prod.
+
 ### 2026-07-12 - LAUNCH: Shelfwright rebrand + canonical domain (GH #79) — SHIPPED; issue scrub
 - **Status**: Completed — live and verified.
 - **Description**: Product renamed **Shelfwright**; https://shelfwright.app is the canonical host
