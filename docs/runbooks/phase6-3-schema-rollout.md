@@ -191,6 +191,17 @@ zero), you're done; if it finds a fresh, small orphan-author batch, that's expec
 follow-on cleanup, not a sign something went wrong. Loop steps 2→3 until a dry-run comes
 back clean.
 
+**Deferred-intersections note:** the report's `deferred_intersections` section lists
+`duplicate_editions`/`duplicate_reading_history` groups the planner deliberately DROPPED
+from this run because they intersect a `duplicate_narrators`/`duplicate_editions` group
+also in play — applying both compositions from the same plan snapshot could lose rows (a
+narrator-merge repoint living on a loser edition; an edition-merge's own reading_history
+collision-delete colliding with class 4's independent pick). **A nonzero
+`deferred_intersections` count is EXPECTED on intersecting data, not an error** — it is
+resolved the exact same way as a fresh orphan-author batch: this same steps 2→3 loop.
+Once the intersecting class (narrators, or editions) has applied, the deferred group no
+longer intersects anything on the next dry-run and applies normally.
+
 **Done when:** the apply command exits 0, prints per-class applied counts, and a
 follow-up dry-run (step 2) comes back with all classes empty except
 `duplicate_works_report_only` (never applied, expected to persist until a future manual

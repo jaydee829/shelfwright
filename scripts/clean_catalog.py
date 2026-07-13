@@ -94,6 +94,26 @@ def _write_dedup_report(plan) -> Path:
         lines.append(f"  key={w.norm_key!r}  work_ids={w.work_ids}  titles={w.titles}")
     lines.append("")
 
+    # Final-review Critical (GH #95 follow-up): groups dropped from their class because they
+    # intersect another class's plan in a way that would compose into row loss if both applied
+    # from this SAME snapshot (narrator x edition cascade; edition x reading_history
+    # double-delete — see etl/dedup_backfill.py's _defer_intersecting_groups docstring). This is
+    # EXPECTED on intersecting data, not an error: the runbook's existing dry-run/apply LOOP
+    # re-plans after the intersecting class has already applied, resolving these on the next pass.
+    total_deferred = sum(len(v) for v in plan.deferred_intersections.values())
+    lines.append(f"deferred_intersections: {total_deferred} groups deferred to the next dry-run pass")
+    if total_deferred:
+        lines.append(
+            "  (EXPECTED on intersecting data, not an error — re-run --dedup-for-constraints "
+            "--dry-run after this apply and these will resolve; see docs/runbooks/"
+            "phase6-3-schema-rollout.md step 3.)"
+        )
+    for class_name, entries in plan.deferred_intersections.items():
+        lines.append(f"  [{class_name}] {len(entries)} deferred")
+        for entry in entries:
+            lines.append(f"    {entry}")
+    lines.append("")
+
     # Machine-readable section (Spec 2026-07-12 follow-up to #95): the exact per-class id set
     # this plan is "about", one id per line, sorted for a stable diff-friendly file. --apply
     # parses this back into a dict[str, set[str]] (see _parse_plan_ids) and cross-checks a
@@ -341,6 +361,15 @@ def main(argv: list[str] | None = None) -> int:
             print("--- duplicate_works_report_only samples (NEVER applied — operator triage) ---")
             for w in plan.duplicate_works_report_only[:10]:
                 print(f"  {w.titles}  ({w.work_ids})")
+
+            total_deferred = sum(len(v) for v in plan.deferred_intersections.values())
+            if total_deferred:
+                print(
+                    f"\n--- deferred_intersections: {total_deferred} groups deferred "
+                    "(EXPECTED on intersecting data — resolves on the next dry-run pass) ---"
+                )
+                for class_name, entries in plan.deferred_intersections.items():
+                    print(f"  [{class_name}] {len(entries)} deferred")
 
             report_path = _write_dedup_report(plan)
             print(f"\nfull plan (every id) written to {report_path} — review this before approving --apply.")

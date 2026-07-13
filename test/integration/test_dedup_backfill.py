@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, delete
 
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
@@ -402,6 +402,263 @@ def test_apply_skips_stale_plan_ids(db_url):
         result = db_.apply_dedup(session, plan)
         assert result["duplicate_reading_history"] == 0
         assert result["skipped_stale"] == 1
+
+
+# --------------------------------------------------------------------------------------------
+# Cross-class composition (final-review Critical, GH #95 follow-up): two deterministic lossy
+# compositions found in the applier's plan-time-vs-apply-time gap. (a) narrator-merge repoints a
+# link living on a LOSER edition, but edition-merge's plan (computed against the SAME pre-apply
+# snapshot) still names the OLD (loser_edition, loser_narrator) pk for repoint/delete — that pk is
+# gone by the time edition-merge applies (narrator-merge already rewrote it), so it goes
+# skipped_stale, and deleting the loser edition then CASCADES away the rewritten link via the
+# `Edition.narrators` secondary relationship — a link the plan promised to repoint is lost.
+# (b) edition-merge's OWN in-group collision logic can plan "repoint R (first-seen), delete R2
+# (date-collides with R)" for two exact-duplicate reading_history rows living on the same loser
+# edition — but class 4 (duplicate_reading_history) independently computed ITS OWN group over the
+# same (user_id, edition_id, date_completed) key, from the SAME pre-apply snapshot, and may pick
+# the opposite survivor (e.g. "keep R2, delete R"). Applying both classes then loses BOTH rows: R2
+# is deleted by edition-merge, and R survives edition-merge's repoint but is then deleted outright
+# by class 4 (which only checks `session.get` — repointing doesn't remove the row, so class 4's
+# stale-loser-id lookup still finds and deletes it).
+# --------------------------------------------------------------------------------------------
+
+
+def test_narrator_edition_intersection_is_deferred_not_applied(db_url):
+    """(a) Seed the narrator x edition intersection exactly: a narrator-merge group whose loser
+    narrator has a link on a loser edition that an edition-merge group's plan also touches. The
+    PLAN must defer the affected EDITION group (drop it from duplicate_editions, list it under
+    deferred_intersections) rather than applying a composition that would lose the repointed
+    link. Two-pass convergence (apply -> re-plan -> apply) must complete with the link intact."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        n1 = Narrator(name="Travis Baldree")  # most-linked -> survivor
+        n2 = Narrator(name="travis baldree")  # loser; linked only on the loser edition
+        w = Work(title="Intersection Test Work")
+        session.add_all([n1, n2, w])
+        session.flush()
+
+        e1 = Edition(work_id=w.id, format="audiobook")  # most-linked -> survivor
+        e2 = Edition(work_id=w.id, format="audiobook")  # exact (work_id, format) dup -> loser
+        session.add_all([e1, e2])
+        session.flush()
+
+        # e1 gets 2 reading_history links (survivor by link count)
+        session.add(ReadingHistory(edition_id=e1.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 1, 1)))
+        session.add(ReadingHistory(edition_id=e1.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 2, 1)))
+        # n1 gets 2 links total (e1 + a style) so it out-links n2's single link
+        session.execute(edition_narrators.insert().values(edition_id=e1.id, narrator_id=n1.id))
+        style = Style(name="Gravelly", category="Narrator")
+        session.add(style)
+        session.flush()
+        session.add(NarratorStyle(narrator_id=n1.id, style_id=style.id, attribute_type="voice_differentiation"))
+        # n2 (the narrator-merge LOSER) is linked only on e2 (the edition-merge LOSER) — this is
+        # the intersecting row: narrator-merge will repoint it (e2, n2) -> (e2, n1); edition-merge
+        # independently plans to repoint/delete the SAME (e2, n2) pk.
+        session.execute(edition_narrators.insert().values(edition_id=e2.id, narrator_id=n2.id))
+        session.flush()
+
+        plan = db_.plan_dedup(session)
+
+        # sanity: both groups exist as planned before the defer logic filters them
+        assert plan.summary()["duplicate_narrators"] == 1
+        narrator_group = plan.duplicate_narrators[0]
+        assert narrator_group.survivor_id == n1.id
+        assert narrator_group.loser_ids == [n2.id]
+        assert (n2.id, (e2.id, n2.id)) in narrator_group.repoint_links
+
+        # the intersecting EDITION group must be DEFERRED, not present in the apply-able plan
+        edition_work_ids = {g.work_id for g in plan.duplicate_editions}
+        assert w.id not in edition_work_ids, "intersecting edition group must be dropped from the plan"
+
+        assert "duplicate_editions" in plan.deferred_intersections
+        deferred = plan.deferred_intersections["duplicate_editions"]
+        assert len(deferred) == 1
+        assert deferred[0]["work_id"] == w.id
+        assert "reason" in deferred[0] and deferred[0]["reason"]
+
+        # apply pass 1: only the narrator merge (deferred edition group untouched)
+        result = db_.apply_dedup(session, plan)
+        session.flush()
+        assert result["duplicate_narrators"] == 1
+        assert result["duplicate_editions"] == 0
+
+        # the repointed link survived (this is the row the bug used to cascade away)
+        e2_narrators = session.execute(
+            edition_narrators.select().where(edition_narrators.c.edition_id == e2.id)
+        ).fetchall()
+        assert [r.narrator_id for r in e2_narrators] == [n1.id]
+
+        # pass 2: re-plan now sees no narrator/edition intersection (narrators already merged) ->
+        # the edition group applies cleanly, converging within two dry-run/apply passes.
+        plan2 = db_.plan_dedup(session)
+        assert plan2.deferred_intersections.get("duplicate_editions", []) == []
+        assert any(g.work_id == w.id for g in plan2.duplicate_editions)
+        result2 = db_.apply_dedup(session, plan2)
+        session.flush()
+        assert result2["duplicate_editions"] == 1
+
+        # the repointed narrator link survived onto the final surviving edition too
+        assert session.query(Edition).filter_by(work_id=w.id).count() == 1
+        surviving_edition = session.query(Edition).filter_by(work_id=w.id).one()
+        surviving_narrators = {
+            r.narrator_id
+            for r in session.execute(
+                edition_narrators.select().where(edition_narrators.c.edition_id == surviving_edition.id)
+            ).fetchall()
+        }
+        assert n1.id in surviving_narrators  # the originally-repointed link, never lost
+
+        # fully converged
+        plan3 = db_.plan_dedup(session)
+        assert plan3.summary()["duplicate_narrators"] == 0
+        assert plan3.summary()["duplicate_editions"] == 0
+
+
+def test_edition_reading_history_intersection_is_deferred_not_applied(db_url):
+    """(b) Seed the edition x reading_history intersection: two exact-duplicate reading_history
+    rows on the SAME loser edition, with the same (user_id, date_completed) as each other, so
+    edition-merge's in-group collision logic plans "repoint one, delete the other" while class 4
+    independently plans its own keep/delete over the identical pair. The PLAN must defer the
+    affected duplicate_reading_history group; both rows (the user's read event) must survive
+    end-to-end across a two-pass apply."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w = Work(title="RH Intersection Work")
+        session.add(w)
+        session.flush()
+
+        e1 = Edition(work_id=w.id, format="ebook")  # survivor (most-linked)
+        e2 = Edition(work_id=w.id, format="ebook")  # loser
+        session.add_all([e1, e2])
+        session.flush()
+
+        # e1 gets THREE reading_history links so it out-links e2's pair below (survivor by count;
+        # e2 will carry 2 links from the duplicate pair seeded next, so e1 needs >2 to win).
+        session.add(ReadingHistory(edition_id=e1.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 1, 1)))
+        session.add(ReadingHistory(edition_id=e1.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 2, 1)))
+        session.add(ReadingHistory(edition_id=e1.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 3, 1)))
+        session.flush()
+
+        # e2 (the loser) carries an EXACT reading_history duplicate pair: same user, same edition,
+        # same date_completed. Class 3 (edition-merge) will see: first row -> no survivor-date
+        # collision -> repoint; second row -> now collides (against the just-updated tracking set)
+        # -> delete. Class 4 (duplicate_reading_history) independently groups the identical pair
+        # by (user_id, edition_id, date_completed) and picks its OWN survivor (lowest str(id)).
+        rh_a = ReadingHistory(edition_id=e2.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 4, 1))
+        rh_b = ReadingHistory(edition_id=e2.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 4, 1))
+        session.add_all([rh_a, rh_b])
+        session.flush()
+        rh_ids = {rh_a.id, rh_b.id}
+
+        plan = db_.plan_dedup(session)
+
+        # sanity: both classes independently see this pair before the defer logic filters them
+        assert plan.summary()["duplicate_editions"] == 1
+        edition_group = plan.duplicate_editions[0]
+        assert set(edition_group.repoint_reading_history) | set(edition_group.delete_reading_history) == rh_ids
+
+        # the intersecting RH-dedup group must be DEFERRED, not present in the apply-able plan
+        rh_group_id_sets = [{g.survivor_id, *g.loser_ids} for g in plan.duplicate_reading_history]
+        assert not any(rh_ids <= s for s in rh_group_id_sets), "intersecting rh group must be dropped"
+
+        assert "duplicate_reading_history" in plan.deferred_intersections
+        deferred = plan.deferred_intersections["duplicate_reading_history"]
+        assert len(deferred) == 1
+        assert "reason" in deferred[0] and deferred[0]["reason"]
+
+        # apply pass 1: edition-merge applies (repoints/deletes within its own group); the
+        # intersecting class-4 group is deferred so it does NOT independently delete a row
+        # edition-merge already repointed.
+        result = db_.apply_dedup(session, plan)
+        session.flush()
+        assert result["duplicate_editions"] == 1
+        assert result["duplicate_reading_history"] == 0
+
+        # exactly one of the pair survives (edition-merge's own repoint/delete-collision landed),
+        # and it is NOT double-deleted by a same-pass class-4 application.
+        surviving = session.query(ReadingHistory).filter(ReadingHistory.id.in_(rh_ids)).all()
+        assert len(surviving) == 1
+        assert session.query(Work).filter_by(id=w.id).one()
+        # the user's reading_history row count for this work is exactly 4: the 3 untouched e1
+        # rows plus the one survivor of the e2 pair (never 3 — that would mean both copies of the
+        # pair were lost, the bug this test guards against).
+        total_rh_for_work = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == w.id).count()
+        assert total_rh_for_work == 4
+
+        # pass 2: re-plan now sees no edition/rh intersection (editions already merged) -> class 4
+        # either finds nothing left to do (the surviving row is unique) or converges cleanly.
+        plan2 = db_.plan_dedup(session)
+        assert plan2.deferred_intersections.get("duplicate_reading_history", []) == []
+        result2 = db_.apply_dedup(session, plan2)
+        session.flush()
+
+        # fully converged, and the row count is STILL 4 (no further loss on pass 2)
+        total_rh_for_work_final = session.query(ReadingHistory).join(Edition).filter(Edition.work_id == w.id).count()
+        assert total_rh_for_work_final == 4
+        plan3 = db_.plan_dedup(session)
+        assert plan3.summary()["duplicate_editions"] == 0
+        assert plan3.summary()["duplicate_reading_history"] == 0
+        assert result2 is not None  # apply_dedup on the converged plan is a valid no-op-ish call
+
+
+def test_apply_edition_group_refuses_when_loser_has_unplanned_narrator_link(db_url):
+    """Belt-and-braces (final-review Critical): _apply_edition_group must refuse to delete a
+    loser edition that still carries an edition_narrators row NOT named in the group's own
+    planned repoint_narrators/delete_narrators — mirroring the existing orphan-author
+    re-verify-at-apply-time pattern. Force-feed a hand-built EditionMergeGroup whose plan is
+    silent about a narrator link that exists on the loser edition at apply time (simulating a
+    plan/apply drift or a bug in the planner itself) and assert it is refused, not deleted."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w = Work(title="Unsafe Delete Work")
+        n = Narrator(name="Untracked Narrator")
+        session.add_all([w, n])
+        session.flush()
+
+        e1 = Edition(work_id=w.id, format="ebook")
+        e2 = Edition(work_id=w.id, format="ebook")
+        session.add_all([e1, e2])
+        session.flush()
+
+        # e2 (about to be force-fed as the loser) carries a narrator link the plan below is
+        # deliberately silent about — the unsafe state the belt-and-braces check must catch.
+        session.execute(edition_narrators.insert().values(edition_id=e2.id, narrator_id=n.id))
+        session.flush()
+
+        unsafe_group = db_.EditionMergeGroup(
+            survivor_id=e1.id,
+            work_id=w.id,
+            fmt="ebook",
+            loser_ids=[e2.id],
+            repoint_reading_history=[],
+            delete_reading_history=[],
+            repoint_narrators=[],  # silent about (e2, n) — the unsafe condition
+            delete_narrators=[],
+        )
+
+        stats = db_._apply_edition_group(session, unsafe_group)
+        session.flush()
+
+        # skipped_unsafe fires (distinct from skipped_stale — the row didn't vanish, it was
+        # unaccounted-for); the binding assertion is that the loser edition survives with its
+        # unplanned narrator link intact, not deleted out from under it.
+        assert stats.get("skipped_unsafe", 0) == 1
+        assert session.get(Edition, e2.id) is not None
+        e2_narrators = session.execute(
+            edition_narrators.select().where(edition_narrators.c.edition_id == e2.id)
+        ).fetchall()
+        assert [r.narrator_id for r in e2_narrators] == [n.id]
+
+        # Cleanup: the refused delete deliberately LEAVES a duplicate (work_id, format) pair in
+        # place (that's the point of the test — the belt-and-braces check refused it), which
+        # would violate uq_editions_work_format when the module's autouse _pre_constraint_schema
+        # fixture recreates it at teardown. Clear the narrator link (the plan's own silence about
+        # it was the test condition, now proven) and delete the loser edition directly so the
+        # schema is clean for the index recreate, mirroring the cleanup pattern used by
+        # test_apply_gate_refuses_on_new_duplicate_in_the_gap for the same reason.
+        session.execute(delete(edition_narrators).where(edition_narrators.c.edition_id == e2.id))
+        session.delete(session.get(Edition, e2.id))
+        session.flush()
 
 
 def test_orphan_authors_recomputed_after_merge_needs_replan(db_url):

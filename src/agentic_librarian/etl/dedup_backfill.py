@@ -114,6 +114,15 @@ class DedupPlan:
     duplicate_suggestions: list[KeepDeleteGroup] = field(default_factory=list)
     orphan_authors: list[UUID] = field(default_factory=list)
     duplicate_works_report_only: list[WorkDupReport] = field(default_factory=list)
+    # Final-review Critical (GH #95 follow-up): groups DROPPED from the classes above because
+    # they intersect another class's plan in a way that would compose into row loss if both
+    # applied from the SAME pre-apply snapshot (see _defer_intersecting_groups's docstring).
+    # Keyed by the class name the group was dropped FROM ("duplicate_editions" /
+    # "duplicate_reading_history"); each entry is {"reason": str, ...group-identifying fields}.
+    # EXPECTED on intersecting data, not an error — a subsequent dry-run/apply pass (the
+    # runbook's existing loop) re-plans after the intersecting class has already applied, so the
+    # intersection is gone and the deferred group applies cleanly on the next pass.
+    deferred_intersections: dict[str, list[dict]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, int]:
         return {
@@ -422,7 +431,7 @@ def _plan_editions(session: Session) -> list[EditionMergeGroup]:
 
 
 def _apply_edition_group(session: Session, group: EditionMergeGroup) -> dict[str, int]:
-    stats = {"merged": 0, "skipped_stale": 0}
+    stats = {"merged": 0, "skipped_stale": 0, "skipped_unsafe": 0}
     if session.get(Edition, group.survivor_id) is None:
         stats["skipped_stale"] += 1
         return stats
@@ -468,6 +477,20 @@ def _apply_edition_group(session: Session, group: EditionMergeGroup) -> dict[str
         e = session.get(Edition, loser_id)
         if e is None:
             stats["skipped_stale"] += 1
+            continue
+        # Belt-and-braces (final-review Critical): by this point every edition_narrators row this
+        # GROUP's plan named for `loser_id` has already been repointed or deleted above. If any
+        # row for `loser_id` still exists now, it is UNPLANNED for this group — deleting the
+        # edition would cascade it away via Edition.narrators' `secondary=` relationship, exactly
+        # the narrator x edition composition loss the plan-time defer (see
+        # _defer_intersecting_groups) is meant to prevent. Mirrors the existing orphan-author
+        # re-verify-at-apply-time pattern: refuse and count separately from skipped_stale, since
+        # this isn't "the row vanished" — it's "an unaccounted-for row is still here."
+        unplanned = session.execute(
+            select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == loser_id)
+        ).first()
+        if unplanned is not None:
+            stats["skipped_unsafe"] += 1
             continue
         session.delete(e)
     session.flush()
@@ -593,28 +616,145 @@ def _plan_duplicate_works(session: Session) -> list[WorkDupReport]:
 
 
 # --------------------------------------------------------------------------------------------
+# Cross-class intersection deferral (final-review Critical, GH #95 follow-up)
+#
+# Two of the seven classes are computed independently but share rows in a way that makes their
+# COMPOSITION lossy when both are applied from the same plan snapshot:
+#
+# (a) narrator-merge x edition-merge: narrator-merge REWRITES an edition_narrators row's
+#     narrator_id (delete old pk, insert new) on whatever edition it happens to live on. If that
+#     edition is a LOSER in some edition-merge group, the edition group's plan (computed against
+#     the SAME pre-apply snapshot) still names the OLD (loser_edition_id, loser_narrator_id) pk
+#     in its own repoint_narrators/delete_narrators. By the time edition-merge applies, narrator-
+#     merge already ran (apply order: authors, narrators, editions, ...) and that old pk is gone
+#     -> edition-merge's repoint/delete for it goes skipped_stale, and the NEW row (same edition,
+#     survivor narrator) is never named by the edition group at all. Deleting the loser edition
+#     then cascades that unnamed row away via Edition.narrators' `secondary=` relationship — a
+#     link the reviewed plan promised to repoint is silently lost.
+#
+# (b) edition-merge x reading_history-dedup: edition-merge's OWN in-group collision logic can
+#     plan "repoint row R (first-seen for a user+date), delete row R2 (collides against R's
+#     date)" for an exact-duplicate reading_history pair living on the same loser edition. Class 4
+#     (duplicate_reading_history) independently groups the IDENTICAL pair by its own
+#     (user_id, edition_id, date_completed) key and may pick the opposite survivor. Applying both
+#     from the same snapshot: edition-merge deletes R2 directly, then class 4 (unaware R was
+#     already repointed elsewhere — it only does a stale `session.get` lookup, and repointing
+#     doesn't remove the row) deletes R too. Both copies of the user's read event are lost.
+#
+# The fix: compute the intersections at PLAN time and drop the affected groups from the classes
+# below, recording them under `deferred_intersections`. This is EXPECTED on intersecting data,
+# not an error — the runbook's existing dry-run/apply LOOP re-plans after the intersecting class
+# has already applied, so the intersection is gone and the deferred group applies cleanly on the
+# next pass (two-pass convergence, proven in test_dedup_backfill.py's intersection tests).
+# --------------------------------------------------------------------------------------------
+
+
+def _defer_intersecting_groups(
+    duplicate_narrators: list[ContributorMergeGroup],
+    duplicate_editions: list[EditionMergeGroup],
+    duplicate_reading_history: list[KeepDeleteGroup],
+) -> tuple[list[EditionMergeGroup], list[KeepDeleteGroup], dict[str, list[dict]]]:
+    """Returns (filtered_editions, filtered_reading_history, deferred_intersections). Never
+    mutates the inputs — builds fresh lists."""
+    deferred: dict[str, list[dict]] = {}
+
+    # (a) narrator ids touched by ANY narrator-merge group (survivor + losers) — a loser edition
+    # link involving any of these narrator ids may be REWRITTEN by narrator-merge before
+    # edition-merge applies.
+    narrator_ids_in_play: set[UUID] = set()
+    for g in duplicate_narrators:
+        narrator_ids_in_play.add(g.survivor_id)
+        narrator_ids_in_play.update(g.loser_ids)
+
+    filtered_editions: list[EditionMergeGroup] = []
+    for eg in duplicate_editions:
+        touched_narrator_ids = {nid for _eid, nid in eg.repoint_narrators} | {nid for _eid, nid in eg.delete_narrators}
+        if touched_narrator_ids & narrator_ids_in_play:
+            deferred.setdefault("duplicate_editions", []).append(
+                {
+                    "work_id": eg.work_id,
+                    "survivor_id": eg.survivor_id,
+                    "loser_ids": eg.loser_ids,
+                    "reason": (
+                        "narrator-merge touches a narrator id referenced by this edition group's "
+                        "narrator repoints/deletes — deferred to avoid the narrator x edition "
+                        "cascade-loss composition; re-plan after this apply pass."
+                    ),
+                }
+            )
+            continue
+        filtered_editions.append(eg)
+
+    # (b) reading_history ids this (already-filtered) set of edition groups will repoint/delete —
+    # a class-4 group sharing any of those ids would independently delete a row edition-merge
+    # already repointed/deleted from the SAME snapshot.
+    rh_ids_touched_by_editions: set[UUID] = set()
+    for eg in filtered_editions:
+        rh_ids_touched_by_editions.update(eg.repoint_reading_history)
+        rh_ids_touched_by_editions.update(eg.delete_reading_history)
+
+    filtered_reading_history: list[KeepDeleteGroup] = []
+    for rg in duplicate_reading_history:
+        group_ids = {rg.survivor_id, *rg.loser_ids}
+        if group_ids & rh_ids_touched_by_editions:
+            deferred.setdefault("duplicate_reading_history", []).append(
+                {
+                    "survivor_id": rg.survivor_id,
+                    "loser_ids": rg.loser_ids,
+                    "detail": rg.detail,
+                    "reason": (
+                        "an edition-merge group's own reading_history repoint/delete already "
+                        "covers a row in this group — deferred to avoid the edition x "
+                        "reading_history double-delete composition; re-plan after this apply pass."
+                    ),
+                }
+            )
+            continue
+        filtered_reading_history.append(rg)
+
+    return filtered_editions, filtered_reading_history, deferred
+
+
+# --------------------------------------------------------------------------------------------
 # Top-level plan / apply
 # --------------------------------------------------------------------------------------------
 
 
 def plan_dedup(session: Session) -> DedupPlan:
     """READ ONLY. Computes every class against the CURRENT db state. See _plan_orphan_authors
-    for why orphans are not simulated against not-yet-applied author merges."""
+    for why orphans are not simulated against not-yet-applied author merges.
+
+    See _defer_intersecting_groups for why duplicate_editions and duplicate_reading_history are
+    filtered against each other (and duplicate_narrators) before the plan is returned — two
+    deterministic lossy compositions (narrator x edition cascade; edition x reading_history
+    double-delete) are caught here and deferred rather than applied."""
+    duplicate_narrators = _plan_narrators(session)
+    duplicate_editions = _plan_editions(session)
+    duplicate_reading_history = _plan_reading_history(session)
+
+    duplicate_editions, duplicate_reading_history, deferred_intersections = _defer_intersecting_groups(
+        duplicate_narrators, duplicate_editions, duplicate_reading_history
+    )
+
     return DedupPlan(
         duplicate_authors=_plan_authors(session),
-        duplicate_narrators=_plan_narrators(session),
-        duplicate_editions=_plan_editions(session),
-        duplicate_reading_history=_plan_reading_history(session),
+        duplicate_narrators=duplicate_narrators,
+        duplicate_editions=duplicate_editions,
+        duplicate_reading_history=duplicate_reading_history,
         duplicate_suggestions=_plan_suggestions(session),
         orphan_authors=_plan_orphan_authors(session),
         duplicate_works_report_only=_plan_duplicate_works(session),
+        deferred_intersections=deferred_intersections,
     )
 
 
 def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
     """Applies EXACTLY plan's ids — no re-derivation. Order: authors, narrators, editions,
     reading_history, suggestions, orphans. duplicate_works_report_only is NEVER applied.
-    Rows that vanished between plan and apply are skipped and counted under skipped_stale."""
+    Rows that vanished between plan and apply are skipped and counted under skipped_stale.
+    Rows that survived but weren't accounted for by the group's own plan (the
+    _apply_edition_group belt-and-braces re-verify — see its docstring) are counted separately
+    under skipped_unsafe, distinct from skipped_stale."""
     result = {
         "duplicate_authors": 0,
         "duplicate_narrators": 0,
@@ -623,6 +763,7 @@ def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
         "duplicate_suggestions": 0,
         "orphan_authors": 0,
         "skipped_stale": 0,
+        "skipped_unsafe": 0,
     }
 
     for group in plan.duplicate_authors:
@@ -639,6 +780,7 @@ def apply_dedup(session: Session, plan: DedupPlan) -> dict[str, int]:
         stats = _apply_edition_group(session, group)
         result["duplicate_editions"] += stats["merged"]
         result["skipped_stale"] += stats["skipped_stale"]
+        result["skipped_unsafe"] += stats["skipped_unsafe"]
 
     for group in plan.duplicate_reading_history:
         stats = _apply_keep_delete(session, ReadingHistory, group)
