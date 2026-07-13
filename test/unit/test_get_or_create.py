@@ -69,6 +69,13 @@ def test_returns_existing(session):
     assert session.query(Widget).count() == 1
 
 
+def test_empty_filters_raises(session):
+    """No filter criteria at all means filter_by() matches an arbitrary first row -- reject
+    it up front instead of silently returning/corrupting an unrelated row."""
+    with pytest.raises(ValueError, match="filter criterion"):
+        get_or_create(session, Widget)
+
+
 def test_creates_when_missing(session):
     """An empty table creates the row: (row, True)."""
     instance, created = get_or_create(session, Widget, name="beta")

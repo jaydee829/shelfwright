@@ -28,6 +28,10 @@ T = TypeVar("T")
 
 
 def get_or_create(session, model, defaults=None, **filters):
+    if not filters:
+        # An empty filter_by() matches an arbitrary first row -- silent data corruption
+        # in an integrity helper.
+        raise ValueError("get_or_create requires at least one filter criterion")
     instance = session.query(model).filter_by(**filters).first()
     if instance is not None:
         return instance, False

@@ -188,13 +188,16 @@ def enrich_deep(work_id: UUID) -> str:
                   persist_enriched_work returns None — nothing was persisted and
                   deep_enriched_at was never stamped, so "done" would be a lie; "missing" tells
                   the caller (api/internal.py) this is non-retryable the same way an
-                  already-gone Work is, rather than falsely reporting success.
-      "empty"   — the scouts yielded nothing to add this pass. A SHORT session stamps
-                  work.deep_enriched_at = now() anyway (GH #97): the timestamp means "the
-                  deep pass COMPLETED", including confirmed-empty — the caller (api/internal.py)
-                  decides retryability from the work's real-trope state, not from this string
-                  alone. An exception raised before this point propagates uncaught, leaving
-                  deep_enriched_at unstamped so Cloud Tasks retries the whole pass.
+                  already-gone Work is, rather than falsely reporting success. Also returned
+                  (PR #126 review) if the empty-path stamp session finds the Work gone —
+                  it was deleted while the slow scouts were running with no session held.
+      "empty"   — the scouts yielded nothing to add this pass, and the Work still exists. A
+                  SHORT session stamps work.deep_enriched_at = now() anyway (GH #97): the
+                  timestamp means "the deep pass COMPLETED", including confirmed-empty — the
+                  caller (api/internal.py) decides retryability from the work's real-trope
+                  state, not from this string alone. An exception raised before this point
+                  propagates uncaught, leaving deep_enriched_at unstamped so Cloud Tasks
+                  retries the whole pass.
       "done"    — the scouts found something AND the write session actually persisted +
                   stamped deep_enriched_at on the SAME Work in the SAME session."""
     with db_manager.get_session() as session:
@@ -213,8 +216,13 @@ def enrich_deep(work_id: UUID) -> str:
         # stamp completion so the requeue sweep doesn't treat this work as never-attempted.
         with db_manager.get_session() as session:
             w = session.get(Work, work_id)
-            if w is not None:
-                w.deep_enriched_at = datetime.now(UTC)
+            if w is None:
+                # The Work was deleted while the slow scouts were running. Falling through
+                # to "empty" would make the internal endpoint 503 and buy a pointless Cloud
+                # Tasks retry before the next pass 404s anyway -- report "missing" now, same
+                # honesty rule as the other non-retryable cases in this function.
+                return "missing"
+            w.deep_enriched_at = datetime.now(UTC)
         return "empty"
 
     _warm_embeddings(row)
