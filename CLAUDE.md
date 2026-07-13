@@ -57,6 +57,16 @@ that every single-pass review missed.
     "CI is the gate for X" is a fine sentence; claiming an unrun test passed is not.
     Comments and ADRs must not overclaim invariants the code doesn't have — name the
     residuals (this bit us three times on one pool-sizing premise before we learned).
+11. **Rehearse operator tooling against the PRE-state schema, not just the post-state.**
+    A migration-gating tool (dedup, backfill, pre-flight check) runs by design against
+    the schema that exists BEFORE the migration it clears the way for — but the branch's
+    ORM models already describe the AFTER. Every test environment that runs the full
+    migration chain first will pass while prod fails with UndefinedColumn on the first
+    entity load (found live, phase 6.3: the dedup gate selected `deep_enriched_at` from
+    a prod that didn't have it yet). Rules: gate-path queries are column-explicit for any
+    model the same branch alters (never entity-load it — state the invariant in a module
+    comment), and the tool gets a fixture test that DROPS the new columns/constraints to
+    mirror the true pre-migration schema.
 
 ## Mechanics
 
