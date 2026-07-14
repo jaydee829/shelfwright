@@ -41,18 +41,31 @@ export default function ImportView() {
   const missing = REQUIRED.filter((f) => !mapping[f])
 
   // Re-preview on every mapping edit so counts and the bad-date warning reflect what
-  // commit will actually do. Last-request-wins guards out-of-order responses.
+  // commit will actually do. Last-request-wins guards out-of-order responses; Continue is
+  // blocked while a preview is in flight or stale (a failed refresh would otherwise let
+  // the user proceed on counts computed from a previous mapping).
   const previewSeq = useRef(0)
+  const [previewStale, setPreviewStale] = useState(false)
   async function onMappingChange(field: keyof ColumnMapping, value: string | null) {
     const next = { ...mapping, [field]: value }
     setMapping(next)
     if (!file) return
     const seq = ++previewSeq.current
+    setBusy(true)
+    setError(null)
     try {
       const p = await previewImport(file, next)
-      if (seq === previewSeq.current) setPreview(p)
+      if (seq === previewSeq.current) {
+        setPreview(p)
+        setPreviewStale(false)
+        setBusy(false)
+      }
     } catch {
-      // keep the previous preview; commit still enforces required mappings server-side
+      if (seq === previewSeq.current) {
+        setPreviewStale(true)
+        setBusy(false)
+        setError("Couldn't refresh the preview for that mapping — re-select a column to retry.")
+      }
     }
   }
 
@@ -175,7 +188,7 @@ export default function ImportView() {
           </div>
           {missing.length > 0 && <p className="import-error">Map required columns: {missing.join(', ')}</p>}
           <div className="import-actions">
-            <button className="btn" disabled={missing.length > 0 || busy} onClick={() => setStep('review')}>Continue</button>
+            <button className="btn" disabled={missing.length > 0 || busy || previewStale} onClick={() => setStep('review')}>Continue</button>
           </div>
         </div>
       )}

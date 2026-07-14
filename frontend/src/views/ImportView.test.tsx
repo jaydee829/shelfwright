@@ -67,6 +67,38 @@ describe('ImportView', () => {
     expect(screen.getByText(/2 rows will be skipped \(unreadable dates\)/i)).toBeInTheDocument()
   })
 
+  it('disables Continue while a mapping re-preview is in flight', async () => {
+    let resolveSecond!: (p: client.ImportPreview) => void
+    vi.spyOn(client, 'previewImport')
+      .mockResolvedValueOnce(PREVIEW)
+      .mockImplementationOnce(() => new Promise((res) => { resolveSecond = res }))
+    render(<ImportView />)
+    uploadFile()
+    await screen.findByText(/Detected: goodreads/i)
+    fireEvent.change(screen.getAllByRole('combobox')[3], { target: { value: 'Author' } })
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled()
+    resolveSecond(BAD_DATE_PREVIEW)
+    await screen.findByText(/2 of 2 rows have dates that couldn't be read/i)
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled()
+  })
+
+  it('blocks Continue and shows an error when the re-preview fails, until one succeeds', async () => {
+    vi.spyOn(client, 'previewImport')
+      .mockResolvedValueOnce(PREVIEW)
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce(BAD_DATE_PREVIEW)
+    render(<ImportView />)
+    uploadFile()
+    await screen.findByText(/Detected: goodreads/i)
+    fireEvent.change(screen.getAllByRole('combobox')[3], { target: { value: 'Author' } })
+    await screen.findByText(/couldn't refresh the preview/i)
+    expect(screen.getByRole('button', { name: /continue/i })).toBeDisabled()
+    // re-selecting a column retries; a successful preview clears the block
+    fireEvent.change(screen.getAllByRole('combobox')[3], { target: { value: 'Title' } })
+    await screen.findByText(/2 of 2 rows have dates that couldn't be read/i)
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled()
+  })
+
   it('commits and then polls status to completion', async () => {
     vi.spyOn(client, 'previewImport').mockResolvedValue(PREVIEW)
     vi.spyOn(client, 'commitImport').mockResolvedValue({ import_job_id: 'j1', total_rows: 2, enqueued: 2 })
