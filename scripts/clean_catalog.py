@@ -245,6 +245,9 @@ def _run_repair_fallbacks(manager: DatabaseManager, safe: str) -> int:
         print("--- prune_tropes samples ---")
         for p in plan.prune_tropes[:10]:
             print(f"  trope={p.trope_id}  ({p.trope_name!r})")
+        print("--- reset (no-evidence) works samples ---")
+        for r in plan.reset_works[:10]:
+            print(f"  work={r.work_id}  title={r.title!r}")
 
         report_path = fallback_repair.write_report(plan, db_target=safe)
         print(f"\nfull plan (every token) written to {report_path} — review this before approving --apply.")
