@@ -52,7 +52,7 @@ def _read_csv(raw: bytes) -> tuple[list[str], list[dict]]:
 
 
 def _counts(parsed: list[parsing.ParsedRow]) -> dict:
-    c = {"read_dated": 0, "read_undated": 0, "to_read": 0, "currently_reading": 0, "total": len(parsed)}
+    c = {"read_dated": 0, "read_undated": 0, "bad_date": 0, "to_read": 0, "currently_reading": 0, "total": len(parsed)}
     for p in parsed:
         if p.shelf == "to-read":
             c["to_read"] += 1
@@ -60,9 +60,19 @@ def _counts(parsed: list[parsing.ParsedRow]) -> dict:
             c["currently_reading"] += 1
         elif p.date_completed is not None:
             c["read_dated"] += 1
+        elif p.bad_date:
+            c["bad_date"] += 1  # would be skipped at commit — surfaced so the UI can warn pre-import
         else:
             c["read_undated"] += 1
     return c
+
+
+def _bad_date_example(parsed: list[parsing.ParsedRow]) -> str | None:
+    """First raw date string that would skip as bad_date (shelved rows never skip on date)."""
+    return next(
+        (p.raw_date for p in parsed if p.bad_date and p.shelf not in ("to-read", "currently-reading")),
+        None,
+    )
 
 
 def _preview_row(p: parsing.ParsedRow) -> dict:
@@ -105,6 +115,7 @@ async def preview(
         "suggested_mapping": suggested,
         "preview_rows": [_preview_row(p) for p in parsed[:5]],
         "counts": _counts(parsed),
+        "bad_date_example": _bad_date_example(parsed),
     }
 
 

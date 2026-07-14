@@ -266,7 +266,11 @@ export interface ImportPreview {
     title: string; author: string; format: string
     date_completed: string | null; rating: number | null; shelf: string
   }>
-  counts: { read_dated: number; read_undated: number; to_read: number; currently_reading: number; total: number }
+  counts: {
+    read_dated: number; read_undated: number; bad_date: number
+    to_read: number; currently_reading: number; total: number
+  }
+  bad_date_example: string | null
 }
 
 export interface ImportCommitResult {

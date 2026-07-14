@@ -14,7 +14,14 @@ const PREVIEW: client.ImportPreview = {
   headers: ['Title', 'Author'],
   suggested_mapping: { title: 'Title', author: 'Author', date_completed: 'Date Read' },
   preview_rows: [{ title: 'Dune', author: 'Frank Herbert', format: 'ebook', date_completed: '2024-03-05', rating: 5, shelf: 'read' }],
-  counts: { read_dated: 1, read_undated: 0, to_read: 1, currently_reading: 0, total: 2 },
+  counts: { read_dated: 1, read_undated: 0, bad_date: 0, to_read: 1, currently_reading: 0, total: 2 },
+  bad_date_example: null,
+}
+
+const BAD_DATE_PREVIEW: client.ImportPreview = {
+  ...PREVIEW,
+  counts: { read_dated: 0, read_undated: 0, bad_date: 2, to_read: 0, currently_reading: 0, total: 2 },
+  bad_date_example: 'October 14, 2017 0:34',
 }
 
 function uploadFile() {
@@ -30,6 +37,34 @@ describe('ImportView', () => {
     uploadFile()
     await waitFor(() => expect(screen.getByText(/Detected: goodreads/i)).toBeInTheDocument())
     expect(screen.getByText(/1 read/i)).toBeInTheDocument()
+  })
+
+  it('re-previews with the edited mapping and warns about unreadable dates', async () => {
+    const spy = vi.spyOn(client, 'previewImport')
+      .mockResolvedValueOnce(PREVIEW)
+      .mockResolvedValueOnce(BAD_DATE_PREVIEW)
+    render(<ImportView />)
+    uploadFile()
+    await screen.findByText(/Detected: goodreads/i)
+    expect(screen.queryByText(/couldn't be read/i)).not.toBeInTheDocument()
+    // FIELDS order: title, author, format, date_completed, ...
+    const dateSelect = screen.getAllByRole('combobox')[3]
+    fireEvent.change(dateSelect, { target: { value: 'Author' } })
+    await screen.findByText(/2 of 2 rows have dates that couldn't be read/i)
+    expect(screen.getByText(/October 14, 2017 0:34/)).toBeInTheDocument()
+    expect(spy).toHaveBeenLastCalledWith(
+      expect.any(File),
+      expect.objectContaining({ date_completed: 'Author' }),
+    )
+  })
+
+  it('review step notes how many rows will be skipped for unreadable dates', async () => {
+    vi.spyOn(client, 'previewImport').mockResolvedValue(BAD_DATE_PREVIEW)
+    render(<ImportView />)
+    uploadFile()
+    await screen.findByText(/Detected: goodreads/i)
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }))
+    expect(screen.getByText(/2 rows will be skipped \(unreadable dates\)/i)).toBeInTheDocument()
   })
 
   it('commits and then polls status to completion', async () => {
