@@ -821,25 +821,76 @@ def update_suggestion_status(work_id: str, status: str) -> str:
         return f"Error updating suggestion status: {str(e)}"
 
 
+def _lift_ranked(
+    user_counts: dict[str, int], catalog_counts: dict[str, int], user_works: int, catalog_works: int, limit: int
+) -> list[str]:
+    """Rank tropes by lift: (user share) / (catalog share), +1-smoothed on the catalog
+    side so a trope the catalog barely has can't divide by ~zero. Ties break by raw user
+    count (desc), then name (asc) for determinism."""
+    if user_works == 0 or catalog_works == 0:
+        return []
+
+    def lift(name: str, count: int) -> float:
+        user_share = count / user_works
+        catalog_share = (catalog_counts.get(name, 0) + 1) / (catalog_works + 1)
+        return user_share / catalog_share
+
+    ranked = sorted(user_counts.items(), key=lambda item: (-lift(item[0], item[1]), -item[1], item[0]))
+    return [name for name, _ in ranked[:limit]]
+
+
 @mcp.tool()
 def get_user_trope_preferences(limit: int = 20) -> list[str]:
-    """Aggregates frequent tropes from user's history."""
+    """Aggregates the user's frequent tropes from REAL (justified) scout links only,
+    ranked by lift vs the catalog baseline (how much the user over-indexes on a trope
+    relative to how common it is catalog-wide) rather than raw link frequency. This keeps
+    genuine over-indexed favorites at the top while deflating tropes that are merely
+    ubiquitous (fallback-pollution attractors — see #125/#70).
+
+    Known, accepted limitation: real scout links with NULL justification (saved before
+    justification was tracked) are under-counted here PERMANENTLY — the #70 repair
+    deliberately spares them (it deletes only links re-derivable from the work's
+    genres/moods), so they remain NULL-justified and invisible to this aggregation.
+    Acceptable for a preference ranking; revisit only if legacy-heavy profiles look thin.
+    """
     user_id = get_required_user_id()
     with db_manager.get_session() as session:
-        # Find tropes present in books read by user
-        results = (
-            session.query(Trope.name, func.count(WorkTrope.work_id))
-            .join(WorkTrope)
-            .join(Work)
-            .join(Edition)
-            .join(ReadingHistory)
-            .filter(ReadingHistory.user_id == user_id)
+        justified = WorkTrope.justification.isnot(None)
+
+        # Tropes present in books the user has read, and how many DISTINCT works link
+        # each one (a work read twice must not double-count).
+        user_counts = dict(
+            session.query(Trope.name, func.count(func.distinct(WorkTrope.work_id)))
+            .join(WorkTrope, WorkTrope.trope_id == Trope.id)
+            .join(Work, Work.id == WorkTrope.work_id)
+            .join(Edition, Edition.work_id == Work.id)
+            .join(ReadingHistory, ReadingHistory.edition_id == Edition.id)
+            .filter(ReadingHistory.user_id == user_id, justified)
             .group_by(Trope.name)
-            .order_by(func.count(WorkTrope.work_id).desc())
-            .limit(limit)
             .all()
         )
-        return [r[0] for r in results]
+
+        user_works = (
+            session.query(func.count(func.distinct(Edition.work_id)))
+            .join(ReadingHistory, ReadingHistory.edition_id == Edition.id)
+            .filter(ReadingHistory.user_id == user_id)
+            .scalar()
+            or 0
+        )
+
+        # Catalog-wide baseline, restricted to tropes the user actually has (only those
+        # can rank), over ALL justified links (not just this user's).
+        catalog_counts = dict(
+            session.query(Trope.name, func.count(func.distinct(WorkTrope.work_id)))
+            .join(WorkTrope, WorkTrope.trope_id == Trope.id)
+            .filter(justified, Trope.name.in_(user_counts.keys()))
+            .group_by(Trope.name)
+            .all()
+        )
+
+        catalog_works = session.query(func.count(func.distinct(WorkTrope.work_id))).filter(justified).scalar() or 0
+
+        return _lift_ranked(user_counts, catalog_counts, user_works, catalog_works, limit)
 
 
 @mcp.tool()

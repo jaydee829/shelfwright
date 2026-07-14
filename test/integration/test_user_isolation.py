@@ -72,7 +72,7 @@ def scoped_db(db_url):
         trope = Trope(name="Found Family")
         session.add_all([solo_work, solo_edition, trope])
         session.flush()
-        session.add(WorkTrope(work_id=solo_work.id, trope_id=trope.id))
+        session.add(WorkTrope(work_id=solo_work.id, trope_id=trope.id, justification="evidence"))
         session.add(
             ReadingHistory(edition_id=solo_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2021, 3, 3))
         )

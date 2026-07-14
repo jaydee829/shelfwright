@@ -188,35 +188,86 @@ def test_search_internal_database_excludes_actively_suggested_work(db_url, monke
 
 
 @pytest.mark.db_integration
-def test_user_trope_preferences_ranked_by_frequency(db_url):
+def test_user_trope_preferences_ranked_by_lift(db_url):
+    """#125 #70: ranking is by lift vs the catalog baseline, not raw frequency. "Fantasy"
+    is on every catalog work (2 read + 2 unread) so it is merely ubiquitous (lift ~= 1);
+    "Mystery" only appears on a work the user actually read, so the user over-indexes on
+    it relative to the catalog -> Mystery ranks first even though Fantasy has more raw
+    links."""
     test_db_manager = DatabaseManager(db_url)
     set_db_manager(test_db_manager)
 
     with test_db_manager.get_session() as session:
-        # "Fantasy" appears in 2 read works, "Mystery" in 1 -> Fantasy ranks first.
         fantasy = Trope(name="Fantasy")
         mystery = Trope(name="Mystery")
         session.add_all([fantasy, mystery])
         session.flush()
-        for i, tropes in enumerate([[fantasy, mystery], [fantasy]]):
-            author = Author(name=f"Auth {i}")
+
+        def _add_work(title, tropes, *, read):
+            author = Author(name=f"Auth {title}")
             session.add(author)
             session.flush()
-            work = Work(title=f"Book {i}")
+            work = Work(title=title)
             session.add(work)
             session.flush()
             session.add(WorkContributor(work=work, author=author, role="Author"))
             for t in tropes:
-                session.add(WorkTrope(work=work, trope=t))
+                session.add(WorkTrope(work=work, trope=t, justification="evidence"))
             edition = Edition(work=work, format="hardcover")
             session.add(edition)
             session.flush()
-            session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2020, 1, 1)))
+            if read:
+                session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2020, 1, 1)))
+            return work
+
+        # Read works: both carry Fantasy; only one also carries Mystery.
+        _add_work("Read Book 0", [fantasy, mystery], read=True)
+        _add_work("Read Book 1", [fantasy], read=True)
+        # Unread catalog works: both carry Fantasy (making it ubiquitous), neither carries Mystery.
+        _add_work("Catalog Book 0", [fantasy], read=False)
+        _add_work("Catalog Book 1", [fantasy], read=False)
         session.commit()
 
     prefs = get_user_trope_preferences()
-    assert prefs[0] == "Fantasy", prefs
+    assert prefs[0] == "Mystery", prefs
     assert set(prefs) == {"Fantasy", "Mystery"}, prefs
+
+
+@pytest.mark.db_integration
+def test_user_trope_preferences_excludes_null_justification_pollution(db_url):
+    """#125 #70: fallback-pollution links (justification IS NULL) must not surface in
+    preferences at all, even when they dominate the user's raw link counts. The user's
+    read works carry a NULL-justification "attractor" trope (fallback pollution) plus a
+    justified "specific" trope (a real scout link) -> only the specific trope appears."""
+    test_db_manager = DatabaseManager(db_url)
+    set_db_manager(test_db_manager)
+
+    with test_db_manager.get_session() as session:
+        attractor = Trope(name="The Dark Night of the Soul")
+        specific = Trope(name="Warrior Romance")
+        session.add_all([attractor, specific])
+        session.flush()
+
+        author = Author(name="Pollution Author")
+        session.add(author)
+        session.flush()
+        work = Work(title="Polluted Book")
+        session.add(work)
+        session.flush()
+        session.add(WorkContributor(work=work, author=author, role="Author"))
+        # Fallback pollution: NULL justification (the default when omitted).
+        session.add(WorkTrope(work=work, trope=attractor))
+        # Real scout link: justified.
+        session.add(WorkTrope(work=work, trope=specific, justification="scout evidence"))
+        edition = Edition(work=work, format="hardcover")
+        session.add(edition)
+        session.flush()
+        session.add(ReadingHistory(edition=edition, user_id=DEFAULT_USER_ID, date_completed=date(2020, 1, 1)))
+        session.commit()
+
+    prefs = get_user_trope_preferences()
+    assert "The Dark Night of the Soul" not in prefs, prefs
+    assert prefs == ["Warrior Romance"], prefs
 
 
 @pytest.mark.db_integration

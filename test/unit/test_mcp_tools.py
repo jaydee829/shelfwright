@@ -238,15 +238,44 @@ def test_update_reading_status_falls_back_to_unknown_format(mock_db_manager, edi
 
 
 def test_get_user_trope_preferences_mock(mock_db_manager):
+    """Feed counts where raw frequency and lift DISAGREE (Fantasy has more raw links but
+    is merely ubiquitous in the catalog; Sci-Fi is rarer but the user over-indexes on it)
+    and assert the lift order — not the raw-frequency order — comes back."""
     session = mock_db_manager.get_session.return_value.__enter__.return_value
 
-    session.query.return_value.join.return_value.join.return_value.join.return_value.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
-        ("Fantasy", 5),
-        ("Sci-Fi", 3),
+    user_counts_query = MagicMock()
+    user_counts_query.join.return_value = user_counts_query
+    user_counts_query.filter.return_value = user_counts_query
+    user_counts_query.group_by.return_value = user_counts_query
+    user_counts_query.all.return_value = [("Fantasy", 5), ("Sci-Fi", 3)]
+
+    user_works_query = MagicMock()
+    user_works_query.join.return_value = user_works_query
+    user_works_query.filter.return_value = user_works_query
+    user_works_query.scalar.return_value = 10
+
+    catalog_counts_query = MagicMock()
+    catalog_counts_query.join.return_value = catalog_counts_query
+    catalog_counts_query.filter.return_value = catalog_counts_query
+    catalog_counts_query.group_by.return_value = catalog_counts_query
+    catalog_counts_query.all.return_value = [("Fantasy", 90), ("Sci-Fi", 4)]
+
+    catalog_works_query = MagicMock()
+    catalog_works_query.join.return_value = catalog_works_query
+    catalog_works_query.filter.return_value = catalog_works_query
+    catalog_works_query.scalar.return_value = 100
+
+    session.query.side_effect = [
+        user_counts_query,
+        user_works_query,
+        catalog_counts_query,
+        catalog_works_query,
     ]
 
     results = get_user_trope_preferences()
-    assert results == ["Fantasy", "Sci-Fi"]
+    # Raw frequency would put Fantasy (5) above Sci-Fi (3); lift flips it: Fantasy is
+    # near-ubiquitous in the catalog (90/100) while Sci-Fi is scarce but user-favored (4/100).
+    assert results == ["Sci-Fi", "Fantasy"]
 
 
 def test_get_work_details_mock(mock_db_manager):
