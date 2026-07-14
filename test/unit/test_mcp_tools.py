@@ -76,21 +76,33 @@ def test_search_internal_database_mock(mock_db_manager, mock_trope_manager, mock
     mock_query.distinct.return_value = mock_query
     mock_query.options.return_value = mock_query  # Support .options()
 
-    # Now set the 'all' results based on the context
-    # This is tricky with simple mocks. Let's simplify:
-    # Just ensure candidate_work_ids gets something.
+    # session.query(...).all() calls, in order: trope prefilter, style prefilter,
+    # final Work retrieval (#125 rewrite — the ranked pool itself now comes from
+    # session.execute(<select>).all(), mocked separately below).
     mock_query.all.side_effect = [
-        [mock_trope],  # search_internal_database (tropes similarity)
-        [(mock_works[0].id,)],  # search_internal_database (trope_works)
-        [mock_style],  # search_internal_database (styles similarity)
-        [(mock_works[1].id,)],  # search_internal_database (author_works)
-        [],  # search_internal_database (work_styles)
-        mock_works,  # search_internal_database (Final Works retrieval)
+        [mock_trope],  # nearest-tag trope prefilter
+        [mock_style],  # nearest-tag style prefilter
+        mock_works,  # final Work retrieval
     ]
 
+    # session.execute(<select>).all() calls, in order: trope-rank, work-style-rank,
+    # author-style-rank — each returns (work_id, score) rows.
+    mock_execute_results = [
+        [(mock_works[0].id, 0.1)],  # trope-rank
+        [(mock_works[1].id, 0.2)],  # work-style-rank
+        [],  # author-style-rank
+    ]
+    session.execute.side_effect = [MagicMock(all=MagicMock(return_value=rows)) for rows in mock_execute_results]
+
     results = search_internal_database(target_tropes=["fantasy"], target_styles=["grimdark"])
-    assert len(results) > 0
-    assert results[0]["title"] in [b["title"] for b in standard_books]
+    assert len(results) == 2
+    assert results[0]["id"] == str(mock_works[0].id)  # lower (better) score ranks first
+    assert results[1]["id"] == str(mock_works[1].id)
+    for row, work in zip(results, [mock_works[0], mock_works[1]], strict=True):
+        assert row["title"] == work.title
+        assert row["authors"] == [c.author.name for c in work.contributors]
+        assert row["genres"] == work.genres
+        assert row["description"] == work.description
 
 
 def test_get_unacted_suggestions_mock(mock_db_manager, mock_trope_manager, mock_style_manager):

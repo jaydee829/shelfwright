@@ -37,8 +37,17 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
     ),
     (
         "search_internal_database",
-        "Vector search the catalog by tropes/styles.",
-        _schema({"target_tropes": _STR_ARRAY, "target_styles": _STR_ARRAY, "limit": _INT}, required=["target_tropes"]),
+        "Vector search the catalog by tropes/styles; exclude_* are negative targets (session constraints).",
+        _schema(
+            {
+                "target_tropes": _STR_ARRAY,
+                "target_styles": _STR_ARRAY,
+                "limit": _INT,
+                "exclude_tropes": _STR_ARRAY,
+                "exclude_styles": _STR_ARRAY,
+            },
+            required=["target_tropes"],
+        ),
         mcp_server.search_internal_database,
     ),
     (
@@ -49,8 +58,17 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
     ),
     (
         "get_recommendation_candidates",
-        "Read-status-aware, novelty-balanced catalog candidates (unread-first; has_unread flag).",
-        _schema({"target_tropes": _STR_ARRAY, "target_styles": _STR_ARRAY, "limit": _INT}, required=["target_tropes"]),
+        "Read-status-aware catalog candidates (unread-first; has_unread flag); pass session constraints as exclude_tropes/exclude_styles.",
+        _schema(
+            {
+                "target_tropes": _STR_ARRAY,
+                "target_styles": _STR_ARRAY,
+                "limit": _INT,
+                "exclude_tropes": _STR_ARRAY,
+                "exclude_styles": _STR_ARRAY,
+            },
+            required=["target_tropes"],
+        ),
         mcp_server.get_recommendation_candidates,
     ),
     (

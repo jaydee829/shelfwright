@@ -7,7 +7,11 @@ from __future__ import annotations
 import json
 import re
 
-from agentic_librarian.mcp.server import get_read_status, get_unacted_suggestions, search_internal_database
+from agentic_librarian.mcp.server import (
+    get_active_suggestion_work_ids,
+    get_read_status,
+    search_internal_database,
+)
 
 
 def coerce_schema_value(value) -> dict:
@@ -36,46 +40,60 @@ def coerce_schema_value(value) -> dict:
 
 
 def extract_candidate_ids(state: dict) -> list[str]:
-    """Gather internal DB candidates from the Analyst's targets, de-duplicated, order preserved."""
+    """Gather internal DB candidates from the Analyst's targets, de-duplicated, order preserved.
+    The Analyst's session_constraints become negative retrieval targets (#125: 'less fantasy'
+    must exclude structurally), and actively-suggested works never re-enter a fresh set."""
     targets = coerce_schema_value(state.get("targets"))
     tropes = targets.get("tropes") or []
     styles = targets.get("styles") or []
+    constraints = targets.get("session_constraints") or []
     if not tropes and not styles:
         return []
-    rows = search_internal_database(target_tropes=tropes, target_styles=styles)
-    rows += get_unacted_suggestions(target_tropes=tropes, target_styles=styles)
+    rows = search_internal_database(target_tropes=tropes, target_styles=styles, exclude_tropes=constraints or None)
+    suggested = get_active_suggestion_work_ids()
     seen: list[str] = []
     for r in rows:
         wid = r.get("id")
-        if wid and wid not in seen:
+        if wid and wid not in seen and wid not in suggested:
             seen.append(wid)
     return seen
 
 
 def _candidate_view(r: dict) -> dict:
-    """Normalize a row from either source into a common candidate shape.
-    search_internal_database -> id/title/authors/genres/description;
-    get_unacted_suggestions -> id/title/justification (no authors/genres)."""
+    """Normalize a search row into the common candidate shape."""
     return {
         "id": r.get("id"),
         "title": r.get("title"),
         "authors": r.get("authors") or [],
         "genres": r.get("genres") or [],
-        "description": r.get("description") or r.get("justification") or "",
+        "description": r.get("description") or "",
     }
 
 
-def curate_candidates(target_tropes: list[str], target_styles: list[str] | None = None, limit: int = 10) -> dict:
-    """Deterministic, read-status-aware candidate set for recommendations (spec A1/A3).
-    Unions internal vector matches + prior unacted (unread) suggestions, annotates each with
-    read status, DROPS books finished <2y ago, orders unread-first, and reports has_unread so
-    the caller can fall back to the Explorer for a fresh discovery."""
-    rows = search_internal_database(target_tropes=target_tropes, target_styles=target_styles, limit=limit)
-    rows += get_unacted_suggestions(target_tropes=target_tropes, target_styles=target_styles, limit=limit)
+def curate_candidates(
+    target_tropes: list[str],
+    target_styles: list[str] | None = None,
+    limit: int = 10,
+    exclude_tropes: list[str] | None = None,
+    exclude_styles: list[str] | None = None,
+) -> dict:
+    """Deterministic, read-status-aware candidate set for recommendations (spec A1/A3 + #125).
+    Vector-searches the catalog (relevance-ranked, negative targets honored), DROPS books
+    finished <2y ago AND books already pitched with an unresolved suggestion (never re-offer
+    what the user hasn't reacted to), orders unread-first, and reports has_unread so the
+    caller can fall back to the Explorer for a fresh discovery."""
+    rows = search_internal_database(
+        target_tropes=target_tropes,
+        target_styles=target_styles,
+        limit=limit,
+        exclude_tropes=exclude_tropes,
+        exclude_styles=exclude_styles,
+    )
+    suggested = get_active_suggestion_work_ids()
     by_id: dict[str, dict] = {}
     for r in rows:
         wid = r.get("id")
-        if wid and wid not in by_id:
+        if wid and wid not in by_id and wid not in suggested:
             by_id[wid] = r
     if not by_id:
         return {"candidates": [], "has_unread": False, "unread_count": 0, "reread_count": 0}
