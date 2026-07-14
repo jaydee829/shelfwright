@@ -255,14 +255,19 @@ def _cleaned_tag_names(genres: list[str] | None, moods: list[str] | None) -> lis
     return names
 
 
-def _is_slug_link(name: str, genres: list[str] | None, moods: list[str] | None) -> bool:
+def _is_slug_link(name: str, work_slugs: set[str]) -> bool:
     """Fix 2 (adjudicated, review pass 3): a link is slug-named iff its trope name
-    (case-insensitive) is a member of `_cleaned_tag_names(genres, moods)` — EXACTLY the set
+    (case-insensitive) is a member of `work_slugs` — the lowercased
+    `_cleaned_tag_names(genres, moods)` set for the work in question, EXACTLY the set
     write_slug writes (via get_or_create_fallback_trope, one call per cleaned name). This
     replaces trope_predicate.is_fallback_trope_name for this module's internal slug carve-out
     (that shared predicate stays as-is for its other callers — persist.py/enrichment_sweep.py/
     trope_backfill.py/api/internal.py — this is a LOCAL redefinition, not a change to the shared
     function).
+
+    Perf (Gemini review adoption): callers precompute `work_slugs` ONCE per work (there are up
+    to four call sites per work in `_plan_from_data`'s per-work loop) rather than recomputing
+    `_cleaned_tag_names` — and re-lowercasing every name in it — on every call.
 
     Why the shared predicate is wrong for this purpose: is_fallback_trope_name checks the
     cleaned NAME against the work's RAW, uncleaned genres|moods (lowercased) — so it never
@@ -276,7 +281,7 @@ def _is_slug_link(name: str, genres: list[str] | None, moods: list[str] | None) 
     scan below counts it as non-slug 'evidence' too, both wrong for a link this tool itself just
     wrote as a plain exact-name slug. Matching against write_slug's own output set closes that
     gap by construction: whatever write_slug writes is always classified as a slug."""
-    return name.lower() in {n.lower() for n in _cleaned_tag_names(genres, moods)}
+    return name.lower() in work_slugs
 
 
 def warm_fallback_repair_texts(session: Session) -> list[str]:
@@ -302,35 +307,62 @@ def warm_fallback_repair_texts(session: Session) -> list[str]:
 # --------------------------------------------------------------------------------------------
 
 
-def _nearest_trope_by_name(session: Session, all_tropes_by_name: dict[str, Trope], name: str) -> Trope | None:
+def _nearest_trope_by_name(
+    session: Session,
+    all_tropes_by_name: dict[str, Trope],
+    name: str,
+    cache: dict[str, Trope | None] | None = None,
+) -> Trope | None:
     """Exact-name match -> None (legitimate slug, never bogus — skip). Else the nearest trope
     by cosine distance if within BOGUS_MATCH_THRESHOLD, else None (no bogus target for this
     name). Read-only: never creates a Trope. Embeds `name` via the (already-warmed, per #123)
-    get_cached_embedding cache."""
+    get_cached_embedding cache.
+
+    Perf (profiled against prod — this was the dominant cost of a repair-plan run: thousands of
+    pgvector round-trips for ~200 unique cleaned tag names, since the same handful of names
+    recur across many works' genres/moods): this lookup is purely a function of `name` (and the
+    DB state captured by `all_tropes_by_name`/the Trope table) within one plan run, so callers
+    MAY pass a `cache` dict to memoize it — one query per unique name per plan, instead of one
+    per (work, name) pair. `cache` is scoped to a single plan_fallback_repair invocation and
+    created fresh by that caller; see plan_fallback_repair for why a module-global cache (e.g.
+    functools.lru_cache) is forbidden here instead."""
+    if cache is not None and name in cache:
+        return cache[name]
     if name in all_tropes_by_name:
-        return None  # an exact-name slug trope already exists for this tag -> legitimate
-    embedding = get_cached_embedding(EMBED_MODEL, name)
-    nearest = (
-        session.query(Trope)
-        .filter(Trope.embedding.isnot(None))
-        .filter(Trope.embedding.cosine_distance(embedding) <= BOGUS_MATCH_THRESHOLD)
-        # Fix 3 (deterministic tie-break, house rule from dedup_backfill's Minor-3 order_by
-        # discipline): Trope.id as the secondary sort key makes an exact-distance tie resolve
-        # identically every time, so a re-plan on unchanged data classifies the SAME nearest
-        # trope and can't spuriously trip the apply-gate's drift check on Postgres row-order
-        # nondeterminism alone.
-        .order_by(Trope.embedding.cosine_distance(embedding), Trope.id)
-        .first()
-    )
-    return nearest
+        result = None  # an exact-name slug trope already exists for this tag -> legitimate
+    else:
+        embedding = get_cached_embedding(EMBED_MODEL, name)
+        result = (
+            session.query(Trope)
+            .filter(Trope.embedding.isnot(None))
+            .filter(Trope.embedding.cosine_distance(embedding) <= BOGUS_MATCH_THRESHOLD)
+            # Fix 3 (deterministic tie-break, house rule from dedup_backfill's Minor-3 order_by
+            # discipline): Trope.id as the secondary sort key makes an exact-distance tie
+            # resolve identically every time, so a re-plan on unchanged data classifies the SAME
+            # nearest trope and can't spuriously trip the apply-gate's drift check on Postgres
+            # row-order nondeterminism alone.
+            .order_by(Trope.embedding.cosine_distance(embedding), Trope.id)
+            .first()
+        )
+    if cache is not None:
+        cache[name] = result
+    return result
 
 
-def bogus_targets(session: Session, work: Work, all_tropes_by_name: dict[str, Trope]) -> set[UUID]:
+def bogus_targets(
+    session: Session,
+    work: Work,
+    all_tropes_by_name: dict[str, Trope],
+    nearest_trope_cache: dict[str, Trope | None] | None = None,
+) -> set[UUID]:
     """The set of trope ids that are a bogus (deterministically re-derivable) semantic-redirect
-    target for THIS work's genres|moods. Read-only."""
+    target for THIS work's genres|moods. Read-only.
+
+    `nearest_trope_cache`, if given, is forwarded to `_nearest_trope_by_name` unchanged — see
+    plan_fallback_repair for the plan-scoped memoization this supports."""
     out: set[UUID] = set()
     for name in _cleaned_tag_names(work.genres, work.moods):
-        nearest = _nearest_trope_by_name(session, all_tropes_by_name, name)
+        nearest = _nearest_trope_by_name(session, all_tropes_by_name, name, cache=nearest_trope_cache)
         if nearest is not None:
             out.add(nearest.id)
     return out
@@ -377,6 +409,10 @@ def _plan_from_data(
 
     for wd in works_data:
         targets = bogus_targets_by_work.get(wd.work_id, set())
+        # Gemini review adoption: compute this work's slug-name set ONCE and reuse it at every
+        # _is_slug_link call site below (there are four), instead of recomputing
+        # _cleaned_tag_names (and re-lowercasing it) per call.
+        work_slugs = {n.lower() for n in _cleaned_tag_names(wd.genres, wd.moods)}
 
         # Reset-no-evidence trigger (#70 follow-up, owner-approved 2026-07-14; evidence scan
         # corrected in review pass 3 — Fix 1): a work with >=1 link and ZERO justified links
@@ -407,7 +443,7 @@ def _plan_from_data(
         non_slug_links = [
             (trope_id, name, justification)
             for trope_id, name, justification in wd.links
-            if not _is_slug_link(name, wd.genres, wd.moods)
+            if not _is_slug_link(name, work_slugs)
         ]
         has_any_justified_link = any(justification is not None for _tid, _name, justification in wd.links)
         reset_no_evidence = bool(non_slug_links) and not has_any_justified_link
@@ -427,7 +463,7 @@ def _plan_from_data(
 
         planned_deletes: set[UUID] = set()
         for trope_id, name, justification in wd.links:
-            is_slug = _is_slug_link(name, wd.genres, wd.moods)
+            is_slug = _is_slug_link(name, work_slugs)
             if (reset_no_evidence and not is_slug) or (justification is None and trope_id in targets):
                 plan.delete_links.append(DeleteLink(work_id=wd.work_id, trope_id=trope_id, trope_name=name))
                 planned_deletes.add(trope_id)
@@ -449,7 +485,7 @@ def _plan_from_data(
         # untouched: this trigger requires `wd.links` non-empty (all_slug_links below is
         # vacuously True on an empty list, but the `bool(wd.links)` guard keeps a zero-link work
         # out of this branch entirely, same rail as the reset-no-evidence trigger above).
-        all_slug_links = bool(wd.links) and all(_is_slug_link(name, wd.genres, wd.moods) for _tid, name, _j in wd.links)
+        all_slug_links = bool(wd.links) and all(_is_slug_link(name, work_slugs) for _tid, name, _j in wd.links)
         stamp_only = (
             bool(wd.links)
             and not has_any_justified_link
@@ -477,7 +513,7 @@ def _plan_from_data(
         # A "real" trope survives if it's NOT planned for deletion AND is not itself a
         # slug-name match for this work's own genres/moods (Fix 2: _is_slug_link False).
         has_real_remaining = any(
-            trope_id not in planned_deletes and not _is_slug_link(name, wd.genres, wd.moods)
+            trope_id not in planned_deletes and not _is_slug_link(name, work_slugs)
             for trope_id, name, _justification in wd.links
         )
 
@@ -534,7 +570,27 @@ def plan_fallback_repair(session: Session) -> FallbackRepairPlan:
         )
         for work in works
     ]
-    bogus_targets_by_work = {work.id: bogus_targets(session, work, all_tropes_by_name) for work in works}
+    # Perf (profiled against prod, adopted alongside the per-work slug-set fix): memoize
+    # _nearest_trope_by_name PER INVOCATION of this function — it is purely a function of `name`
+    # within one plan run, and the same handful of cleaned tag names (~200 unique) recur across
+    # many hundreds of works, so without this cache every work re-issues a pgvector round-trip
+    # for names already resolved by an earlier work in the same run. The cache is created fresh
+    # here, lives only as long as this call, and is thrown away when it returns.
+    #
+    # Deliberately NOT a module-global cache (e.g. functools.lru_cache on
+    # _nearest_trope_by_name): this module's whole contract is that plan_fallback_repair always
+    # reflects the CURRENT DB state (see the module docstring's "Apply is THE USER GATE" section
+    # — apply_fallback_repair re-plans FRESH specifically so drift since review is detected). A
+    # process-lifetime cache would silently serve a stale nearest-trope result across separate
+    # plan runs — e.g. a trope created or deleted between a dry-run and the apply re-plan, or
+    # between two operator invocations in the same process — corrupting exactly the re-plan-
+    # fresh guarantee the drift gate depends on. Scoping the cache to one call sidesteps that
+    # entirely: it can never outlive the DB state it was computed against.
+    nearest_trope_cache: dict[str, Trope | None] = {}
+    bogus_targets_by_work = {
+        work.id: bogus_targets(session, work, all_tropes_by_name, nearest_trope_cache=nearest_trope_cache)
+        for work in works
+    }
 
     return _plan_from_data(works_data, all_tropes_by_id, bogus_targets_by_work)
 
