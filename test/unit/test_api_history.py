@@ -139,3 +139,60 @@ def test_get_history_limit_cap_enforced():
     assert client.get("/history?limit=500").status_code == 422
     assert client.get("/history?limit=0").status_code == 422
     assert client.get("/history?offset=-1").status_code == 422
+
+
+def _mock_work_trope(name, *, relevance, justification):
+    wt = MagicMock()
+    wt.trope.name = name
+    wt.relevance_score = relevance
+    wt.justification = justification
+    return wt
+
+
+@pytest.mark.parametrize(
+    ("tropes", "expected_names"),
+    [
+        pytest.param(
+            [
+                _mock_work_trope("Slow Burn", relevance=0.9, justification="found in scout summary"),
+                _mock_work_trope("Found Family", relevance=0.7, justification="found in scout summary"),
+                _mock_work_trope("Dark", relevance=1.0, justification=None),
+                _mock_work_trope("Sad", relevance=1.0, justification=None),
+                _mock_work_trope("Fantasy", relevance=1.0, justification=None),
+            ],
+            ["Slow Burn", "Found Family", "Dark"],
+            id="justified_tropes_outrank_slugs_top_3",
+        ),
+        pytest.param(
+            [
+                _mock_work_trope("Fantasy", relevance=1.0, justification=None),
+                _mock_work_trope("Dark", relevance=1.0, justification=None),
+            ],
+            ["Dark", "Fantasy"],
+            id="slug_only_work_still_shows_slugs",
+        ),
+    ],
+)
+def test_get_history_tropes_prefer_real_over_slugs(tropes, expected_names):
+    with patch("agentic_librarian.api.main.db_manager") as mock_db:
+        mock_session = MagicMock()
+        mock_db.get_session.return_value.__enter__.return_value = mock_session
+
+        mock_history = MagicMock()
+        mock_history.id = "test-id"
+        mock_history.date_completed = date(2024, 1, 1)
+        mock_history.user_rating = 5
+        mock_history.edition.format = "hardcover"
+        mock_history.edition.work.title = "Test Book"
+        mock_contributor = MagicMock()
+        mock_contributor.author.name = "Test Author"
+        mock_contributor.role = "Author"
+        mock_history.edition.work.contributors = [mock_contributor]
+        mock_history.edition.work.tropes = tropes
+
+        _history_chain(mock_session, [mock_history])
+
+        response = client.get("/history")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["tropes"] == expected_names
