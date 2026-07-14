@@ -49,7 +49,12 @@ def extract_candidate_ids(state: dict) -> list[str]:
     constraints = targets.get("session_constraints") or []
     if not tropes and not styles:
         return []
-    rows = search_internal_database(target_tropes=tropes, target_styles=styles, exclude_tropes=constraints or None)
+    rows = search_internal_database(
+        target_tropes=tropes,
+        target_styles=styles,
+        exclude_tropes=constraints or None,
+        exclude_styles=constraints or None,
+    )
     suggested = get_active_suggestion_work_ids()
     seen: list[str] = []
     for r in rows:

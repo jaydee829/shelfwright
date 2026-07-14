@@ -98,46 +98,47 @@ def get_server_status() -> str:
 _POOL_NEAREST_TAGS = 20  # nearest tropes/styles feeding the pool (5 was a second collapse point)
 _POOL_OVERFETCH = 3  # each arm over-fetches limit*3; exclusion/merge trims back to limit
 _EXCLUDE_DEMOTE_DISTANCE = 0.35  # candidates this close to a negative rank below all clean ones
+# untuned heuristic knob — real embedding-distance distributions should tune it (follow-up)
 
 
-def _trope_rank_select(query_vector, trope_ids, pool_limit: int):
+def _trope_rank_select(query_vector, trope_ids, pool_limit: int, exclude_work_ids=None):
     """Works ranked by their best-matching trope: cosine distance to the query vector,
     penalized for low link relevance (relevance 1.0 → ×1, relevance 0.0 → ×2)."""
     score = func.min(Trope.embedding.cosine_distance(query_vector) * (2.0 - WorkTrope.relevance_score)).label("score")
-    return (
+    stmt = (
         select(WorkTrope.work_id, score)
         .join(Trope, Trope.id == WorkTrope.trope_id)
         .where(WorkTrope.trope_id.in_(trope_ids))
-        .group_by(WorkTrope.work_id)
-        .order_by(score)
-        .limit(pool_limit)
     )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkTrope.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkTrope.work_id).order_by(score).limit(pool_limit)
 
 
-def _work_style_rank_select(query_vector, style_ids, pool_limit: int):
+def _work_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_work_ids=None):
     score = func.min(Style.embedding.cosine_distance(query_vector)).label("score")
-    return (
+    stmt = (
         select(WorkStyle.work_id, score)
         .join(Style, Style.id == WorkStyle.style_id)
         .where(WorkStyle.style_id.in_(style_ids))
-        .group_by(WorkStyle.work_id)
-        .order_by(score)
-        .limit(pool_limit)
     )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkStyle.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkStyle.work_id).order_by(score).limit(pool_limit)
 
 
-def _author_style_rank_select(query_vector, style_ids, pool_limit: int):
+def _author_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_work_ids=None):
     score = func.min(Style.embedding.cosine_distance(query_vector)).label("score")
-    return (
+    stmt = (
         select(WorkContributor.work_id, score)
         .join(Author, Author.id == WorkContributor.author_id)
         .join(AuthorStyle, AuthorStyle.author_id == Author.id)
         .join(Style, Style.id == AuthorStyle.style_id)
         .where(AuthorStyle.style_id.in_(style_ids))
-        .group_by(WorkContributor.work_id)
-        .order_by(score)
-        .limit(pool_limit)
     )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkContributor.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkContributor.work_id).order_by(score).limit(pool_limit)
 
 
 def _neg_trope_distance_select(query_vector, work_ids):
@@ -182,7 +183,11 @@ def _merge_min(*score_maps: dict) -> dict:
 def _apply_exclusions(pos_scores: dict, neg_scores: dict) -> list:
     """Order candidates by positive score. DROP any at least as close to a negative
     target as to the positives (ties go to the exclusion — user feedback wins); DEMOTE
-    near-misses (within _EXCLUDE_DEMOTE_DISTANCE of a negative) below all clean ones."""
+    near-misses (within _EXCLUDE_DEMOTE_DISTANCE of a negative) below all clean ones.
+    pos_scores carry the relevance penalty while neg distances are raw — deliberate
+    asymmetry: weak positive evidence earns less protection from a user's exclusion.
+    A candidate with no links in an exclusion's space has no measured distance and is
+    kept un-demoted (fail-open by design — no evidence to measure)."""
     kept, demoted = [], []
     for wid in sorted(pos_scores, key=pos_scores.get):
         neg = neg_scores.get(wid)
@@ -221,7 +226,11 @@ def search_internal_database(
     exclude_tropes/exclude_styles are NEGATIVE targets (session constraints like
     "less fantasy", "nothing gory"): candidates closer to a negative than to the
     positive targets are dropped; near-misses rank below all clean candidates.
+    Results never include works already pitched and awaiting the user's reaction.
     """
+    limit = max(int(limit), 0)
+    if limit == 0:
+        return []
     _warm_embeddings([*(target_tropes or []), *(target_styles or []), *(exclude_tropes or []), *(exclude_styles or [])])
 
     with db_manager.get_session() as session:
@@ -229,6 +238,16 @@ def search_internal_database(
         sm = StyleManager(session=session)
         pool_limit = max(limit, 1) * _POOL_OVERFETCH
         pos_scores: dict[UUID, float] = {}
+
+        # Works with an active 'Suggested' suggestion for this user are excluded at the
+        # ranking source: a deflected title must not be retrievable by Critic-direct search,
+        # and it must not consume a result slot ahead of the limit (#125 follow-up).
+        suggested = [
+            row[0]
+            for row in session.query(Suggestions.work_id)
+            .filter(Suggestions.status == "Suggested", Suggestions.user_id == get_required_user_id())
+            .all()
+        ]
 
         # 1. Trope arm — ranked into the pool.
         if target_tropes:
@@ -242,7 +261,7 @@ def search_internal_database(
                 .all()
             ]
             if trope_ids:
-                rows = session.execute(_trope_rank_select(avg_vector, trope_ids, pool_limit)).all()
+                rows = session.execute(_trope_rank_select(avg_vector, trope_ids, pool_limit, suggested)).all()
                 pos_scores = _merge_min(pos_scores, dict(rows))
 
         # 2. Style arm (work styles + primary-author styles) — ranked into the pool.
@@ -257,8 +276,8 @@ def search_internal_database(
                 .all()
             ]
             for stmt in (
-                _work_style_rank_select(avg_style_vector, style_ids, pool_limit),
-                _author_style_rank_select(avg_style_vector, style_ids, pool_limit),
+                _work_style_rank_select(avg_style_vector, style_ids, pool_limit, suggested),
+                _author_style_rank_select(avg_style_vector, style_ids, pool_limit, suggested),
             ):
                 if style_ids:
                     pos_scores = _merge_min(pos_scores, dict(session.execute(stmt).all()))

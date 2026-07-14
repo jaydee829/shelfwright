@@ -76,10 +76,11 @@ def test_search_internal_database_mock(mock_db_manager, mock_trope_manager, mock
     mock_query.distinct.return_value = mock_query
     mock_query.options.return_value = mock_query  # Support .options()
 
-    # session.query(...).all() calls, in order: trope prefilter, style prefilter,
-    # final Work retrieval (#125 rewrite — the ranked pool itself now comes from
-    # session.execute(<select>).all(), mocked separately below).
+    # session.query(...).all() calls, in order: active-suggestion exclusion set, trope
+    # prefilter, style prefilter, final Work retrieval (#125 rewrite — the ranked pool
+    # itself now comes from session.execute(<select>).all(), mocked separately below).
     mock_query.all.side_effect = [
+        [],  # active-suggestion exclusion set (none suggested)
         [mock_trope],  # nearest-tag trope prefilter
         [mock_style],  # nearest-tag style prefilter
         mock_works,  # final Work retrieval

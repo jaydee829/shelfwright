@@ -43,6 +43,24 @@ def test_author_style_rank_select_reaches_works_through_contributors():
     assert sql.index("ORDER BY") < sql.index("LIMIT")
 
 
+@pytest.mark.parametrize(
+    "builder",
+    [server._trope_rank_select, server._work_style_rank_select, server._author_style_rank_select],
+)
+def test_rank_select_excludes_work_ids_when_given(builder):
+    sql = _compiled(builder(VEC, IDS, pool_limit=30, exclude_work_ids=IDS))
+    assert "NOT IN" in sql
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [server._trope_rank_select, server._work_style_rank_select, server._author_style_rank_select],
+)
+def test_rank_select_omits_exclusion_by_default(builder):
+    sql = _compiled(builder(VEC, IDS, pool_limit=30))
+    assert "NOT IN" not in sql
+
+
 def test_neg_trope_distance_select_returns_min_distance_per_work():
     sql = _compiled(server._neg_trope_distance_select(VEC, IDS))
     assert "min" in sql.lower() and "<=>" in sql
@@ -60,7 +78,9 @@ def test_merge_min_keeps_best_score_per_work():
     [
         # No negatives: pure positive-score order.
         ({"a": 0.2, "b": 0.1}, {}, ["b", "a"]),
-        # Closer to a negative than to any positive target: dropped.
+        # Closer to a negative than to any positive target: dropped. pos_scores carry the
+        # relevance penalty while neg distances are raw — deliberate asymmetry: weak positive
+        # evidence earns less protection from a user's exclusion.
         ({"a": 0.2, "b": 0.1}, {"a": 0.05}, ["b"]),
         # Near a negative (within the demote margin) but still closer to the positive:
         # kept, demoted below every clean candidate despite a better positive score.

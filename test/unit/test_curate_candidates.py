@@ -6,8 +6,7 @@ from agentic_librarian.agents import candidates
 def _patch(monkeypatch, internal, status, suggested=frozenset()):
     monkeypatch.setattr(candidates, "search_internal_database", lambda **kw: internal)
     monkeypatch.setattr(candidates, "get_read_status", lambda ids: status)
-    # raising=False: the helper doesn't exist yet on the first RED run (TDD).
-    monkeypatch.setattr(candidates, "get_active_suggestion_work_ids", lambda: set(suggested), raising=False)
+    monkeypatch.setattr(candidates, "get_active_suggestion_work_ids", lambda: set(suggested))
 
 
 def test_curate_orders_unread_first_and_drops_recent_reads(monkeypatch):
@@ -142,6 +141,7 @@ def test_extract_candidate_ids_passes_session_constraints_as_exclusions(monkeypa
     assert seen.get("target_tropes") == ["heist"]
     assert seen.get("target_styles") == ["witty"]
     assert seen.get("exclude_tropes") == ["high fantasy", "gore"]
+    assert seen.get("exclude_styles") == ["high fantasy", "gore"]
 
 
 def test_extract_candidate_ids_excludes_actively_suggested(monkeypatch):
