@@ -51,6 +51,31 @@ converges away on its own, no matter how many times the repair is re-run. The on
 ordering: land and deploy the fixed writer FIRST, confirm it is actually serving (not mid-rollout)
 THEN run --repair-fallbacks / --repair-fallbacks-apply.
 
+RESET-NO-EVIDENCE (#70 follow-up, owner-approved 2026-07-14): a work whose EVERY trope link is
+NULL-justified has no deep-scout evidence at all. The per-link structural distinguisher above
+(bogus_targets) only catches links that are a deterministic recompute of THIS work's own
+genres/moods — a non-derivable junk residue link (e.g. a stray "Comics Graphic Novels" tag that
+isn't a semantic match for anything on the work) survives it, reads as a "real" trope to
+has_real_remaining, and therefore permanently blocks write_slug/clear_stamp — leaving the work
+stamped, junk-fingerprinted, and invisible to the #97 requeue sweep forever (25 such works found
+on prod, e.g. Lessons in Chemistry, several Rivers of London/Expanse volumes). The fix is a
+SECOND, work-level trigger, deliberately NOT the #69 trap (classifying an individual link as
+real-vs-fallback by justification alone, which the #69 lesson forbids because many real scout
+tropes ARE NULL-justified "semantic collapse" attractors — trope_predicate.py's docstring):
+the signal here is not per-link but "this work has NO evidence-bearing link at all" — checked
+catalog-wide, every deep-scout link that DOES carry justification does so reliably (6247/6247),
+so a work with >=1 link and ZERO justified links is a work the deep scout never actually
+vouched for anything on. When that holds, EVERY one of the work's (necessarily NULL-just) links
+is planned for deletion regardless of bogus_targets membership, and the pre-existing
+deletion-triggered write_slug/clear_stamp classes below fire for it unchanged (a delete is a
+delete — same token format whichever trigger planned it). The trigger structurally cannot touch
+#67's zero-link works (it requires >=1 link) or a work with even one justified link (the
+justified-link co-condition on the ORIGINAL per-link trigger already protects those; this new
+trigger adds its own explicit "zero justified links" gate on top). The affected work list is
+always in the dry-run report (see write_report's 'reset (no-evidence) works' section) for the
+operator to review before approving --apply, and the operation is recoverable: the #97 sweep
+re-enriches any work whose stamp this clears.
+
 Four action classes, one plan (mirrors etl/dedup_backfill.py's op-tagged token gate EXACTLY —
 see plan_id_set's docstring there for why the op-tag is load-bearing, not cosmetic):
 
@@ -153,11 +178,23 @@ class PruneTrope:
 
 
 @dataclass
+class ResetWork:
+    """One work caught by the zero-justified-links reset trigger (#70 follow-up): informational
+    only, for write_report's human-readable section — NOT part of the op-tagged token block (a
+    reset work's links are already individually represented as delete_link tokens; this is a
+    derived, report-only view grouping them by work for the operator)."""
+
+    work_id: UUID
+    title: str
+
+
+@dataclass
 class FallbackRepairPlan:
     delete_links: list[DeleteLink] = field(default_factory=list)
     write_slugs: list[WriteSlug] = field(default_factory=list)
     clear_stamps: list[ClearStamp] = field(default_factory=list)
     prune_tropes: list[PruneTrope] = field(default_factory=list)
+    reset_works: list[ResetWork] = field(default_factory=list)
 
     def summary(self) -> dict[str, int]:
         return {
@@ -165,6 +202,7 @@ class FallbackRepairPlan:
             "write_slugs": len(self.write_slugs),
             "clear_stamps": len(self.clear_stamps),
             "prune_tropes": len(self.prune_tropes),
+            "reset_works": len(self.reset_works),
         }
 
 
@@ -261,6 +299,7 @@ class _WorkData:
     deep_enriched_at: object | None  # only ever compared to None; type left loose for callers
     # (trope_id, trope_name, justification) per link
     links: list[tuple[UUID, str, str | None]]
+    title: str = ""
 
 
 def _plan_from_data(
@@ -284,12 +323,52 @@ def _plan_from_data(
     for wd in works_data:
         targets = bogus_targets_by_work.get(wd.work_id, set())
 
+        # Reset-no-evidence trigger (#70 follow-up, owner-approved 2026-07-14): a work with
+        # >=1 link and ZERO justified links has no deep-scout evidence at all — not even one
+        # link the original per-link structural distinguisher can vouch for. Catalog-wide,
+        # every REAL deep-scout link carries justification (6247/6247, see module docstring),
+        # so "no justified link survives on this work" is itself a reliable, work-level signal
+        # that everything on it is old-writer pollution — including non-derivable junk residue
+        # (e.g. a "Comics Graphic Novels" link) that bogus_targets' per-link recompute cannot
+        # touch because it isn't a semantic redirect of THIS work's own tags. This is
+        # deliberately NOT the #69 trap (classifying a link real-vs-fallback by justification
+        # alone): the signal here is "zero evidence anywhere on the work," not "this particular
+        # link lacks justification." A work that has already tripped this rule is planned for
+        # full deletion regardless of bogus_targets membership; a work with even one justified
+        # link NEVER trips it (existing semantic-recompute trigger still applies to its
+        # NULL-just links only). The zero-link guard (`wd.links` empty -> loop body below never
+        # runs) keeps #67's fast-pass tropeless works untouched, same as always.
+        #
+        # CONVERGENCE (found via db_integration test, not in the original design note — a real
+        # re-plan-after-apply gap, not a hypothetical): write_slug ALWAYS writes its exact-name
+        # slug links with justification=None (get_or_create_fallback_trope never sets one), so a
+        # work this trigger just reset would, on the VERY NEXT re-plan, still have zero justified
+        # links — its brand-new legitimate slugs would look exactly like "no evidence" again and
+        # get deleted-and-rewritten forever. A legitimate exact-name fallback slug
+        # (is_fallback_trope_name(...) is True for this work's own genres/moods) is NOT missing
+        # evidence — it doesn't need justification, it's structurally self-evident from the
+        # work's own tags. So it is excluded from BOTH the "any evidence?" scan below AND from
+        # what gets force-deleted when the trigger does fire elsewhere on the same work: this
+        # matches has_real_remaining's existing fallback-name carve-out just below, applied one
+        # step earlier so the trigger itself converges instead of only its aftermath.
+        non_slug_links = [
+            (trope_id, name, justification)
+            for trope_id, name, justification in wd.links
+            if is_fallback_trope_name(name, wd.genres, wd.moods) is not True
+        ]
+        has_any_justified_link = any(justification is not None for _tid, _name, justification in non_slug_links)
+        reset_no_evidence = bool(non_slug_links) and not has_any_justified_link
+
         planned_deletes: set[UUID] = set()
         for trope_id, name, justification in wd.links:
-            if justification is None and trope_id in targets:
+            is_slug = is_fallback_trope_name(name, wd.genres, wd.moods) is True
+            if (reset_no_evidence and not is_slug) or (justification is None and trope_id in targets):
                 plan.delete_links.append(DeleteLink(work_id=wd.work_id, trope_id=trope_id, trope_name=name))
                 planned_deletes.add(trope_id)
                 deleted_link_count_by_trope[trope_id] += 1
+
+        if reset_no_evidence:
+            plan.reset_works.append(ResetWork(work_id=wd.work_id, title=wd.title))
 
         # Fix 1 (adjudicated design change, review pass 2): write_slug/clear_stamp are
         # DELETION-TRIGGERED ONLY — a work is eligible for either ONLY if this plan just
@@ -359,6 +438,7 @@ def plan_fallback_repair(session: Session) -> FallbackRepairPlan:
             moods=work.moods,
             deep_enriched_at=work.deep_enriched_at,
             links=links_by_work.get(work.id, []),
+            title=work.title,
         )
         for work in works
     ]
@@ -450,6 +530,19 @@ def write_report(plan: FallbackRepairPlan, reports_dir: Path | None = None, db_t
     lines.append(f"prune_tropes: {len(plan.prune_tropes)} tropes left with zero links")
     for p in plan.prune_tropes:
         lines.append(f"  trope_id={p.trope_id}  trope_name={p.trope_name!r}")
+    lines.append("")
+
+    # Informational only (#70 follow-up) — NOT part of the token block: every reset work's
+    # links are already individually represented as delete_link tokens above/below, this is
+    # just a human-readable grouping so the operator can see, at a glance, which works are
+    # getting a FULL reset (every link gone, exact-name slugs written, stamp cleared) rather
+    # than a partial per-link cleanup. Placed ABOVE '== PLAN TOKENS ==' like every other
+    # human-readable section — parse_report's fail-closed parser only looks between the
+    # start/end markers, so this section is invisible to it by construction (verified by
+    # test_token_round_trip_format_parse_equal's extension for this section).
+    lines.append(f"reset (no-evidence) works: {len(plan.reset_works)} works with zero justified links")
+    for r in plan.reset_works:
+        lines.append(f"  work_id={r.work_id}  title={r.title!r}")
     lines.append("")
 
     lines.append("== PLAN TOKENS ==")

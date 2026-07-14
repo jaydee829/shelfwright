@@ -145,7 +145,13 @@ def test_full_round_trip_delete_write_slug_clear_stamp_prune(db_url):
 
         # --- convergence: re-plan finds nothing left to do ---
         converged = fr.plan_fallback_repair(session)
-        assert converged.summary() == {"delete_links": 0, "write_slugs": 0, "clear_stamps": 0, "prune_tropes": 0}
+        assert converged.summary() == {
+            "delete_links": 0,
+            "write_slugs": 0,
+            "clear_stamps": 0,
+            "prune_tropes": 0,
+            "reset_works": 0,
+        }
 
         # sanity: the report's own tokens matched what got applied (round-trip already proven
         # elsewhere; this just confirms the fixture wiring produced a non-empty reviewed set)
@@ -286,3 +292,86 @@ def test_prune_trope_deleted_when_all_links_bogus_kept_when_justified_link_survi
         remaining_b_links = session.query(WorkTrope).filter_by(trope_id=attractor_b.id).all()
         assert len(remaining_b_links) == 1
         assert remaining_b_links[0].work_id == work_b2.id
+
+
+def test_reset_no_evidence_full_reset_including_non_derivable_junk_link(db_url):
+    """#70 follow-up (owner-approved 2026-07-14): the Lessons-analog shape — a stamped work
+    with genres/moods and TWO NULL-justified links, one cosine-derivable from its own mood
+    tag (the ORIGINAL per-link distinguisher would catch this alone) and one junk trope FAR
+    from every tag (non-derivable — the original distinguisher structurally cannot touch it,
+    which is exactly the residue that used to survive forever and block write_slug/clear_stamp).
+    Because the work has ZERO justified links, the new reset-no-evidence trigger plans BOTH
+    links for deletion regardless of derivability. Post-apply: both links gone, exact-name
+    slug links exist for the work's genres/moods, the stamp is cleared, the now-linkless junk
+    trope is pruned, and a fresh re-plan converges to empty."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+        # derivable: "Dark" mood cosine-redirects onto this attractor (same distinguisher as
+        # every other test in this module).
+        attractor = Trope(name="The Dark Night of the Soul", embedding=_ATTRACTOR_VEC)
+        # non-derivable junk: an orthogonal embedding, nowhere near any of the work's own
+        # genres/moods (via _fake_embed's _OTHER_VEC) — bogus_targets' recompute can never
+        # produce this trope for this work, so ONLY the new work-level trigger can catch it.
+        junk = Trope(name="Comics Graphic Novels", embedding=_OTHER_VEC)
+        session.add_all([attractor, junk])
+        session.flush()
+
+        work = Work(
+            title="Lessons in Chemistry",
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+        session.add(work)
+        session.flush()
+
+        _link(session, work, attractor, justification=None)  # derivable, NULL-justified
+        _link(session, work, junk, justification=None)  # non-derivable, NULL-justified
+        session.flush()
+
+        # --- dry-run plan ---
+        plan = fr.plan_fallback_repair(session)
+        deleted_trope_ids = {d.trope_id for d in plan.delete_links if d.work_id == work.id}
+        assert deleted_trope_ids == {attractor.id, junk.id}
+        assert {s.trope_name for s in plan.write_slugs if s.work_id == work.id} == {"Thriller", "Dark"}
+        assert [c.work_id for c in plan.clear_stamps] == [work.id]
+        reset_work_ids = {r.work_id for r in plan.reset_works}
+        assert reset_work_ids == {work.id}
+
+        report_path = fr.write_report(plan)
+
+        # --- apply ---
+        applied = fr.apply_fallback_repair(session, report_path)
+        session.flush()
+
+        assert applied["delete_links"] == 2
+        assert applied["write_slugs"] == 2
+        assert applied["clear_stamps"] == 1
+        # both the attractor and the junk trope are left with zero links anywhere (this
+        # fixture's work was their only link) -> both pruned.
+        assert applied["prune_tropes"] == 2
+
+        # both original links gone, exact-name slugs present, stamp cleared
+        work_links = {
+            session.get(Trope, wt.trope_id).name for wt in session.query(WorkTrope).filter_by(work_id=work.id).all()
+        }
+        assert work_links == {"Thriller", "Dark"}
+        assert session.get(Work, work.id).deep_enriched_at is None
+
+        # both original tropes pruned (neither had any other link); the newly-written
+        # exact-name "Dark"/"Thriller" slug tropes are DIFFERENT tropes than the attractor
+        # they used to be redirected onto.
+        assert session.get(Trope, junk.id) is None
+        assert session.get(Trope, attractor.id) is None
+
+        # --- convergence: re-plan finds nothing left to do ---
+        converged = fr.plan_fallback_repair(session)
+        assert converged.summary() == {
+            "delete_links": 0,
+            "write_slugs": 0,
+            "clear_stamps": 0,
+            "prune_tropes": 0,
+            "reset_works": 0,
+        }

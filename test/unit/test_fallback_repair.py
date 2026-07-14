@@ -14,6 +14,7 @@ from agentic_librarian.etl.fallback_repair import (
     DeleteLink,
     FallbackRepairPlan,
     PruneTrope,
+    ResetWork,
     WriteSlug,
     _plan_from_data,
     _WorkData,
@@ -51,16 +52,28 @@ def test_delete_link_classification(case_name, justification, is_bogus_target, e
     required. A justified link is never touched even when it happens to coincide with a
     recomputed semantic-fallback target; a NULL-justified link whose trope is NOT derivable
     from this work's tags (real scout NULL-justification, e.g. semantic-collapse attractors) is
-    never touched either."""
+    never touched either.
+
+    A second, always-justified link is included on every work here so the work always has
+    >=1 justified link — this isolates the ORIGINAL per-link distinguisher under test from the
+    newer reset-no-evidence trigger (TestResetNoEvidence), which fires on a *different*
+    condition (zero justified links anywhere on the work) and would otherwise override the
+    'never_touched' cases below regardless of bogus_targets membership."""
     trope_id = uuid4()
+    anchor_id = uuid4()
     work = _work(
-        links=[(trope_id, "The Dark Night of the Soul", justification)],
+        links=[
+            (trope_id, "The Dark Night of the Soul", justification),
+            (anchor_id, "Found Family", "scout justification"),
+        ],
         genres=["Fantasy"],
         moods=["Dark"],
     )
     targets = {trope_id} if is_bogus_target else set()
 
-    plan = _plan_from_data([work], {trope_id: "The Dark Night of the Soul"}, {work.work_id: targets})
+    plan = _plan_from_data(
+        [work], {trope_id: "The Dark Night of the Soul", anchor_id: "Found Family"}, {work.work_id: targets}
+    )
 
     deleted_trope_ids = {d.trope_id for d in plan.delete_links}
     assert (trope_id in deleted_trope_ids) is expect_delete
@@ -72,11 +85,20 @@ def test_exact_name_slug_never_a_bogus_target_by_construction():
     _nearest_trope_by_name returning None on an exact match before any embedding/distance
     lookup happens. Here we assert the classification core's contract: if bogus_targets_by_work
     reports NO targets for a work (the exact-name-match outcome), no delete is planned even for
-    a NULL-justified link."""
-    trope_id = uuid4()
-    work = _work(links=[(trope_id, "Fantasy", None)], genres=["Fantasy"], moods=[])
+    a NULL-justified link.
 
-    plan = _plan_from_data([work], {trope_id: "Fantasy"}, {work.work_id: set()})
+    A second, always-justified link keeps this work out of the reset-no-evidence trigger's
+    reach (see test_delete_link_classification's docstring for why), isolating the
+    bogus-targets-membership behavior under test here."""
+    trope_id = uuid4()
+    anchor_id = uuid4()
+    work = _work(
+        links=[(trope_id, "Fantasy", None), (anchor_id, "Found Family", "scout justification")],
+        genres=["Fantasy"],
+        moods=[],
+    )
+
+    plan = _plan_from_data([work], {trope_id: "Fantasy", anchor_id: "Found Family"}, {work.work_id: set()})
 
     assert plan.delete_links == []
 
@@ -164,13 +186,18 @@ class TestWriteSlugAndClearStamp:
 
     def test_no_duplicate_slug_for_already_linked_exact_name(self):
         """A work that already carries an exact-name 'Thriller' slug link (untouched, real=False
-        but not planned for deletion) must not get a second write_slug for the same name."""
+        but not planned for deletion) must not get a second write_slug for the same name.
+
+        The exact-name slug link is given a justification here (a justified genre-derived link
+        is a perfectly ordinary shape) so this work has >=1 justified link and stays out of the
+        reset-no-evidence trigger's reach (see TestResetNoEvidence) — isolating the ORIGINAL
+        per-link bogus_targets distinguisher, which is what this test is about."""
         bogus_trope_id = uuid4()
         existing_slug_id = uuid4()
         work = _work(
             links=[
                 (bogus_trope_id, "The Dark Night of the Soul", None),
-                (existing_slug_id, "Thriller", None),  # exact-name slug already present
+                (existing_slug_id, "Thriller", "scout justification"),  # exact-name slug already present
             ],
             genres=["Thriller"],
             moods=["Dark"],
@@ -221,6 +248,124 @@ class TestWriteSlugAndClearStamp:
         assert plan.clear_stamps == []
 
 
+class TestResetNoEvidence:
+    """GH #70 follow-up: a work whose EVERY trope link is NULL-justified has no deep-scout
+    evidence at all. Non-derivable junk residue (a link that is NOT a bogus_targets member)
+    used to survive the original distinguisher, read as a real trope to has_real_remaining,
+    and permanently block write_slug/clear_stamp. New trigger: >=1 link AND zero
+    justified links -> ALL links planned for deletion, regardless of bogus_targets
+    membership. Existing rules (justified-link gate, zero-link works untouched) must be
+    unaffected."""
+
+    def test_zero_justified_work_all_links_deleted_including_non_derivable(self):
+        """3 NULL-justified links, only 1 of which is a bogus_targets member (semantically
+        derivable) -> ALL 3 are planned for deletion by the new trigger, and slugs/stamp
+        clearing follow from the existing deletion-triggered classes."""
+        derivable_id = uuid4()
+        junk_id_1 = uuid4()
+        junk_id_2 = uuid4()
+        work = _work(
+            links=[
+                (derivable_id, "The Dark Night of the Soul", None),
+                (junk_id_1, "Comics Graphic Novels", None),
+                (junk_id_2, "Some Other Junk", None),
+            ],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        all_tropes_by_id = {
+            derivable_id: "The Dark Night of the Soul",
+            junk_id_1: "Comics Graphic Novels",
+            junk_id_2: "Some Other Junk",
+        }
+        # only derivable_id is a bogus_targets member; the two junk tropes are NOT derivable
+        # from this work's genres/moods at all.
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: {derivable_id}})
+
+        deleted_trope_ids = {d.trope_id for d in plan.delete_links if d.work_id == work.work_id}
+        assert deleted_trope_ids == {derivable_id, junk_id_1, junk_id_2}
+
+        slug_names = {s.trope_name for s in plan.write_slugs if s.work_id == work.work_id}
+        assert slug_names == {"Thriller", "Dark"}
+        assert [c.work_id for c in plan.clear_stamps] == [work.work_id]
+
+    def test_at_least_one_justified_link_never_triggers_full_reset(self):
+        """1 justified + 2 NULL-just links (1 of the NULL-just links derivable, 1 not) ->
+        the new trigger must NOT fire (there IS a justified link); only the original
+        semantic-recompute trigger applies, so only the derivable NULL-just link is deleted.
+        The justified link survives, so no slug/stamp actions follow."""
+        justified_id = uuid4()
+        derivable_id = uuid4()
+        junk_id = uuid4()
+        work = _work(
+            links=[
+                (justified_id, "Found Family", "scout justification"),
+                (derivable_id, "The Dark Night of the Soul", None),
+                (junk_id, "Comics Graphic Novels", None),
+            ],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        all_tropes_by_id = {
+            justified_id: "Found Family",
+            derivable_id: "The Dark Night of the Soul",
+            junk_id: "Comics Graphic Novels",
+        }
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: {derivable_id}})
+
+        deleted_trope_ids = {d.trope_id for d in plan.delete_links if d.work_id == work.work_id}
+        assert deleted_trope_ids == {derivable_id}
+
+        # the justified link survives -> no write_slug/clear_stamp for this work
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+
+    def test_zero_link_work_never_triggers_reset(self):
+        """A work with ZERO links must never trigger the new reset (the trigger explicitly
+        requires >=1 link) — the #67 fast-pass tropeless works stay invisible."""
+        work = _work(
+            links=[],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        plan = _plan_from_data([work], {}, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+
+    def test_already_reset_work_converges_to_nothing_on_replan(self):
+        """Convergence (found via the db_integration round-trip, not in the original design
+        note): write_slug ALWAYS writes its exact-name slug links with justification=None, so
+        a work that was JUST reset would, without the fallback-name carve-out, still have zero
+        justified links on the very next re-plan and get its brand-new legitimate slugs
+        deleted-and-rewritten forever. Simulates that post-apply state directly: a work whose
+        ONLY links are exact-name genre/mood slugs (NULL-justified, as write_slug always writes
+        them) must plan NOTHING — not a delete, not a re-trigger of the reset, not a duplicate
+        slug."""
+        thriller_slug_id = uuid4()
+        dark_slug_id = uuid4()
+        work = _work(
+            links=[
+                (thriller_slug_id, "Thriller", None),
+                (dark_slug_id, "Dark", None),
+            ],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at=None,  # already cleared by the prior reset's clear_stamp
+        )
+        all_tropes_by_id = {thriller_slug_id: "Thriller", dark_slug_id: "Dark"}
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+        assert plan.reset_works == []
+
+
 class TestPruneTrope:
     def test_pruned_when_all_links_deleted(self):
         trope_id = uuid4()
@@ -258,6 +403,7 @@ def _sample_plan() -> FallbackRepairPlan:
         write_slugs=[WriteSlug(work_id=uuid4(), trope_name="Dark")],
         clear_stamps=[ClearStamp(work_id=uuid4())],
         prune_tropes=[PruneTrope(trope_id=uuid4(), trope_name="The Dark Night of the Soul")],
+        reset_works=[ResetWork(work_id=uuid4(), title="Lessons in Chemistry")],
     )
 
 
@@ -270,7 +416,12 @@ def test_token_round_trip_format_parse_equal(tmp_path, db_target):
     """The optional `db target: ...` header (final whole-branch review fix, DB-target
     visibility) is written ABOVE the '== PLAN TOKENS ==' block as a plain human-readable
     line — parse_report's fail-closed parser only looks between the start/end markers, so
-    the header must never appear in (or otherwise corrupt) the parsed token set."""
+    the header must never appear in (or otherwise corrupt) the parsed token set.
+
+    _sample_plan() also carries a reset_works entry (#70 follow-up) — the report's
+    'reset (no-evidence) works' section is informational only (ABOVE/OUTSIDE the token
+    block, like the db-target header), so its presence must not affect the parsed token set
+    either."""
     plan = _sample_plan()
     expected = plan_tokens(plan)
 
@@ -285,6 +436,12 @@ def test_token_round_trip_format_parse_equal(tmp_path, db_target):
         header_line_idx = report_text.splitlines().index(f"db target: {db_target}")
         token_start_idx = report_text.splitlines().index("== PLAN TOKENS ==")
         assert header_line_idx < token_start_idx
+
+    report_lines = report_text.splitlines()
+    reset_section_idx = next(i for i, line in enumerate(report_lines) if line.startswith("reset (no-evidence) works"))
+    token_start_idx = report_lines.index("== PLAN TOKENS ==")
+    assert reset_section_idx < token_start_idx
+    assert f"  work_id={plan.reset_works[0].work_id}  title='Lessons in Chemistry'" in report_lines
 
 
 @pytest.mark.parametrize(
