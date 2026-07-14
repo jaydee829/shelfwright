@@ -35,9 +35,10 @@ def test_extract_candidate_ids_calls_search(monkeypatch):
     state = {"targets": {"tropes": ["heist"], "styles": []}}
     with (
         patch(
-            "agentic_librarian.agents.candidates.search_internal_database", return_value=[{"id": "w1"}, {"id": "w2"}]
+            "agentic_librarian.agents.candidates.search_internal_database",
+            return_value=[{"id": "w1"}, {"id": "w2"}, {"id": "w1"}],
         ),
-        patch("agentic_librarian.agents.candidates.get_unacted_suggestions", return_value=[{"id": "w2"}]),
+        patch("agentic_librarian.agents.candidates.get_active_suggestion_work_ids", return_value=set()),
     ):
         ids = extract_candidate_ids(state)
     assert ids == ["w1", "w2"]  # de-duplicated, order preserved

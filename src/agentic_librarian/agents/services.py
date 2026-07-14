@@ -140,8 +140,8 @@ class LibrarianAgent(LlmAgent):
             DELEGATION STRATEGY (internal-first — the user's enriched catalog is the primary source):
             1. Call the 'Analyst' to turn user vibes into structured targets and session constraints.
             2. Call 'get_recommendation_candidates' with target vibes to get read-status-tagged,
-               novelty-balanced candidates plus a has_unread flag (it wraps get_unacted_suggestions
-               + the catalog search).
+               novelty-balanced candidates plus a has_unread flag (the catalog search; it excludes
+               books already suggested and awaiting the user's reaction).
             3. Call the 'Critic' to search the internal catalog and rank candidates.
             4. Call the 'Explorer' ONLY when: internal candidates are too few or poorly matched;
                OR the strong internal matches have already been suggested or read; OR the user

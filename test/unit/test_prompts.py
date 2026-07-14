@@ -34,7 +34,10 @@ def test_librarian_instruction_delegates_to_the_mesh():
     assert "log_suggestion" in text
     assert "update_suggestion_status" in text
     assert "update_reading_status" in text
-    assert "get_unacted_suggestions" in text
+    # get_recommendation_candidates is the catalog search; it no longer wraps
+    # get_unacted_suggestions (#125 follow-up — a stale tool description was corrected).
+    assert "get_recommendation_candidates" in text
+    assert "excludes books already" in text and "awaiting the user's reaction" in text
 
 
 def test_explorer_has_a_search_budget_and_keeps_its_contract():

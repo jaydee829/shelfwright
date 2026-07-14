@@ -87,98 +87,227 @@ def get_server_status() -> str:
         return f"Librarian MCP Server error: {str(e)}"
 
 
+# --- Candidate-pool ranking & exclusion (#125) --------------------------------------
+# The pool that reaches the Critic must be relevance-ranked at every stage that limits:
+# the old code joined works to the nearest tropes with an unordered `.limit()`, making
+# pool membership arbitrary among every work sharing those tropes (how a thriller
+# request retrieved We Are Legion). Negative targets make "less fantasy" a structural
+# exclusion instead of a polite request. The pgvector statements are pg-only:
+# compile-inspected in test_search_ranking.py, executed in test_internal_retrieval.py.
+
+_POOL_NEAREST_TAGS = 20  # nearest tropes/styles feeding the pool (5 was a second collapse point)
+_POOL_OVERFETCH = 3  # each arm over-fetches limit*3; exclusion/merge trims back to limit
+_EXCLUDE_DEMOTE_DISTANCE = 0.35  # candidates this close to a negative rank below all clean ones
+# untuned heuristic knob — real embedding-distance distributions should tune it (follow-up)
+
+
+def _trope_rank_select(query_vector, trope_ids, pool_limit: int, exclude_work_ids=None):
+    """Works ranked by their best-matching trope: cosine distance to the query vector,
+    penalized for low link relevance (relevance 1.0 → ×1, relevance 0.0 → ×2).
+    embedding IS NOT NULL everywhere a distance is aggregated: an unembedded trope can't
+    be semantically near anything, and a NULL distance surviving into min() would put a
+    Python None into the score maps (relevance_score itself is NOT NULL by schema)."""
+    score = func.min(Trope.embedding.cosine_distance(query_vector) * (2.0 - WorkTrope.relevance_score)).label("score")
+    stmt = (
+        select(WorkTrope.work_id, score)
+        .join(Trope, Trope.id == WorkTrope.trope_id)
+        .where(WorkTrope.trope_id.in_(trope_ids), Trope.embedding.isnot(None))
+    )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkTrope.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkTrope.work_id).order_by(score).limit(pool_limit)
+
+
+def _work_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_work_ids=None):
+    score = func.min(Style.embedding.cosine_distance(query_vector)).label("score")
+    stmt = (
+        select(WorkStyle.work_id, score)
+        .join(Style, Style.id == WorkStyle.style_id)
+        .where(WorkStyle.style_id.in_(style_ids), Style.embedding.isnot(None))
+    )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkStyle.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkStyle.work_id).order_by(score).limit(pool_limit)
+
+
+def _author_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_work_ids=None):
+    score = func.min(Style.embedding.cosine_distance(query_vector)).label("score")
+    stmt = (
+        select(WorkContributor.work_id, score)
+        .join(Author, Author.id == WorkContributor.author_id)
+        .join(AuthorStyle, AuthorStyle.author_id == Author.id)
+        .join(Style, Style.id == AuthorStyle.style_id)
+        .where(AuthorStyle.style_id.in_(style_ids), Style.embedding.isnot(None))
+    )
+    if exclude_work_ids:
+        stmt = stmt.where(WorkContributor.work_id.notin_(exclude_work_ids))
+    return stmt.group_by(WorkContributor.work_id).order_by(score).limit(pool_limit)
+
+
+def _neg_trope_distance_select(query_vector, work_ids):
+    """Best (min) distance from each candidate's tropes to one negative target. Measured
+    for EVERY candidate — no LIMIT; an exclusion check must never truncate."""
+    return (
+        select(WorkTrope.work_id, func.min(Trope.embedding.cosine_distance(query_vector)))
+        .join(Trope, Trope.id == WorkTrope.trope_id)
+        .where(WorkTrope.work_id.in_(work_ids), Trope.embedding.isnot(None))
+        .group_by(WorkTrope.work_id)
+    )
+
+
+def _neg_style_distance_selects(query_vector, work_ids):
+    work_arm = (
+        select(WorkStyle.work_id, func.min(Style.embedding.cosine_distance(query_vector)))
+        .join(Style, Style.id == WorkStyle.style_id)
+        .where(WorkStyle.work_id.in_(work_ids), Style.embedding.isnot(None))
+        .group_by(WorkStyle.work_id)
+    )
+    author_arm = (
+        select(WorkContributor.work_id, func.min(Style.embedding.cosine_distance(query_vector)))
+        .join(Author, Author.id == WorkContributor.author_id)
+        .join(AuthorStyle, AuthorStyle.author_id == Author.id)
+        .join(Style, Style.id == AuthorStyle.style_id)
+        .where(WorkContributor.work_id.in_(work_ids), Style.embedding.isnot(None))
+        .group_by(WorkContributor.work_id)
+    )
+    return work_arm, author_arm
+
+
+def _merge_min(*score_maps: dict) -> dict:
+    """Union score maps keeping the best (lowest) score per key."""
+    merged: dict = {}
+    for scores in score_maps:
+        for key, value in scores.items():
+            if key not in merged or value < merged[key]:
+                merged[key] = value
+    return merged
+
+
+def _apply_exclusions(pos_scores: dict, neg_scores: dict) -> list:
+    """Order candidates by positive score. DROP any at least as close to a negative
+    target as to the positives (ties go to the exclusion — user feedback wins); DEMOTE
+    near-misses (within _EXCLUDE_DEMOTE_DISTANCE of a negative) below all clean ones.
+    pos_scores carry the relevance penalty while neg distances are raw — deliberate
+    asymmetry: weak positive evidence earns less protection from a user's exclusion.
+    A candidate with no links in an exclusion's space has no measured distance and is
+    kept un-demoted (fail-open by design — no evidence to measure)."""
+    kept, demoted = [], []
+    for wid in sorted(pos_scores, key=pos_scores.get):
+        neg = neg_scores.get(wid)
+        if neg is None:
+            kept.append(wid)
+        elif neg <= pos_scores[wid]:
+            continue
+        elif neg <= _EXCLUDE_DEMOTE_DISTANCE:
+            demoted.append(wid)
+        else:
+            kept.append(wid)
+    return kept + demoted
+
+
+def _warm_embeddings(texts: list[str]) -> None:
+    """GH #123: warm the embedding LRU before the session opens so in-session
+    _get_embedding calls are cache hits, not network round-trips held under a pooled
+    connection (the pool's 5+2 sizing depends on no embed calls inside sessions)."""
+    for text in texts:
+        try:
+            get_cached_embedding(EMBED_MODEL, text)
+        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call retries
+            logger.warning("embed warm failed for %r — retrying in-session", text)
+
+
 @mcp.tool()
-def search_internal_database(target_tropes: list[str], target_styles: list[str] = None, limit: int = 10) -> list[dict]:
+def search_internal_database(
+    target_tropes: list[str],
+    target_styles: list[str] = None,
+    limit: int = 10,
+    exclude_tropes: list[str] = None,
+    exclude_styles: list[str] = None,
+) -> list[dict]:
     """
-    Performs a pgvector similarity search across tropes and literary styles.
+    pgvector similarity search across tropes and literary styles, relevance-ranked.
+    exclude_tropes/exclude_styles are NEGATIVE targets (session constraints like
+    "less fantasy", "nothing gory"): candidates closer to a negative than to the
+    positive targets are dropped; near-misses rank below all clean candidates.
+    Results never include works already pitched and awaiting the user's reaction.
     """
-    # GH #123: warm the embedding LRU before the session opens so the in-session
-    # _get_embedding calls below are cache hits, not network round-trips held under a
-    # pooled connection (the pool's 5+2 sizing depends on no embed calls inside sessions).
-    for t in target_tropes or []:
-        try:
-            get_cached_embedding(EMBED_MODEL, t)
-        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
-            logger.warning("embed warm failed for trope %r — retrying in-session", t)
-    for s in target_styles or []:
-        try:
-            get_cached_embedding(EMBED_MODEL, s)
-        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
-            logger.warning("embed warm failed for style %r — retrying in-session", s)
+    limit = max(int(limit), 0)
+    if limit == 0:
+        return []
+    _warm_embeddings([*(target_tropes or []), *(target_styles or []), *(exclude_tropes or []), *(exclude_styles or [])])
 
     with db_manager.get_session() as session:
         tm = TropeManager(session=session)
         sm = StyleManager(session=session)
+        pool_limit = max(limit, 1) * _POOL_OVERFETCH
+        pos_scores: dict[UUID, float] = {}
 
-        candidate_work_ids = set()
-        avg_vector = None
+        # Works with an active 'Suggested' suggestion for this user are excluded at the
+        # ranking source: a deflected title must not be retrievable by Critic-direct search,
+        # and it must not consume a result slot ahead of the limit (#125 follow-up).
+        suggested = [
+            row[0]
+            for row in session.query(Suggestions.work_id)
+            .filter(Suggestions.status == "Suggested", Suggestions.user_id == get_required_user_id())
+            .all()
+        ]
 
-        # 1. Trope Search
+        # 1. Trope arm — ranked into the pool.
         if target_tropes:
             embeddings = [tm._get_embedding(t) for t in target_tropes]
             avg_vector = np.mean(embeddings, axis=0).tolist()
-            similar_tropes = session.query(Trope).order_by(Trope.embedding.cosine_distance(avg_vector)).limit(5).all()
-            trope_ids = [t.id for t in similar_tropes]
-            trope_works = (
-                session.query(Work.id).join(WorkTrope).filter(WorkTrope.trope_id.in_(trope_ids)).limit(limit).all()
-            )
-            candidate_work_ids.update([w[0] for w in trope_works])
+            trope_ids = [
+                t.id
+                for t in session.query(Trope)
+                .filter(Trope.embedding.isnot(None))
+                .order_by(Trope.embedding.cosine_distance(avg_vector))
+                .limit(_POOL_NEAREST_TAGS)
+                .all()
+            ]
+            if trope_ids:
+                rows = session.execute(_trope_rank_select(avg_vector, trope_ids, pool_limit, suggested)).all()
+                pos_scores = _merge_min(pos_scores, dict(rows))
 
-        # 2. Style Search
+        # 2. Style arm (work styles + primary-author styles) — ranked into the pool.
         if target_styles:
             s_embeddings = [sm._get_embedding(s) for s in target_styles]
             avg_style_vector = np.mean(s_embeddings, axis=0).tolist()
-            similar_styles = (
-                session.query(Style).order_by(Style.embedding.cosine_distance(avg_style_vector)).limit(5).all()
-            )
-            style_ids = [s.id for s in similar_styles]
-
-            # Check Author, Work, and Narrator styles
-            author_works = (
-                session.query(Work.id)
-                .join(WorkContributor)
-                .join(Author)
-                .join(AuthorStyle)
-                .filter(AuthorStyle.style_id.in_(style_ids))
-                .limit(limit)
+            style_ids = [
+                s.id
+                for s in session.query(Style)
+                .filter(Style.embedding.isnot(None))
+                .order_by(Style.embedding.cosine_distance(avg_style_vector))
+                .limit(_POOL_NEAREST_TAGS)
                 .all()
-            )
-            work_styles = (
-                session.query(Work.id).join(WorkStyle).filter(WorkStyle.style_id.in_(style_ids)).limit(limit).all()
-            )
+            ]
+            for stmt in (
+                _work_style_rank_select(avg_style_vector, style_ids, pool_limit, suggested),
+                _author_style_rank_select(avg_style_vector, style_ids, pool_limit, suggested),
+            ):
+                if style_ids:
+                    pos_scores = _merge_min(pos_scores, dict(session.execute(stmt).all()))
 
-            candidate_work_ids.update([w[0] for w in author_works])
-            candidate_work_ids.update([w[0] for w in work_styles])
-
-        # 3. Final Work Retrieval, ordered by semantic relevance.
-        if not candidate_work_ids:
+        if not pos_scores:
             return []
 
-        # Order candidates by their closest matching trope to the query vector (cosine
-        # distance). Candidates that arrived via style-only matching (no matching trope)
-        # are appended afterward in a stable order. Without this, the set + IN filter
-        # returns rows in arbitrary DB order.
-        ordered_ids: list[UUID] = []
-        if target_tropes and avg_vector is not None:
-            ranked = (
-                session.query(Work.id)
-                .join(WorkTrope, WorkTrope.work_id == Work.id)
-                .join(Trope, Trope.id == WorkTrope.trope_id)
-                .filter(Work.id.in_(list(candidate_work_ids)))
-                .group_by(Work.id)
-                .order_by(func.min(Trope.embedding.cosine_distance(avg_vector)))
-                .limit(limit)
-                .all()
+        # 3. Negative targets: best distance from each candidate to each exclusion.
+        candidate_ids = list(pos_scores)
+        neg_scores: dict[UUID, float] = {}
+        for text in exclude_tropes or []:
+            vec = tm._get_embedding(text)
+            neg_scores = _merge_min(
+                neg_scores, dict(session.execute(_neg_trope_distance_select(vec, candidate_ids)).all())
             )
-            ordered_ids = [w[0] for w in ranked]
-        # sorted() so the style-only leftovers have a deterministic order (set iteration
-        # order is process-randomized).
-        for wid in sorted(candidate_work_ids):
-            if wid not in ordered_ids:
-                ordered_ids.append(wid)
-        ordered_ids = ordered_ids[:limit]
+        for text in exclude_styles or []:
+            vec = sm._get_embedding(text)
+            for stmt in _neg_style_distance_selects(vec, candidate_ids):
+                neg_scores = _merge_min(neg_scores, dict(session.execute(stmt).all()))
 
-        # Eager load contributors/authors, then restore the ranked order.
+        ordered_ids = _apply_exclusions(pos_scores, neg_scores)[:limit]
+        if not ordered_ids:
+            return []
+
+        # 4. Final retrieval; restore the ranked order.
         works = (
             session.query(Work)
             .options(joinedload(Work.contributors).joinedload(WorkContributor.author))
@@ -186,8 +315,6 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
             .all()
         )
         works_by_id = {w.id: w for w in works}
-        ordered_works = [works_by_id[wid] for wid in ordered_ids if wid in works_by_id]
-
         return [
             {
                 "id": str(w.id),
@@ -196,7 +323,8 @@ def search_internal_database(target_tropes: list[str], target_styles: list[str] 
                 "genres": w.genres,
                 "description": w.description,
             }
-            for w in ordered_works
+            for wid in ordered_ids
+            if (w := works_by_id.get(wid)) is not None
         ]
 
 
@@ -207,18 +335,9 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
     ranked by similarity to current target vibes.
     """
     user_id = get_required_user_id()
-    # GH #123: warm before the session opens (see search_internal_database above) — a no-op
-    # cache-hit in-session either way if there turn out to be no suggestions to rank.
-    for t in target_tropes or []:
-        try:
-            get_cached_embedding(EMBED_MODEL, t)
-        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
-            logger.warning("embed warm failed for trope %r — retrying in-session", t)
-    for s in target_styles or []:
-        try:
-            get_cached_embedding(EMBED_MODEL, s)
-        except Exception:  # noqa: BLE001 - warming is best-effort; the in-session call below retries
-            logger.warning("embed warm failed for style %r — retrying in-session", s)
+    # GH #123: warm before the session opens — a no-op cache-hit in-session either way
+    # if there turn out to be no suggestions to rank.
+    _warm_embeddings([*(target_tropes or []), *(target_styles or [])])
 
     with db_manager.get_session() as session:
         # 1. Get all unacted suggestions with Eager Loading (Fixes N+1)
@@ -304,6 +423,22 @@ def get_unacted_suggestions(target_tropes: list[str], target_styles: list[str] =
             }
             for s in ranked[:limit]
         ]
+
+
+def get_active_suggestion_work_ids() -> set[str]:
+    """Work ids with an ACTIVE ('Suggested') suggestion for the current user. Fresh
+    candidate sets exclude these (#125): a pitched-but-unacted book must not be
+    re-offered on the next request; resolving the suggestion (Accepted / Dismissed /
+    Already Read) frees the work again. A curation-layer helper (candidates.py), not
+    an MCP tool — the LLM never needs it directly."""
+    user_id = get_required_user_id()
+    with db_manager.get_session() as session:
+        rows = (
+            session.query(Suggestions.work_id)
+            .filter(Suggestions.status == "Suggested", Suggestions.user_id == user_id)
+            .all()
+        )
+        return {str(wid) for (wid,) in rows}
 
 
 def reread_eligibility(date_completed: date) -> tuple[bool, float]:
@@ -444,16 +579,25 @@ def get_read_status(work_ids: list[str]) -> dict:
 
 @mcp.tool()
 def get_recommendation_candidates(
-    target_tropes: list[str], target_styles: list[str] | None = None, limit: int = 10
+    target_tropes: list[str],
+    target_styles: list[str] | None = None,
+    limit: int = 10,
+    exclude_tropes: list[str] | None = None,
+    exclude_styles: list[str] | None = None,
 ) -> dict:
     """Read-status-aware, novelty-balanced candidates for a recommendation. Returns
     {"candidates":[{id,title,authors,genres,description,read_status,last_read,rating}],
     "has_unread","unread_count","reread_count"}. candidates is unread-first and excludes books
-    finished <2y ago. If has_unread is false, delegate to the Explorer for a fresh discovery.
+    finished <2y ago, plus books already pitched and awaiting the user's reaction.
+    ALWAYS pass the user's session constraints ("less fantasy", "nothing gory") as
+    exclude_tropes/exclude_styles — matching candidates are structurally dropped.
+    If has_unread is false, delegate to the Explorer for a fresh discovery.
     This is the Critic's primary catalog tool."""
     from agentic_librarian.agents.candidates import curate_candidates
 
-    return curate_candidates(target_tropes, target_styles, limit=limit)
+    return curate_candidates(
+        target_tropes, target_styles, limit=limit, exclude_tropes=exclude_tropes, exclude_styles=exclude_styles
+    )
 
 
 _READING_STATUSES = ("read",)

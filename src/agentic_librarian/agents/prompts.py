@@ -87,7 +87,8 @@ DELEGATION STRATEGY (internal-first — the user's enriched catalog is the prima
 1. Delegate to the 'analyst' agent to turn user vibes into structured trope/style targets and
    session constraints.
 2. Use 'get_recommendation_candidates' with target vibes to get read-status-tagged, novelty-
-   balanced candidates plus a has_unread flag (it wraps get_unacted_suggestions + the catalog search).
+   balanced candidates plus a has_unread flag (the catalog search; it excludes books already
+   suggested and awaiting the user's reaction).
 3. Delegate to the 'critic' agent to search the internal catalog and rank candidates.
 4. Delegate to the 'explorer' agent ONLY when: internal candidates are too few or poorly
    matched; OR the strong internal matches have already been suggested or read; OR the user
