@@ -127,10 +127,16 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noq
         return JSONResponse(status_code=503, content={"status": "error", "detail": str(e)})
 
 
+def _ranked_tropes(work_tropes):
+    """Real scout tropes (justified) outrank genre/mood slug fallbacks (justification is
+    NULL, default relevance 1.0) — otherwise slugs crowd every display list (#70)."""
+    return sorted(work_tropes, key=lambda wt: (wt.justification is None, -wt.relevance_score, wt.trope.name))
+
+
 def _history_item(h) -> dict:
     """Serialize one ReadingHistory row to the /history payload shape (shared by GET + PATCH)."""
     work = h.edition.work
-    top = sorted(work.tropes, key=lambda wt: wt.relevance_score, reverse=True)[:3]
+    top = _ranked_tropes(work.tropes)[:3]
     return {
         "id": str(h.id),
         "title": work.title,
@@ -289,7 +295,7 @@ def get_works(
                 "publication_year": w.original_publication_year,
                 "genres": w.genres or [],
                 "moods": w.moods or [],
-                "tropes": [wt.trope.name for wt in w.tropes],
+                "tropes": [wt.trope.name for wt in _ranked_tropes(w.tropes)],
                 "styles": [{"attribute": ws.attribute_type, "name": ws.style.name} for ws in w.styles],
             }
             for w in works

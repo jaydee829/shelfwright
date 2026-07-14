@@ -118,3 +118,30 @@ def test_get_works_limit_cap_enforced():
     assert client.get("/works?limit=500").status_code == 422
     assert client.get("/works?limit=0").status_code == 422
     assert client.get("/works?offset=-1").status_code == 422
+
+
+def _mock_work_trope(name, *, relevance, justification):
+    wt = MagicMock()
+    wt.trope.name = name
+    wt.relevance_score = relevance
+    wt.justification = justification
+    return wt
+
+
+def test_get_works_tropes_ordered_justified_first():
+    with patch("agentic_librarian.api.main.db_manager") as mock_db:
+        mock_session = MagicMock()
+        mock_db.get_session.return_value.__enter__.return_value = mock_session
+        work = _mock_work()
+        work.tropes = [
+            _mock_work_trope("Dark", relevance=1.0, justification=None),
+            _mock_work_trope("Slow Burn", relevance=0.9, justification="found in scout summary"),
+            _mock_work_trope("Fantasy", relevance=1.0, justification=None),
+            _mock_work_trope("Found Family", relevance=0.7, justification="found in scout summary"),
+        ]
+        _mock_chain(mock_session, [work])
+
+        response = client.get("/works")
+        assert response.status_code == 200
+        entry = response.json()[0]
+        assert entry["tropes"] == ["Slow Burn", "Found Family", "Dark", "Fantasy"]
