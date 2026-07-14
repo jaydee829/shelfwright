@@ -10,10 +10,14 @@
   python scripts/clean_catalog.py --dedup-for-constraints --dry-run
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes --report data/reports/dedup-<ts>.txt
+  python scripts/clean_catalog.py --repair-fallbacks --dry-run
+  python scripts/clean_catalog.py --repair-fallbacks-apply --yes --report data/reports/fallback-repair-<ts>.txt
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
 --dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
-the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted."""
+the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted.
+--repair-fallbacks-apply likewise re-plans fresh and refuses on any drift from --report (required,
+no default — GH #70)."""
 
 from __future__ import annotations
 
@@ -26,8 +30,9 @@ from sqlalchemy import func
 
 from agentic_librarian.db.models import Trope, Work
 from agentic_librarian.db.session import DatabaseManager, resolve_database_url
-from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, trope_backfill
+from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, fallback_repair, trope_backfill
 from agentic_librarian.etl.tag_backfill import is_prod_url
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
 
 
 def _write_dedup_report(plan) -> Path:
@@ -234,6 +239,32 @@ def main(argv: list[str] | None = None) -> int:
             "review) is fine and applies normally (ordinary skipped_stale)."
         ),
     )
+    ap.add_argument(
+        "--repair-fallbacks",
+        action="store_true",
+        help=(
+            "GH #70 (PR-D part 2): dry-run plan for the fallback-pollution repair — deletes "
+            "NULL-justified work_tropes links that are a deterministic recompute of the OLD "
+            "fallback writer's semantic redirect (see etl/fallback_repair.py's module "
+            "docstring for the distinguisher), restores exact-name slug fallbacks on works left "
+            "tropeless, clears falsely-backfilled deep_enriched_at stamps, and prunes orphaned "
+            "tropes. Writes data/reports/fallback-repair-<UTC timestamp>.txt for review — this "
+            "flag never applies; use --repair-fallbacks-apply for that."
+        ),
+    )
+    ap.add_argument(
+        "--repair-fallbacks-apply",
+        action="store_true",
+        help=(
+            "Apply the fallback-pollution repair (GH #70). A SEPARATE invocation from the "
+            "reviewed --repair-fallbacks dry-run: re-plans from scratch and REFUSES (exit 1) if "
+            "the fresh plan contains any token the operator never reviewed (op-tagged, so even "
+            "an operation flip on the same ids counts) — see etl/fallback_repair.py's "
+            "apply_fallback_repair. Requires --yes and --report (no default, unlike "
+            "--dedup-for-constraints — this is a distinct destructive operation and must name "
+            "its reviewed report explicitly)."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
@@ -242,9 +273,10 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help=(
-            "--dedup-for-constraints --apply only: path to the reviewed dry-run report to "
+            "--dedup-for-constraints --apply: path to the reviewed dry-run report to "
             "cross-check the fresh plan against (THE USER GATE). Defaults to the newest "
-            "data/reports/dedup-*.txt — the tool prints which one it used."
+            "data/reports/dedup-*.txt — the tool prints which one it used. "
+            "--repair-fallbacks-apply: same idea, but REQUIRED (no default)."
         ),
     )
     args = ap.parse_args(argv)
@@ -433,9 +465,71 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 0
 
+        if args.repair_fallbacks:
+            # #123: warm every cleaned genre/mood name's embedding BEFORE plan_fallback_repair
+            # runs any bogus_targets lookup against THIS session — see
+            # etl/fallback_repair.py's warm_fallback_repair_texts docstring.
+            for name in fallback_repair.warm_fallback_repair_texts(session):
+                get_cached_embedding(EMBED_MODEL, name)
+
+            plan = fallback_repair.plan_fallback_repair(session)
+            summary = plan.summary()
+            print("\n=== repair-fallbacks plan (THE USER GATE, GH #70) ===")
+            for key, count in summary.items():
+                print(f"  {key:32} {count}")
+
+            print("\n--- delete_links samples ---")
+            for d in plan.delete_links[:10]:
+                print(f"  work={d.work_id}  trope={d.trope_id}  ({d.trope_name!r})")
+            print("--- write_slugs samples ---")
+            for w in plan.write_slugs[:10]:
+                print(f"  work={w.work_id}  slug={w.trope_name!r}")
+            print("--- clear_stamps samples ---")
+            for c in plan.clear_stamps[:10]:
+                print(f"  work={c.work_id}")
+            print("--- prune_tropes samples ---")
+            for p in plan.prune_tropes[:10]:
+                print(f"  trope={p.trope_id}  ({p.trope_name!r})")
+
+            report_path = fallback_repair.write_report(plan)
+            print(f"\nfull plan (every token) written to {report_path} — review this before approving --apply.")
+            print(f"\napply with: --repair-fallbacks-apply --yes --report {report_path}")
+            return 0
+
+        if args.repair_fallbacks_apply:
+            if not args.yes:
+                print("\nREFUSING --repair-fallbacks-apply without --yes.")
+                return 2
+            if not is_prod_url(url):
+                print(f"\nREFUSING --repair-fallbacks-apply: '{safe}' is not a live prod DB (sqlite/backup/localhost).")
+                return 2
+            if args.report is None:
+                print(
+                    "\nREFUSING --repair-fallbacks-apply: --report is required (no default — "
+                    "name the reviewed --repair-fallbacks dry-run report explicitly)."
+                )
+                return 1
+
+            # #123: same warm-before-session discipline as the dry-run path — apply_fallback_repair
+            # re-plans fresh internally, so its bogus_targets lookups must find warmed cache hits.
+            for name in fallback_repair.warm_fallback_repair_texts(session):
+                get_cached_embedding(EMBED_MODEL, name)
+
+            try:
+                applied = fallback_repair.apply_fallback_repair(session, args.report)
+            except (OSError, ValueError) as exc:
+                print(f"\nREFUSING --repair-fallbacks-apply: {exc}")
+                return 1
+
+            print("\napplied:")
+            for key, count in applied.items():
+                print(f"  {key:32} {count}")
+            return 0
+
         print(
             "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
-            "--requeue-unenriched, or --dedup-for-constraints."
+            "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, or "
+            "--repair-fallbacks-apply."
         )
         return 1
 
