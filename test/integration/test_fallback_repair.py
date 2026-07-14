@@ -24,11 +24,14 @@ pytestmark = pytest.mark.db_integration
 # attractor (two tropes at the exact same distance from a query vector is not how the real
 # pollution incident looks — every attractor is its own semantic cluster; a same-distance tie
 # would make "nearest" a Postgres row-order accident rather than a real classification).
-# Everything else gets an orthogonal-ish vector so it never accidentally satisfies
-# BOGUS_MATCH_THRESHOLD.
+# Everything else (every cleaned tag name the fixtures use that ISN'T "Dark"/"Grim"/"Junk Basis",
+# e.g. "Thriller", "Found Family") gets _OTHER_VEC so it never accidentally satisfies
+# BOGUS_MATCH_THRESHOLD. _JUNK_BASIS_VEC is its OWN fourth orthogonal dimension (Fix 4,
+# adjudicated review pass 3) — see its own comment below for why it must NOT reuse _OTHER_VEC.
 _ATTRACTOR_A_VEC = [1.0] + [0.0] * 1535
 _ATTRACTOR_B_VEC = [0.0, 0.0, 1.0] + [0.0] * 1533
 _OTHER_VEC = [0.0, 1.0] + [0.0] * 1534
+_JUNK_BASIS_VEC = [0.0, 0.0, 0.0, 1.0] + [0.0] * 1532
 _ATTRACTOR_VEC = _ATTRACTOR_A_VEC  # back-compat alias for the single-attractor tests below
 
 
@@ -37,6 +40,8 @@ def _fake_embed(model_name, text_):
         return _ATTRACTOR_A_VEC
     if text_ == "Grim":
         return _ATTRACTOR_B_VEC
+    if text_ == "Junk Basis":
+        return _JUNK_BASIS_VEC
     return _OTHER_VEC
 
 
@@ -303,7 +308,21 @@ def test_reset_no_evidence_full_reset_including_non_derivable_junk_link(db_url):
     Because the work has ZERO justified links, the new reset-no-evidence trigger plans BOTH
     links for deletion regardless of derivability. Post-apply: both links gone, exact-name
     slug links exist for the work's genres/moods, the stamp is cleared, the now-linkless junk
-    trope is pruned, and a fresh re-plan converges to empty."""
+    trope is pruned, and a fresh re-plan converges to empty.
+
+    Fix 4 (Important, adjudicated review pass 3): the junk trope gets its OWN basis vector
+    (_JUNK_BASIS_VEC, a fourth orthogonal dimension) rather than reusing _OTHER_VEC — the
+    catch-all _fake_embed returns for every cleaned tag name that isn't "Dark"/"Grim". Reusing
+    _OTHER_VEC was a fixture bug: this work's OWN "Thriller" genre ALSO embeds to _OTHER_VEC
+    (it's not "Dark" or "Grim" either), so a junk trope embedded at _OTHER_VEC sits at cosine
+    distance 0 from "Thriller"'s embedding — well within BOGUS_MATCH_THRESHOLD — making it a
+    bogus_targets member via the ORIGINAL per-link distinguisher alone. That means the junk
+    link's delete would have been explained by the pre-existing NULL-justified+bogus_targets
+    rule, not by the NEW reset-no-evidence trigger this test exists to exercise — the fixture
+    was not actually testing what its own docstring/comments claimed. With its own basis vector,
+    the junk trope is not the nearest match for ANY of this work's cleaned tag names, so it is
+    provably absent from bogus_targets(work) (asserted below via _nearest_trope_by_name), and
+    its deletion is attributable ONLY to the reset-no-evidence trigger."""
     manager = DatabaseManager(db_url)
     with manager.get_session() as session:
         session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
@@ -311,12 +330,23 @@ def test_reset_no_evidence_full_reset_including_non_derivable_junk_link(db_url):
         # derivable: "Dark" mood cosine-redirects onto this attractor (same distinguisher as
         # every other test in this module).
         attractor = Trope(name="The Dark Night of the Soul", embedding=_ATTRACTOR_VEC)
-        # non-derivable junk: an orthogonal embedding, nowhere near any of the work's own
-        # genres/moods (via _fake_embed's _OTHER_VEC) — bogus_targets' recompute can never
-        # produce this trope for this work, so ONLY the new work-level trigger can catch it.
-        junk = Trope(name="Comics Graphic Novels", embedding=_OTHER_VEC)
+        # non-derivable junk: its OWN orthogonal basis vector (_JUNK_BASIS_VEC), distinct from
+        # _OTHER_VEC (the catch-all vector this work's OWN "Thriller" genre also embeds to —
+        # see the Fix 4 docstring note above for why reusing it would have made the junk trope
+        # a bogus_targets member via the ORIGINAL distinguisher, defeating the point of this
+        # fixture). bogus_targets' recompute can never produce this trope for this work, so
+        # ONLY the new work-level trigger can catch it.
+        junk = Trope(name="Comics Graphic Novels", embedding=_JUNK_BASIS_VEC)
         session.add_all([attractor, junk])
         session.flush()
+
+        # Fix 4: prove the junk trope is genuinely non-derivable BEFORE the plan runs — for
+        # every cleaned tag name this work actually carries, the nearest trope within
+        # BOGUS_MATCH_THRESHOLD must never be the junk trope (or None, if nothing is within
+        # threshold at all).
+        for tag_name in ("Thriller", "Dark"):
+            nearest = fr._nearest_trope_by_name(session, {"The Dark Night of the Soul": attractor}, tag_name)
+            assert nearest is None or nearest.id != junk.id
 
         work = Work(
             title="Lessons in Chemistry",

@@ -191,7 +191,15 @@ class TestWriteSlugAndClearStamp:
         The exact-name slug link is given a justification here (a justified genre-derived link
         is a perfectly ordinary shape) so this work has >=1 justified link and stays out of the
         reset-no-evidence trigger's reach (see TestResetNoEvidence) — isolating the ORIGINAL
-        per-link bogus_targets distinguisher, which is what this test is about."""
+        per-link bogus_targets distinguisher, which is what this test is about. This claim is
+        only true because of Fix 1 (review pass 3): the evidence scan considers EVERY link on
+        the work, including this justified SLUG-named one — an earlier, buggy draft scoped the
+        evidence scan to non-slug links only, under which this same justified "Thriller" link
+        would have been silently excluded from "is there evidence," and the work's other
+        NULL-justified non-slug link ("The Dark Night of the Soul") would have wrongly tripped
+        the reset-no-evidence trigger instead of being governed by the per-link distinguisher
+        this test isolates (see test_reset_no_evidence_trigger_scan_covers_all_links, which
+        pins the corrected behavior directly)."""
         bogus_trope_id = uuid4()
         existing_slug_id = uuid4()
         work = _work(
@@ -337,6 +345,40 @@ class TestResetNoEvidence:
         assert plan.write_slugs == []
         assert plan.clear_stamps == []
 
+    def test_reset_no_evidence_trigger_scan_covers_all_links(self):
+        """Fix 1 (Critical, adjudicated review pass 3): the evidence scan must consider EVERY
+        link of the work, including slug-named ones — a justified slug-named link IS evidence
+        and must block the reset trigger entirely. Here the work has one JUSTIFIED slug-named
+        link ("Thriller", justification set, name is a member of the work's own genres — an
+        entirely ordinary justified genre-derived slug link) plus one NULL-justified,
+        non-derivable, non-slug link ("Some Junk", not a bogus_targets member and not a
+        slug). An earlier, buggy draft scoped the evidence scan to non-slug links only, under
+        which the justified slug link would have been silently excluded from 'is there
+        evidence' and this work would have wrongly tripped the reset trigger, force-deleting
+        the junk link and reporting the work as reset. The corrected scan sees the justified
+        slug link as evidence -> the trigger must NOT fire at all: no delete_link (the junk
+        link is neither a bogus_targets member nor a slug so the ORIGINAL per-link trigger
+        also leaves it alone), no write_slug, no clear_stamp, and reset_works stays empty."""
+        thriller_slug_id = uuid4()
+        junk_id = uuid4()
+        work = _work(
+            links=[
+                (thriller_slug_id, "Thriller", "scout: genre-derived, confirmed"),
+                (junk_id, "Some Junk", None),
+            ],
+            genres=["Thriller"],
+            moods=[],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        all_tropes_by_id = {thriller_slug_id: "Thriller", junk_id: "Some Junk"}
+        # junk_id is NOT a bogus_targets member (non-derivable from this work's own tags).
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+        assert plan.reset_works == []
+
     def test_already_reset_work_converges_to_nothing_on_replan(self):
         """Convergence (found via the db_integration round-trip, not in the original design
         note): write_slug ALWAYS writes its exact-name slug links with justification=None, so
@@ -364,6 +406,93 @@ class TestResetNoEvidence:
         assert plan.write_slugs == []
         assert plan.clear_stamps == []
         assert plan.reset_works == []
+
+    def test_already_reset_work_with_combo_map_genre_converges_to_nothing_on_replan(self):
+        """Fix 2 (Important, adjudicated review pass 3): the slug carve-out must be keyed to
+        write_slug's EXACT output — _cleaned_tag_names(genres, moods) — not the shared
+        trope_predicate.is_fallback_trope_name (which checks a cleaned name against the work's
+        RAW, uncleaned genres|moods and therefore never accounts for COMBO_MAP splits). Raw
+        genre tag "Science Fiction Fantasy" is a COMBO_MAP entry that cleans to two exact-name
+        slugs, ["Science Fiction", "Fantasy"] (tag_maps.COMBO_MAP["science fiction fantasy"]) —
+        exactly what write_slug would have written as this work's post-reset shape. Simulates
+        that post-apply state directly (both links present, NULL-justified, as write_slug
+        always writes them, deep_enriched_at already cleared): re-plan must plan NOTHING for
+        this work — no delete, no re-trigger of the reset, no duplicate slug. Under the OLD
+        is_fallback_trope_name-based carve-out, neither "Science Fiction" nor "Fantasy" would
+        match the raw genre string "Science Fiction Fantasy" as a set member, so both would be
+        misclassified as non-slug 'real' tropes: has_real_remaining would see them as
+        real-remaining evidence (permanently blocking write_slug/clear_stamp), and — because
+        they're also NULL-justified — the reset-no-evidence scan would count them as non-slug
+        'evidence' too, wrongly re-triggering a full reset on this already-correctly-shaped
+        work forever."""
+        sci_fi_slug_id = uuid4()
+        fantasy_slug_id = uuid4()
+        work = _work(
+            links=[
+                (sci_fi_slug_id, "Science Fiction", None),
+                (fantasy_slug_id, "Fantasy", None),
+            ],
+            genres=["Science Fiction Fantasy"],
+            moods=[],
+            deep_enriched_at=None,  # already cleared by the prior reset's clear_stamp
+        )
+        all_tropes_by_id = {sci_fi_slug_id: "Science Fiction", fantasy_slug_id: "Fantasy"}
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+        assert plan.reset_works == []
+
+
+class TestStampOnlyClass:
+    """Fix 3 (Important, adjudicated review pass 3): a stamped work with >=1 link, ZERO
+    justified links anywhere, and ALL links slug-named (per Fix 2's _is_slug_link) is a
+    migration-backfill false positive whose fallback representation is already correct — plan
+    clear_stamp ONLY (no deletes, no slug writes). This traces case (a) from the review
+    directly: a work whose only links are the exact-name "Thriller"/"Dark" slugs write_slug
+    would have written, all NULL-justified, with a deep_enriched_at stamp still set (the 6.3
+    migration backfill stamped ANY work with >=1 trope row, without regard to whether those
+    rows were fallback slugs)."""
+
+    @pytest.mark.parametrize(
+        "deep_enriched_at, expect_clear_stamp, expect_reset_work",
+        [
+            ("2026-01-01T00:00:00Z", True, True),
+            (None, False, False),
+        ],
+        ids=["stamped_clears_stamp_only", "unstamped_plans_nothing"],
+    )
+    def test_slug_only_zero_justified_work(self, deep_enriched_at, expect_clear_stamp, expect_reset_work):
+        thriller_slug_id = uuid4()
+        dark_slug_id = uuid4()
+        work = _work(
+            links=[
+                (thriller_slug_id, "Thriller", None),
+                (dark_slug_id, "Dark", None),
+            ],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at=deep_enriched_at,
+        )
+        all_tropes_by_id = {thriller_slug_id: "Thriller", dark_slug_id: "Dark"}
+        plan = _plan_from_data([work], all_tropes_by_id, {work.work_id: set()})
+
+        # never any deletes or slug writes for this shape, stamped or not
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+
+        assert ([c.work_id for c in plan.clear_stamps] == [work.work_id]) is expect_clear_stamp
+        if not expect_clear_stamp:
+            assert plan.clear_stamps == []
+
+        reset_work_ids = {r.work_id for r in plan.reset_works}
+        assert (work.work_id in reset_work_ids) is expect_reset_work
+        if expect_reset_work:
+            (reset_entry,) = [r for r in plan.reset_works if r.work_id == work.work_id]
+            assert reset_entry.stamp_only is True
+        else:
+            assert plan.reset_works == []
 
 
 class TestPruneTrope:
