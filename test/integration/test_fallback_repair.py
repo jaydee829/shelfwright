@@ -74,7 +74,17 @@ def test_full_round_trip_delete_write_slug_clear_stamp_prune(db_url):
         # work 2: shares the SAME attractor trope, but via a real justified scout link — must
         # survive untouched.
         work2 = Work(title="Justified Work", genres=[], moods=[])
-        session.add_all([work1, work2])
+        # work 3 (Fix 1, deletion-triggered eligibility): a seeded TROPELESS work with its own
+        # genres/moods AND a deep_enriched_at stamp — the #67-pruned-fast-pass shape. It has ZERO
+        # work_tropes links, so plan_fallback_repair must plan NO delete_link, NO write_slug, and
+        # NO clear_stamp for it: this run never touched it, so it must never touch it back.
+        work3 = Work(
+            title="Fast-Pass Tropeless Work",
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at=datetime(2026, 6, 1, tzinfo=UTC),
+        )
+        session.add_all([work1, work2, work3])
         session.flush()
 
         attractor = Trope(name="The Dark Night of the Soul", embedding=_ATTRACTOR_VEC)
@@ -83,6 +93,7 @@ def test_full_round_trip_delete_write_slug_clear_stamp_prune(db_url):
 
         _link(session, work1, attractor, justification=None)  # bogus: NULL-justified + derivable
         _link(session, work2, attractor, justification="scout: framed as a spiritual crisis arc")
+        # work3 gets NO links at all — see above.
         session.flush()
 
         # --- dry-run plan ---
@@ -93,6 +104,13 @@ def test_full_round_trip_delete_write_slug_clear_stamp_prune(db_url):
         assert {s.trope_name for s in plan.write_slugs if s.work_id == work1.id} == {"Thriller", "Dark"}
         assert [c.work_id for c in plan.clear_stamps] == [work1.id]
         assert [p.trope_id for p in plan.prune_tropes] == []  # attractor still has work2's link
+
+        # work3: the plan must be entirely silent about it — no delete_link (nothing to delete),
+        # no write_slug (never eligible — zero delete_links planned for it), no clear_stamp
+        # (same eligibility gate; its stamp is left alone).
+        assert all(d.work_id != work3.id for d in plan.delete_links)
+        assert all(w.work_id != work3.id for w in plan.write_slugs)
+        assert all(c.work_id != work3.id for c in plan.clear_stamps)
 
         report_path = fr.write_report(plan)
         reviewed_tokens = fr.parse_report(report_path.read_text(encoding="utf-8"))
@@ -118,6 +136,12 @@ def test_full_round_trip_delete_write_slug_clear_stamp_prune(db_url):
         assert len(work2_links) == 1
         assert work2_links[0].trope_id == attractor.id
         assert work2_links[0].justification is not None
+
+        # work3: STILL zero links, stamp UNTOUCHED — apply must not have re-added fallback slugs
+        # or cleared its stamp, even though it superficially "has no real trope" too.
+        work3_links = session.query(WorkTrope).filter_by(work_id=work3.id).all()
+        assert work3_links == []
+        assert session.get(Work, work3.id).deep_enriched_at == datetime(2026, 6, 1, tzinfo=UTC)
 
         # --- convergence: re-plan finds nothing left to do ---
         converged = fr.plan_fallback_repair(session)
@@ -159,9 +183,17 @@ def test_drift_gate_refuses_and_changes_nothing(db_url):
         works_stamps_before = {w.id: w.deep_enriched_at for w in session.query(Work).all()}
         tropes_before = {t.id for t in session.query(Trope).all()}
 
-        with pytest.raises(ValueError, match="drifted"):
+        with pytest.raises(fr.FallbackRepairDriftError, match="drifted") as exc_info:
             fr.apply_fallback_repair(session, report_path)
         session.flush()
+
+        # Minor 5: the refusal carries the offending delta TOKENS (not just counts) and a fresh
+        # report path written from the drifted plan, ready for immediate re-review.
+        new_delete_token = f"delete_link:{(work2.id, attractor.id)}"
+        assert new_delete_token in exc_info.value.delta["delete_links"]
+        assert exc_info.value.fresh_report_path.exists()
+        fresh_reviewable = fr.parse_report(exc_info.value.fresh_report_path.read_text(encoding="utf-8"))
+        assert new_delete_token in fresh_reviewable["delete_links"]
 
         work_tropes_after = {(wt.work_id, wt.trope_id, wt.justification) for wt in session.query(WorkTrope).all()}
         works_stamps_after = {w.id: w.deep_enriched_at for w in session.query(Work).all()}
@@ -170,6 +202,52 @@ def test_drift_gate_refuses_and_changes_nothing(db_url):
         assert work_tropes_after == work_tropes_before
         assert works_stamps_after == works_stamps_before
         assert tropes_after == tropes_before
+
+
+def test_skipped_stale_reports_shrinkage_when_fresh_is_subset_of_reviewed(db_url):
+    """Minor 4: fresh ⊂ reviewed (some reviewed rows were already applied/vanished by the time
+    of this apply) is NOT a drift refusal — it applies cleanly, and skipped_stale reports the
+    exact shrinkage: the reviewed tokens no longer present in the fresh plan."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+        work1 = Work(title="Shrinkage Work 1", genres=[], moods=["Dark"])
+        work2 = Work(title="Shrinkage Work 2", genres=[], moods=["Dark"])
+        session.add_all([work1, work2])
+        session.flush()
+
+        attractor = Trope(name="The Dark Night of the Soul", embedding=_ATTRACTOR_VEC)
+        session.add(attractor)
+        session.flush()
+        _link(session, work1, attractor, justification=None)
+        _link(session, work2, attractor, justification=None)
+        session.flush()
+
+        # reviewed report sees BOTH bogus links AND (Fix 1: each work has >=1 delete_link, so
+        # both are write_slug-eligible) the exact-name "Dark" slug restore for each work.
+        reviewed_plan = fr.plan_fallback_repair(session)
+        assert len(reviewed_plan.delete_links) == 2
+        assert len(reviewed_plan.write_slugs) == 2
+        report_path = fr.write_report(reviewed_plan)
+
+        # work2's bogus link is removed out-of-band before apply runs (simulating "already
+        # applied by someone else" / "the row is simply gone by apply time") — the fresh re-plan
+        # sees only work1's delete_link (a SUBSET of what was reviewed): work2 now has ZERO
+        # links, so Fix 1's eligibility gate also drops its reviewed write_slug token — TWO
+        # reviewed tokens (delete_link + write_slug) vanish for the one out-of-band change.
+        stale_link = session.query(WorkTrope).filter_by(work_id=work2.id, trope_id=attractor.id).one()
+        session.delete(stale_link)
+        session.flush()
+
+        applied = fr.apply_fallback_repair(session, report_path)
+        session.flush()
+
+        assert applied["delete_links"] == 1  # only work1's link actually got deleted
+        assert applied["write_slugs"] == 1  # only work1's "Dark" slug actually got written
+        # skipped_stale must account for BOTH vanished work2 tokens (delete_link + write_slug) —
+        # the shrinkage Minor 4 asks to be reported, not silently dropped.
+        assert applied["skipped_stale"] == 2
 
 
 def test_prune_trope_deleted_when_all_links_bogus_kept_when_justified_link_survives(db_url):

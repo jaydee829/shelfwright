@@ -81,6 +81,63 @@ def test_exact_name_slug_never_a_bogus_target_by_construction():
     assert plan.delete_links == []
 
 
+class TestDeletionTriggeredEligibility:
+    """Fix 1 (adjudicated design change, review pass 2): write_slug/clear_stamp are eligible
+    ONLY for a work that has >=1 delete_link planned. Without this gate a zero-link work or an
+    untouched legitimately-stamped work would also qualify by the old 'no real trope survives'
+    test alone."""
+
+    def test_zero_link_work_gets_no_write_slug_or_clear_stamp(self):
+        """A work with ZERO pre-existing trope links (never touched by the old fallback writer)
+        must not get write_slug/clear_stamp planned — that would re-add fallback tropes the #67
+        prune deliberately removed from fast-pass works."""
+        work = _work(
+            links=[],
+            genres=["Thriller"],
+            moods=["Dark"],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        plan = _plan_from_data([work], {}, {work.work_id: set()})
+
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+
+    def test_linkless_and_stamped_work_untouched(self):
+        """A work with zero links but a deep_enriched_at stamp (a legitimately-stamped
+        confirmed-empty work the #97 sweep already knows about) must be left entirely alone —
+        no write_slug, no clear_stamp, no delete_link. Clearing its stamp would erase the
+        sweep's repeat-cost signal for a work this run never touched."""
+        work = _work(
+            links=[],
+            genres=[],
+            moods=[],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        plan = _plan_from_data([work], {}, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+
+    def test_work_with_only_justified_links_and_no_bogus_targets_untouched(self):
+        """A work with real (justified) links and no bogus targets plans no delete_link, so it
+        must not become eligible for write_slug/clear_stamp either, even though has_real_remaining
+        would still be True here anyway — this asserts the eligibility gate specifically, not
+        just the pre-existing has_real_remaining behavior."""
+        real_trope_id = uuid4()
+        work = _work(
+            links=[(real_trope_id, "Found Family", "scout")],
+            genres=["Thriller"],
+            moods=[],
+            deep_enriched_at="2026-01-01T00:00:00Z",
+        )
+        plan = _plan_from_data([work], {real_trope_id: "Found Family"}, {work.work_id: set()})
+
+        assert plan.delete_links == []
+        assert plan.write_slugs == []
+        assert plan.clear_stamps == []
+
+
 class TestWriteSlugAndClearStamp:
     def test_write_slug_planned_when_no_real_trope_remains(self):
         bogus_trope_id = uuid4()

@@ -27,28 +27,52 @@ tags. It cannot be told apart from the actual pollution using only this work's d
 report is the human gate for this residual: the operator reviews every planned delete_link before
 approving --apply.
 
+A second, opposite-direction residual (fail-SAFE, name it honestly too): a pollution link whose
+old semantic target is no longer the nearest trope TODAY (e.g. the catalog grew a closer trope
+since the link was written, or the original nearest trope was itself since renamed/pruned) is
+invisible to bogus_targets' recompute — the current nearest-trope lookup simply won't reproduce
+that stale target, so the link is never proposed for deletion and stays. This under-deletes rather
+than over-deletes, so it is safe by construction, but it means a re-run of this tool is not
+guaranteed to converge on removing every historical pollution link in one pass; some residual
+junk can persist indefinitely without ever tripping the distinguisher again.
+
 Four action classes, one plan (mirrors etl/dedup_backfill.py's op-tagged token gate EXACTLY —
 see plan_id_set's docstring there for why the op-tag is load-bearing, not cosmetic):
 
   1. delete_link(work_id, trope_id): NULL-justified link whose trope_id is in
      bogus_targets(work).
-  2. write_slug(work_id, trope_name): after (planned) deletions, the work would have NO real
-     trope left (no remaining/surviving link that is_fallback_trope_name(...) is False for) ->
-     plan the missing exact-name slug links for every name in clean_trope_name(tag),
-     tag in genres|moods, not already linked. Applied via D1's get_or_create_fallback_trope
-     (exact-name-only — never the semantic redirect that caused this mess).
-  3. clear_stamp(work_id): work has no real trope remaining (post-delete) AND
-     deep_enriched_at IS NOT NULL -> NULL it out. The 6.3 migration backfill stamped
-     deep_enriched_at on any work with >=1 trope row; a fallback-only work is a false positive
-     that must become visible to the #97 requeue sweep again.
+  2. write_slug(work_id, trope_name): DELETION-TRIGGERED ONLY (adjudicated fix, review pass 2)
+     — a work is eligible for write_slug ONLY IF this plan contains >=1 delete_link for that
+     work. Among eligible works, plan the missing exact-name slug links for every name in
+     clean_trope_name(tag), tag in genres|moods, not already linked, IF after the planned
+     deletions the work would have NO real trope left (no remaining/surviving link that
+     is_fallback_trope_name(...) is False for). Applied via D1's get_or_create_fallback_trope
+     (exact-name-only — never the semantic redirect that caused this mess). A work with ZERO
+     pre-existing trope links (never touched by the old fallback writer at all) is NEVER
+     eligible — writing slugs there would re-add fallback tropes the #67 prune deliberately
+     removed from fast-pass works. This module repairs works it strips, never works it didn't
+     touch.
+  3. clear_stamp(work_id): DELETION-TRIGGERED ONLY, same eligibility rule as write_slug (this
+     plan contains >=1 delete_link for that work). Among eligible works: work has no real trope
+     remaining (post-delete) AND deep_enriched_at IS NOT NULL -> NULL it out. The 6.3 migration
+     backfill stamped deep_enriched_at on any work with >=1 trope row; a fallback-only work
+     whose fallback links this plan is about to delete is a false positive that must become
+     visible to the #97 requeue sweep again. A work this plan does NOT delete anything from
+     keeps its stamp — clearing it would erase the sweep's legitimate repeat-cost signal for a
+     work that was correctly, honestly confirmed-empty.
   4. prune_trope(trope_id): a trope left with ZERO links after the PLANNED deletes (apply
      recomputes this at apply time — see apply_fallback_repair).
 
 Read-only during planning: bogus_targets NEVER creates a Trope. Per #123 (memory: warm
 embeddings before any session), every cleaned genre/mood name this plan might need to embed is
-warmed via get_cached_embedding BEFORE plan_fallback_repair opens/uses its session — see
-scripts/clean_catalog.py's --repair-fallbacks CLI wiring, which calls warm_fallback_repair_texts
-first.
+warmed via get_cached_embedding in a SHORT, SEPARATE, dedicated session that closes BEFORE the
+warm loop runs, which itself completes BEFORE the work session that opens plan_fallback_repair
+(or apply_fallback_repair) is opened — see scripts/clean_catalog.py's --repair-fallbacks /
+--repair-fallbacks-apply CLI wiring, which calls warm_fallback_repair_texts against its own
+short-lived session first, closes it, warms, and only then opens the work session. This is
+honest by construction, not just by convention: warm_fallback_repair_texts already excludes any
+name that exact-matches an existing Trope.name (Minor 7), since the planner never calls
+get_cached_embedding for those either — see warm_fallback_repair_texts's docstring.
 
 Apply is THE USER GATE (mirrors dedup_backfill/clean_catalog's --dedup-for-constraints exactly):
 apply_fallback_repair(session, reviewed_report_path) re-plans FRESH against current DB state,
@@ -148,14 +172,21 @@ def _cleaned_tag_names(genres: list[str] | None, moods: list[str] | None) -> lis
 
 
 def warm_fallback_repair_texts(session: Session) -> list[str]:
-    """Every cleaned genre/mood name across every work — the full set plan_fallback_repair's
-    bogus_targets scan might need to embed. Callers MUST warm these via get_cached_embedding
-    BEFORE opening/using the session that will call plan_fallback_repair (#123). Read-only:
-    only SELECTs Work.genres/moods, never touches Trope."""
+    """Every cleaned genre/mood name across every work that would actually need an embedding
+    lookup — the full set plan_fallback_repair's bogus_targets scan might call
+    get_cached_embedding for. Callers MUST warm these via get_cached_embedding BEFORE
+    opening/using the session that will call plan_fallback_repair (#123).
+
+    Minor 7 (combined with Fix 2): excludes any cleaned name that already exact-matches an
+    existing Trope.name — _nearest_trope_by_name returns None for those WITHOUT ever calling
+    get_cached_embedding (see its docstring), so warming them here would be wasted network
+    calls the planner will never make. Read-only: SELECTs Work.genres/moods and Trope.name
+    only, never mutates."""
+    all_trope_names = {name for (name,) in session.query(Trope.name).all()}
     names: set[str] = set()
     for genres, moods in session.query(Work.genres, Work.moods).all():
         names.update(_cleaned_tag_names(genres, moods))
-    return sorted(names)
+    return sorted(names - all_trope_names)
 
 
 # --------------------------------------------------------------------------------------------
@@ -175,7 +206,12 @@ def _nearest_trope_by_name(session: Session, all_tropes_by_name: dict[str, Trope
         session.query(Trope)
         .filter(Trope.embedding.isnot(None))
         .filter(Trope.embedding.cosine_distance(embedding) <= BOGUS_MATCH_THRESHOLD)
-        .order_by(Trope.embedding.cosine_distance(embedding))
+        # Fix 3 (deterministic tie-break, house rule from dedup_backfill's Minor-3 order_by
+        # discipline): Trope.id as the secondary sort key makes an exact-distance tie resolve
+        # identically every time, so a re-plan on unchanged data classifies the SAME nearest
+        # trope and can't spuriously trip the apply-gate's drift check on Postgres row-order
+        # nondeterminism alone.
+        .order_by(Trope.embedding.cosine_distance(embedding), Trope.id)
         .first()
     )
     return nearest
@@ -239,6 +275,18 @@ def _plan_from_data(
                 plan.delete_links.append(DeleteLink(work_id=wd.work_id, trope_id=trope_id, trope_name=name))
                 planned_deletes.add(trope_id)
                 deleted_link_count_by_trope[trope_id] += 1
+
+        # Fix 1 (adjudicated design change, review pass 2): write_slug/clear_stamp are
+        # DELETION-TRIGGERED ONLY — a work is eligible for either ONLY if this plan just
+        # planned >=1 delete_link for it. Without this gate, a work with ZERO pre-existing
+        # trope links (never touched by the old fallback writer) or a work whose tropelessness
+        # is legitimate and untouched by this run would also qualify by the old "no real trope
+        # survives" test alone — re-adding fallbacks the #67 prune deliberately removed from
+        # fast-pass works, and clearing a legitimately-stamped confirmed-empty work's
+        # deep_enriched_at (erasing the #97 sweep's repeat-cost signal). This module repairs
+        # works it strips, never works it didn't touch.
+        if not planned_deletes:
+            continue
 
         # A "real" trope survives if it's NOT planned for deletion AND is not itself a
         # fallback-name match for this work's own genres/moods (is_fallback_trope_name False).
@@ -426,37 +474,78 @@ def parse_report(report_text: str) -> dict[str, set[str]]:
 # --------------------------------------------------------------------------------------------
 
 
+class FallbackRepairDriftError(ValueError):
+    """Minor 5 (operator UX, mirrors dedup_backfill/clean_catalog's --dedup-for-constraints
+    refusal exactly): raised instead of a bare ValueError when apply_fallback_repair's fresh
+    re-plan drifted from the reviewed report. Carries the per-class delta TOKENS (not just
+    counts — an operator staring at "write_slugs: +1" has no way to find which row that is) and
+    the path of a FRESH report written from the drifted plan, ready for immediate re-review —
+    the operator doesn't have to re-run --repair-fallbacks by hand to see what changed."""
+
+    def __init__(self, delta: dict[str, set[str]], fresh_report_path: Path):
+        self.delta = delta
+        self.fresh_report_path = fresh_report_path
+        details = ", ".join(f"{name}: +{len(tokens)}" for name, tokens in delta.items() if tokens)
+        super().__init__(
+            f"REFUSING apply_fallback_repair: fresh plan drifted from the reviewed report ({details}). "
+            f"A fresh report was written to {fresh_report_path} — re-review it before re-applying."
+        )
+
+
 def apply_fallback_repair(session: Session, reviewed_report_path: Path) -> dict[str, int]:
     """--repair-fallbacks-apply is a SEPARATE invocation from the reviewed dry-run. Re-plans
     FRESH against current DB state, parses the reviewed report's token set (fail-closed — see
-    parse_report), and REFUSES (raises ValueError, no partial writes — nothing is flushed
-    before the drift check completes) if the fresh plan contains ANY token absent from the
-    reviewed set. fresh_tokens ⊆ reviewed_tokens is fine (reported under skipped_stale, not
+    parse_report), and REFUSES (raises FallbackRepairDriftError, no partial writes — nothing is
+    flushed before the drift check completes) if the fresh plan contains ANY token absent from
+    the reviewed set. fresh_tokens ⊆ reviewed_tokens is fine (reported under skipped_stale, not
     refused). Executes delete_link -> write_slug -> clear_stamp -> prune_trope in ONE
     transaction (session.flush() between phases so later phases see earlier ones; the caller
     owns commit/rollback via the session context manager, mirroring every other gated tool in
-    this package)."""
+    this package).
+
+    Minor 4 (skipped_stale semantics, matches dedup_backfill's convention — one TOTAL counter,
+    not split per-class): skipped_stale counts EVERY reviewed token that is no longer live by
+    the time it would be applied, from both directions —
+      (a) reviewed tokens already absent from the FRESH plan (the common case: some reviewed
+          rows were already applied, or the underlying data changed enough that this specific
+          row is no longer proposed at all — reviewed ⊃ fresh, i.e. plan shrinkage since
+          review), counted up front from reviewed_tokens - fresh_tokens, per class; PLUS
+      (b) fresh-plan rows that still vanish from the DB between the fresh re-plan above and this
+          row's own apply step (the sub-second race dedup_backfill's skipped_stale also covers),
+          counted by the per-row session.get() misses below.
+    Both are "the operator reviewed/approved this, but it wasn't there to apply" — same bucket,
+    same operator-facing meaning, mirroring dedup_backfill's apply_dedup docstring."""
     reviewed_tokens = parse_report(Path(reviewed_report_path).read_text(encoding="utf-8"))
 
     fresh_plan = plan_fallback_repair(session)
     delta = plan_delta(reviewed_tokens, fresh_plan)
     if any(delta.values()):
-        details = ", ".join(f"{name}: +{len(tokens)}" for name, tokens in delta.items() if tokens)
-        raise ValueError(
-            f"REFUSING apply_fallback_repair: fresh plan drifted from the reviewed report ({details}). "
-            "Re-review a fresh report before applying."
-        )
+        # Minor 5: write the drifted plan out as a fresh report (same shape --repair-fallbacks
+        # writes) so the operator has an immediately re-reviewable artifact, not just a count in
+        # an error message — mirrors clean_catalog.py's --dedup-for-constraints refusal, which
+        # reuses the fresh plan it already wrote rather than making the operator re-run dry-run.
+        fresh_report_path = write_report(fresh_plan)
+        raise FallbackRepairDriftError(delta, fresh_report_path)
 
     from agentic_librarian.scouts.trope_manager import TropeManager
 
     tm = TropeManager(session=session)
+
+    # Minor 4(a): reviewed tokens no longer present in the fresh plan — the shrinkage the
+    # operator's reviewed report promised but the fresh re-plan (computed above, already known
+    # to be a SUBSET check away from a refusal) doesn't contain. fresh ⊆ reviewed is exactly the
+    # non-refusing case reached here, so this is always >= 0 by construction.
+    fresh_tokens = plan_tokens(fresh_plan)
+    shrinkage = sum(
+        len(reviewed_tokens.get(name, set()) - fresh_tokens.get(name, set())) for name in PLAN_TOKEN_CLASSES
+    )
 
     result = {
         "delete_links": 0,
         "write_slugs": 0,
         "clear_stamps": 0,
         "prune_tropes": 0,
-        "skipped_stale": 0,
+        "skipped_stale": shrinkage,
     }
 
     for d in fresh_plan.delete_links:
