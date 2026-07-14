@@ -11,6 +11,9 @@ class _NullManager:
     def standardize_trope(self, *a, **k):
         return None
 
+    def get_or_create_fallback_trope(self, *a, **k):
+        return None
+
     def standardize_style(self, *a, **k):
         return None
 

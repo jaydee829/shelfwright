@@ -8,18 +8,25 @@ pytestmark = pytest.mark.db_integration
 
 
 class _PassthroughTrope:
-    """standardize_trope returns an exact-name Trope (no embedding) so names are assertable."""
+    """standardize_trope/get_or_create_fallback_trope both return an exact-name Trope (no
+    embedding) so names are assertable."""
 
     def __init__(self, session):
         self.session = session
 
-    def standardize_trope(self, name, *a, **k):
+    def _get_or_create(self, name):
         t = self.session.query(Trope).filter_by(name=name).first()
         if t is None:
             t = Trope(name=name)
             self.session.add(t)
             self.session.flush()
         return t
+
+    def standardize_trope(self, name, *a, **k):
+        return self._get_or_create(name)
+
+    def get_or_create_fallback_trope(self, name, *a, **k):
+        return self._get_or_create(name)
 
     def standardize_style(self, *a, **k):
         return None

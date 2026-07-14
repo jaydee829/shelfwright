@@ -418,8 +418,12 @@ def persist_enriched_work(
             if row.get("write_fallback_tropes", True) and not has_real_trope:
                 for tag in all_fallback_tags:
                     for name in clean_trope_name(tag):
+                        # #70: fallback tags map by EXACT cleaned name only — never
+                        # standardize_trope's 0.85 semantic match, which is how mood tags like
+                        # "Dark" landed on real tropes ("The Dark Night of the Soul") and
+                        # flattened every user's trope fingerprint.
                         standardized_trope = _safe_standardize(
-                            trope_manager.standardize_trope, name, label=f"trope {name!r}"
+                            trope_manager.get_or_create_fallback_trope, name, label=f"trope {name!r}"
                         )
                         if standardized_trope is None:
                             continue
