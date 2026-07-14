@@ -68,6 +68,25 @@ def test_neg_trope_distance_select_returns_min_distance_per_work():
     assert "LIMIT" not in sql  # measures every candidate; never truncates
 
 
+@pytest.mark.parametrize(
+    "stmt",
+    [
+        server._trope_rank_select(VEC, IDS, pool_limit=30),
+        server._work_style_rank_select(VEC, IDS, pool_limit=30),
+        server._author_style_rank_select(VEC, IDS, pool_limit=30),
+        server._neg_trope_distance_select(VEC, IDS),
+        *server._neg_style_distance_selects(VEC, IDS),
+    ],
+    ids=["trope_rank", "work_style_rank", "author_style_rank", "neg_trope", "neg_work_style", "neg_author_style"],
+)
+def test_every_distance_aggregate_excludes_null_embeddings(stmt):
+    """A NULL embedding must never reach a distance aggregate: SQL min() over all-NULL
+    distances yields NULL, which lands a Python None in the score maps and TypeErrors the
+    sort. relevance_score is NOT NULL by schema; embeddings are the one nullable input."""
+    sql = _compiled(stmt)
+    assert "embedding IS NOT NULL" in sql
+
+
 def test_merge_min_keeps_best_score_per_work():
     merged = server._merge_min({"a": 0.5, "b": 0.2}, {"a": 0.3, "c": 0.9})
     assert merged == {"a": 0.3, "b": 0.2, "c": 0.9}
