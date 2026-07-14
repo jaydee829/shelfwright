@@ -1,5 +1,7 @@
 from datetime import date
 
+import pytest
+
 from agentic_librarian.imports import parsing
 
 GOODREADS_HEADERS = [
@@ -90,6 +92,78 @@ def test_parse_rows_normalizes_format_rating_date_shelf():
     assert parsed[1].date_completed is None
     assert parsed[1].bad_date is False  # blank date is not "bad"
     assert parsed[1].shelf == "to-read"
+
+
+_DATE_ONLY_MAPPING = {
+    "title": "t",
+    "author": "a",
+    "format": None,
+    "date_completed": "d",
+    "rating": None,
+    "notes": None,
+    "shelf": None,
+}
+
+
+def _parse_one_date(raw: str) -> parsing.ParsedRow:
+    return parsing.parse_rows([{"t": "T", "a": "A", "d": raw}], _DATE_ONLY_MAPPING)[0]
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # Numeric formats (Goodreads, ISO, US — day-first ambiguity resolved as US).
+        ("2024/03/05", date(2024, 3, 5)),
+        ("2024-03-05", date(2024, 3, 5)),
+        ("3/5/2024", date(2024, 3, 5)),  # non-zero-padded
+        ("10/14/2017 16:54", date(2017, 10, 14)),
+        ("10/14/17", date(2017, 10, 14)),  # Excel two-digit year
+        ("10-14-2017", date(2017, 10, 14)),
+        ("10/14/2017 4:54 PM", date(2017, 10, 14)),  # Excel/Sheets 12-hour
+        ("10/14/2017 4:54:02 PM", date(2017, 10, 14)),
+        # Month-name formats. Libby's "timestamp" is "October 14, 2017 0:34" (naive local
+        # time, non-zero-padded hour); only the calendar date matters (user report 2026-07-14).
+        ("October 14, 2017 0:34", date(2017, 10, 14)),
+        ("November 06, 2017", date(2017, 11, 6)),
+        ("Oct 14, 2017 16:54", date(2017, 10, 14)),
+        ("Oct 14, 2017", date(2017, 10, 14)),
+        ("October 14 2017", date(2017, 10, 14)),  # comma stripped by a spreadsheet
+        ("Oct 14 2017", date(2017, 10, 14)),
+        ("14 October 2017", date(2017, 10, 14)),  # written-out European (month name is unambiguous)
+        ("14 Oct 2017", date(2017, 10, 14)),
+        ("14-Oct-2017", date(2017, 10, 14)),  # Excel DD-MMM-YYYY
+        # Machine ISO-8601 timestamps.
+        ("2017-10-14 16:54:02", date(2017, 10, 14)),
+        ("2017-10-14 16:54", date(2017, 10, 14)),
+        ("2017-10-14T16:54:02", date(2017, 10, 14)),
+        ("2017-10-14T16:54:02Z", date(2017, 10, 14)),
+        ("2017-10-14T16:54:02.123+02:00", date(2017, 10, 14)),
+        ("2017-10-14 16:54:02.123456", date(2017, 10, 14)),
+    ],
+)
+def test_parse_rows_accepts_known_date_formats(raw, expected):
+    p = _parse_one_date(raw)
+    assert p.date_completed == expected
+    assert p.bad_date is False
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not a date",
+        "2999-01-01",  # future
+        "October 14, 2999 0:34",  # future, datetime-bearing
+        "14 days",  # Libby "details" column — a mis-mapping must be loud
+        "5",  # a rating cell; dateutil would fill in today's year+month (why we don't use it)
+        "2017",  # bare year — must not resolve to an invented month/day
+        "20171014",  # undelimited digits — reject rather than guess
+        "9781524722166",  # ISBN
+    ],
+)
+def test_parse_rows_flags_unusable_dates(raw):
+    p = _parse_one_date(raw)
+    assert p.date_completed is None
+    assert p.bad_date is True
 
 
 def test_parse_rows_flags_future_and_unparseable_dates_and_defaults_format():

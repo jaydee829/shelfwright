@@ -3,6 +3,7 @@ test-value surface, where Goodreads/generic format variability lives."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 
@@ -43,6 +44,38 @@ _BINDING_TO_FORMAT = {
     "audible audio": "audiobook",
     "audio": "audiobook",
 }
+
+
+# Completion-date formats, tried in order. A deterministic explicit list, NOT dateutil:
+# users can map any column here, and dateutil fills missing components from today's date
+# (a mis-mapped rating cell "5" becomes the 5th of this month) — a wrong mapping must
+# surface as bad_date in the report, never as plausible invented dates. Datetime-bearing
+# formats (Libby exports "October 14, 2017 0:34") are truncated to the calendar date —
+# the time-of-day and its unstated timezone are irrelevant here.
+_DATE_FORMATS = (
+    # Numeric: Goodreads, ISO date, US (day-first ambiguity is resolved as US).
+    "%Y/%m/%d",
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%m/%d/%Y %H:%M",
+    "%m/%d/%Y %I:%M %p",
+    "%m/%d/%Y %I:%M:%S %p",
+    "%m/%d/%y",
+    "%m-%d-%Y",
+    # Month-name: Libby timestamps, written-out dates, Excel DD-MMM-YYYY.
+    "%B %d, %Y %H:%M",
+    "%B %d, %Y",
+    "%b %d, %Y %H:%M",
+    "%b %d, %Y",
+    "%B %d %Y",
+    "%b %d %Y",
+    "%d %B %Y",
+    "%d %b %Y",
+    "%d-%b-%Y",
+)
+
+# Gate for the fromisoformat fallback: a full YYYY-MM-DD prefix followed by a time part.
+_ISO_DATETIME_PREFIX = re.compile(r"\d{4}-\d{2}-\d{2}[T ]")
 
 
 @dataclass
@@ -97,15 +130,24 @@ def _parse_date(text: str) -> tuple[date | None, bool]:
     unusable (unparseable or in the future). A blank string is (None, False)."""
     if not text:
         return None, False
-    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%m/%d/%Y"):
+    d = None
+    for fmt in _DATE_FORMATS:
         try:
             d = datetime.strptime(text, fmt).date()
+            break
         except ValueError:
             continue
-        if d > date.today():
-            return None, True
-        return d, False
-    return None, True
+    if d is None and _ISO_DATETIME_PREFIX.match(text):
+        # Machine ISO-8601 timestamps ('T' separator, offsets/'Z', fractional seconds) via
+        # fromisoformat. The full-date prefix guard keeps it from resolving fragments like
+        # "2017" or "20171014" — a partial cell must stay bad_date, never an invented date.
+        try:
+            d = datetime.fromisoformat(text).date()
+        except ValueError:
+            d = None
+    if d is None or d > date.today():
+        return None, True
+    return d, False
 
 
 def _parse_rating(text: str) -> int | None:
