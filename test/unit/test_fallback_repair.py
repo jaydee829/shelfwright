@@ -261,14 +261,30 @@ def _sample_plan() -> FallbackRepairPlan:
     )
 
 
-def test_token_round_trip_format_parse_equal(tmp_path):
+@pytest.mark.parametrize(
+    "db_target",
+    [None, "…@prod-host/shelfwright"],
+    ids=["no_db_target", "with_db_target_header"],
+)
+def test_token_round_trip_format_parse_equal(tmp_path, db_target):
+    """The optional `db target: ...` header (final whole-branch review fix, DB-target
+    visibility) is written ABOVE the '== PLAN TOKENS ==' block as a plain human-readable
+    line — parse_report's fail-closed parser only looks between the start/end markers, so
+    the header must never appear in (or otherwise corrupt) the parsed token set."""
     plan = _sample_plan()
     expected = plan_tokens(plan)
 
-    report_path = write_report(plan, reports_dir=tmp_path)
-    parsed = parse_report(report_path.read_text(encoding="utf-8"))
+    report_path = write_report(plan, reports_dir=tmp_path, db_target=db_target)
+    report_text = report_path.read_text(encoding="utf-8")
+    parsed = parse_report(report_text)
 
     assert parsed == expected
+    if db_target is not None:
+        assert f"db target: {db_target}" in report_text.splitlines()
+        # the header line must land before the token block, never inside it
+        header_line_idx = report_text.splitlines().index(f"db target: {db_target}")
+        token_start_idx = report_text.splitlines().index("== PLAN TOKENS ==")
+        assert header_line_idx < token_start_idx
 
 
 @pytest.mark.parametrize(

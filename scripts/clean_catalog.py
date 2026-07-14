@@ -213,9 +213,17 @@ def _warm_fallback_repair_embeddings(manager: DatabaseManager) -> None:
         get_cached_embedding(EMBED_MODEL, name)
 
 
-def _run_repair_fallbacks(manager: DatabaseManager) -> int:
+def _run_repair_fallbacks(manager: DatabaseManager, safe: str) -> int:
     """--repair-fallbacks: dry-run plan only, never applies. Warms BEFORE opening the work
-    session — see _warm_fallback_repair_embeddings."""
+    session — see _warm_fallback_repair_embeddings.
+
+    DB-target visibility (final whole-branch review fix): this mode branches out of main()
+    before the shared session block that prints `DB target: ...` for every other mode, so
+    without this line it silently never told the operator which database it planned
+    against. Print the exact same redacted `safe` string the shared block uses (built once in
+    main() from `url.split("@")[-1]`) — never re-derive it here, so the redaction stays in
+    exactly one place."""
+    print(f"DB target: …@{safe}")
     _warm_fallback_repair_embeddings(manager)
 
     with manager.get_session() as session:
@@ -238,7 +246,7 @@ def _run_repair_fallbacks(manager: DatabaseManager) -> int:
         for p in plan.prune_tropes[:10]:
             print(f"  trope={p.trope_id}  ({p.trope_name!r})")
 
-        report_path = fallback_repair.write_report(plan)
+        report_path = fallback_repair.write_report(plan, db_target=safe)
         print(f"\nfull plan (every token) written to {report_path} — review this before approving --apply.")
         print(f"\napply with: --repair-fallbacks-apply --yes --report {report_path}")
         return 0
@@ -247,7 +255,13 @@ def _run_repair_fallbacks(manager: DatabaseManager) -> int:
 def _run_repair_fallbacks_apply(manager: DatabaseManager, args, url: str, safe: str) -> int:
     """--repair-fallbacks-apply: guards first (no session needed for those), THEN warms in its
     own short session, THEN opens the work session that re-plans fresh and applies — see
-    _warm_fallback_repair_embeddings."""
+    _warm_fallback_repair_embeddings.
+
+    DB-target visibility (final whole-branch review fix): same rationale as
+    _run_repair_fallbacks — this mode also branches out of main() before the shared
+    `DB target: ...` print, so print it here too, before the --yes/prod-url/--report guards,
+    so the operator sees which DB was targeted even on an early refusal."""
+    print(f"DB target: …@{safe}")
     if not args.yes:
         print("\nREFUSING --repair-fallbacks-apply without --yes.")
         return 2
@@ -386,7 +400,7 @@ def main(argv: list[str] | None = None) -> int:
     # `with manager.get_session()` block every other mode shares, precisely so these two modes
     # never touch that shared session at all.
     if args.repair_fallbacks:
-        return _run_repair_fallbacks(manager)
+        return _run_repair_fallbacks(manager, safe)
     if args.repair_fallbacks_apply:
         return _run_repair_fallbacks_apply(manager, args, url, safe)
 

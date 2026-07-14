@@ -36,6 +36,21 @@ than over-deletes, so it is safe by construction, but it means a re-run of this 
 guaranteed to converge on removing every historical pollution link in one pass; some residual
 junk can persist indefinitely without ever tripping the distinguisher again.
 
+A third residual, operational rather than algorithmic (final whole-branch review finding — name
+it honestly too): deploy the fixed writer (D1, TropeManager.get_or_create_fallback_trope) BEFORE
+running this repair, not after. If the OLD fallback writer is still serving traffic while
+--repair-fallbacks-apply runs (or in the gap between apply and deploy), it can mint a brand-new
+bogus semantic-redirect link mid-apply. Once this repair's write_slug phase has ALREADY created
+the exact-name slug trope for that same work's tag (the ordinary, correct write_slug outcome),
+`_nearest_trope_by_name`'s exact-name-match short-circuit (see its docstring) means every FUTURE
+re-plan treats that tag name as a legitimate slug and never calls bogus_targets/get_cached_
+embedding for it again — the new bogus link is permanently invisible to this tool's distinguisher
+from that point on. This is fail-safe in the same direction as the second residual above (under-
+delete, never over-delete: the bogus link just sits there, linked, forever) but it never
+converges away on its own, no matter how many times the repair is re-run. The only fix is
+ordering: land and deploy the fixed writer FIRST, confirm it is actually serving (not mid-rollout)
+THEN run --repair-fallbacks / --repair-fallbacks-apply.
+
 Four action classes, one plan (mirrors etl/dedup_backfill.py's op-tagged token gate EXACTLY —
 see plan_id_set's docstring there for why the op-tag is load-bearing, not cosmetic):
 
@@ -390,10 +405,22 @@ def plan_delta(reviewed: dict[str, set[str]], fresh: FallbackRepairPlan) -> dict
 # --------------------------------------------------------------------------------------------
 
 
-def write_report(plan: FallbackRepairPlan, reports_dir: Path | None = None) -> Path:
+def write_report(plan: FallbackRepairPlan, reports_dir: Path | None = None, db_target: str | None = None) -> Path:
     """Every token in the plan, always written (dry-run AND apply) — this file is what the
     operator reviews before approving --repair-fallbacks-apply (THE USER GATE). Microsecond
-    timestamp resolution, same collision-avoidance reasoning as _write_dedup_report."""
+    timestamp resolution, same collision-avoidance reasoning as _write_dedup_report.
+
+    db_target (final whole-branch review fix — DB-target visibility): the same redacted
+    `safe` string scripts/clean_catalog.py prints as `DB target: ...` for every other mode,
+    passed through so the report FILE also records which database the plan was made against
+    — not just the operator's terminal. Written as a plain human-readable header line ABOVE
+    the '== PLAN TOKENS ==' block, never inside it: parse_report's fail-closed parser only
+    looks at lines between the start/end markers (see below), so this line is invisible to it
+    by construction and cannot be mistaken for a token — verified by
+    test_token_round_trip_format_parse_equal, which asserts a report carrying this header
+    line still round-trips to the exact same token set. Optional (defaults to None / omitted)
+    so existing callers that construct a report without a DB context (e.g. unit tests) are
+    unaffected."""
     reports_dir = reports_dir or Path("data/reports")
     reports_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now(UTC)
@@ -401,6 +428,9 @@ def write_report(plan: FallbackRepairPlan, reports_dir: Path | None = None) -> P
     path = reports_dir / f"fallback-repair-{ts}.txt"
 
     lines: list[str] = [f"Fallback-repair plan report — {ts}", "=" * 60, ""]
+    if db_target is not None:
+        lines.append(f"db target: {db_target}")
+        lines.append("")
 
     lines.append(f"delete_links: {len(plan.delete_links)} links (NULL-justified, recomputed-bogus)")
     for d in plan.delete_links:
