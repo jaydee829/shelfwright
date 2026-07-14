@@ -129,8 +129,10 @@ def db_health_check(user: AuthenticatedUser = Depends(get_current_user)):  # noq
 
 def _ranked_tropes(work_tropes):
     """Real scout tropes (justified) outrank genre/mood slug fallbacks (justification is
-    NULL, default relevance 1.0) — otherwise slugs crowd every display list (#70)."""
-    return sorted(work_tropes, key=lambda wt: (wt.justification is None, -wt.relevance_score, wt.trope.name))
+    NULL, default relevance 1.0) — otherwise slugs crowd every display list (#70).
+    The sort touches wt.trope.name for EVERY link: callers must eager-load
+    WorkTrope.trope (both current call sites do) or this becomes an N+1."""
+    return sorted(work_tropes, key=lambda wt: (wt.justification is None, -wt.relevance_score, wt.trope.name.lower()))
 
 
 def _history_item(h) -> dict:

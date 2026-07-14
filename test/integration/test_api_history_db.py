@@ -122,6 +122,44 @@ def test_history_includes_genre_and_top_three_tropes(two_user_client, db_url):
     assert row["tropes"] == ["Antihero", "Found Family", "Heist"]  # top 3, score desc; "Low Score" dropped
 
 
+def test_history_top_tropes_prefer_justified_over_slug_fallbacks(two_user_client, db_url):
+    """#70 display fix: slug fallbacks carry default relevance 1.0 with NULL justification;
+    real scout tropes (justified, lower relevance) must still win the top-3."""
+    from agentic_librarian.db.models import Trope, WorkTrope
+
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author = AuthorModel(name="Slugged Author")
+        work = Work(
+            title="Slugged Book",
+            genres=["Fantasy"],
+            moods=["Dark", "Sad"],
+            contributors=[WorkContributor(author=author, role="Author")],
+        )
+        edition = Edition(work=work, format="ebook")
+        session.add_all([author, work, edition])
+        session.flush()
+        links = [
+            ("Dark", 1.0, None),  # slug fallbacks: NULL justification, default relevance
+            ("Sad", 1.0, None),
+            ("Fantasy", 1.0, None),
+            ("Heist Gone Wrong", 0.70, "the vault job unravels"),  # real scout tropes
+            ("Reluctant Mentor", 0.90, "trains the thief against his will"),
+        ]
+        for name, score, just in links:
+            trope = Trope(name=name)
+            session.add(trope)
+            session.flush()
+            session.add(WorkTrope(work_id=work.id, trope_id=trope.id, relevance_score=score, justification=just))
+        session.add(ReadingHistory(edition_id=edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2026, 1, 3)))
+        session.flush()
+
+    rows = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com").get("/history").json()
+    row = next(r for r in rows if r["title"] == "Slugged Book")
+    # Both justified tropes lead (relevance desc) despite lower scores; ONE slug fills slot 3.
+    assert row["tropes"] == ["Reluctant Mentor", "Heist Gone Wrong", "Dark"]
+
+
 def test_history_no_tropes_returns_empty_list(two_user_client):
     rows = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com").get("/history").json()
     shared = next(r for r in rows if r["title"] == "Shared Book")
