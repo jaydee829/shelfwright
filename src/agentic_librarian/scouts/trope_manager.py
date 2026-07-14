@@ -61,3 +61,21 @@ class TropeManager:
         self.session.flush()  # Ensure ID is populated for the caller
         # We don't commit here, let the caller handle it or use a flush
         return new_trope
+
+    def get_or_create_fallback_trope(self, name: str) -> Trope:
+        """Exact-name-only get-or-create for genre/mood fallback tags (#70): NEVER a semantic
+        match — the 0.85 redirect is how mood tags like 'Dark' polluted real tropes
+        ('The Dark Night of the Soul'). The slug trope still gets an embedding so
+        genre/mood-as-trope matching keeps working; it just cannot land on a real trope."""
+        # 1. Exact Name Match (do NOT update description — this is a slug tag, not a scout trope)
+        existing = self.session.query(Trope).filter(Trope.name == name).first()
+        if existing:
+            return existing
+
+        # 2. Create New — no semantic-similarity step, mirrors standardize_trope's creation
+        # branch's flush discipline so the caller gets a populated id.
+        embedding = self._get_embedding(name)
+        new_trope = Trope(name=name, embedding=embedding)
+        self.session.add(new_trope)
+        self.session.flush()
+        return new_trope

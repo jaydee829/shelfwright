@@ -10,10 +10,14 @@
   python scripts/clean_catalog.py --dedup-for-constraints --dry-run
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes --report data/reports/dedup-<ts>.txt
+  python scripts/clean_catalog.py --repair-fallbacks --dry-run
+  python scripts/clean_catalog.py --repair-fallbacks-apply --yes --report data/reports/fallback-repair-<ts>.txt
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
 --dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
-the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted."""
+the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted.
+--repair-fallbacks-apply likewise re-plans fresh and refuses on any drift from --report (required,
+no default — GH #70)."""
 
 from __future__ import annotations
 
@@ -26,8 +30,9 @@ from sqlalchemy import func
 
 from agentic_librarian.db.models import Trope, Work
 from agentic_librarian.db.session import DatabaseManager, resolve_database_url
-from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, trope_backfill
+from agentic_librarian.etl import contributor_dedup, dedup_backfill, enrichment_sweep, fallback_repair, trope_backfill
 from agentic_librarian.etl.tag_backfill import is_prod_url
+from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
 
 
 def _write_dedup_report(plan) -> Path:
@@ -194,6 +199,114 @@ def _refuse(args, url, safe) -> int | None:
     return None
 
 
+def _warm_fallback_repair_embeddings(manager: DatabaseManager) -> None:
+    """Fix 2 (#123, honestly this time): a SHORT, DEDICATED session collects the cleaned
+    genre/mood names that would actually need an embedding lookup (warm_fallback_repair_texts
+    already excludes exact-name matches — Minor 7, see its docstring), and that session is
+    CLOSED before the warm loop below makes any embedding network call. Only once warming is
+    complete does the caller open the work session that runs plan/apply_fallback_repair — so no
+    embedding call is ever made while a work session sits open, honoring #123 in fact, not just
+    in a docstring's claim."""
+    with manager.get_session() as warm_session:
+        names = fallback_repair.warm_fallback_repair_texts(warm_session)
+    for name in names:
+        get_cached_embedding(EMBED_MODEL, name)
+
+
+def _run_repair_fallbacks(manager: DatabaseManager, safe: str) -> int:
+    """--repair-fallbacks: dry-run plan only, never applies. Warms BEFORE opening the work
+    session — see _warm_fallback_repair_embeddings.
+
+    DB-target visibility (final whole-branch review fix): this mode branches out of main()
+    before the shared session block that prints `DB target: ...` for every other mode, so
+    without this line it silently never told the operator which database it planned
+    against. Print the exact same redacted `safe` string the shared block uses (built once in
+    main() from `url.split("@")[-1]`) — never re-derive it here, so the redaction stays in
+    exactly one place."""
+    print(f"DB target: …@{safe}")
+    _warm_fallback_repair_embeddings(manager)
+
+    with manager.get_session() as session:
+        plan = fallback_repair.plan_fallback_repair(session)
+        summary = plan.summary()
+        print("\n=== repair-fallbacks plan (THE USER GATE, GH #70) ===")
+        for key, count in summary.items():
+            print(f"  {key:32} {count}")
+
+        print("\n--- delete_links samples ---")
+        for d in plan.delete_links[:10]:
+            print(f"  work={d.work_id}  trope={d.trope_id}  ({d.trope_name!r})")
+        print("--- write_slugs samples ---")
+        for w in plan.write_slugs[:10]:
+            print(f"  work={w.work_id}  slug={w.trope_name!r}")
+        print("--- clear_stamps samples ---")
+        for c in plan.clear_stamps[:10]:
+            print(f"  work={c.work_id}")
+        print("--- prune_tropes samples ---")
+        for p in plan.prune_tropes[:10]:
+            print(f"  trope={p.trope_id}  ({p.trope_name!r})")
+
+        report_path = fallback_repair.write_report(plan, db_target=safe)
+        print(f"\nfull plan (every token) written to {report_path} — review this before approving --apply.")
+        print(f"\napply with: --repair-fallbacks-apply --yes --report {report_path}")
+        return 0
+
+
+def _run_repair_fallbacks_apply(manager: DatabaseManager, args, url: str, safe: str) -> int:
+    """--repair-fallbacks-apply: guards first (no session needed for those), THEN warms in its
+    own short session, THEN opens the work session that re-plans fresh and applies — see
+    _warm_fallback_repair_embeddings.
+
+    DB-target visibility (final whole-branch review fix): same rationale as
+    _run_repair_fallbacks — this mode also branches out of main() before the shared
+    `DB target: ...` print, so print it here too, before the --yes/prod-url/--report guards,
+    so the operator sees which DB was targeted even on an early refusal."""
+    print(f"DB target: …@{safe}")
+    if not args.yes:
+        print("\nREFUSING --repair-fallbacks-apply without --yes.")
+        return 2
+    if not is_prod_url(url):
+        print(f"\nREFUSING --repair-fallbacks-apply: '{safe}' is not a live prod DB (sqlite/backup/localhost).")
+        return 2
+    if args.report is None:
+        print(
+            "\nREFUSING --repair-fallbacks-apply: --report is required (no default — "
+            "name the reviewed --repair-fallbacks dry-run report explicitly)."
+        )
+        return 1
+
+    # #123: same warm-before-session discipline as the dry-run path — apply_fallback_repair
+    # re-plans fresh internally, so its bogus_targets lookups must find warmed cache hits.
+    _warm_fallback_repair_embeddings(manager)
+
+    with manager.get_session() as session:
+        try:
+            applied = fallback_repair.apply_fallback_repair(session, args.report)
+        except fallback_repair.FallbackRepairDriftError as exc:
+            # Minor 5: mirrors clean_catalog.py's --dedup-for-constraints refusal — print the
+            # offending delta TOKENS (not just per-class counts) so the operator can see exactly
+            # which rows are new, plus the fresh report path already written for re-review.
+            print(f"\nREFUSING --repair-fallbacks-apply: {exc}")
+            print("New tokens present in the fresh plan but NOT in the reviewed report:")
+            for class_name in fallback_repair.PLAN_TOKEN_CLASSES:
+                new_tokens = sorted(exc.delta.get(class_name, set()))
+                if new_tokens:
+                    print(f"  [{class_name}] +{len(new_tokens)}: {new_tokens}")
+            print(
+                f"\nre-review {exc.fresh_report_path}, then re-run "
+                f"--repair-fallbacks-apply --yes --report {exc.fresh_report_path}"
+            )
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"\nREFUSING --repair-fallbacks-apply: {exc}")
+            return 1
+
+        print("\napplied:")
+        for key, count in applied.items():
+            print(f"  {key:32} {count}")
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Dedup contributors / clean trope names.")
     ap.add_argument("--inventory", action="store_true")
@@ -234,6 +347,32 @@ def main(argv: list[str] | None = None) -> int:
             "review) is fine and applies normally (ordinary skipped_stale)."
         ),
     )
+    ap.add_argument(
+        "--repair-fallbacks",
+        action="store_true",
+        help=(
+            "GH #70 (PR-D part 2): dry-run plan for the fallback-pollution repair — deletes "
+            "NULL-justified work_tropes links that are a deterministic recompute of the OLD "
+            "fallback writer's semantic redirect (see etl/fallback_repair.py's module "
+            "docstring for the distinguisher), restores exact-name slug fallbacks on works left "
+            "tropeless, clears falsely-backfilled deep_enriched_at stamps, and prunes orphaned "
+            "tropes. Writes data/reports/fallback-repair-<UTC timestamp>.txt for review — this "
+            "flag never applies; use --repair-fallbacks-apply for that."
+        ),
+    )
+    ap.add_argument(
+        "--repair-fallbacks-apply",
+        action="store_true",
+        help=(
+            "Apply the fallback-pollution repair (GH #70). A SEPARATE invocation from the "
+            "reviewed --repair-fallbacks dry-run: re-plans from scratch and REFUSES (exit 1) if "
+            "the fresh plan contains any token the operator never reviewed (op-tagged, so even "
+            "an operation flip on the same ids counts) — see etl/fallback_repair.py's "
+            "apply_fallback_repair. Requires --yes and --report (no default, unlike "
+            "--dedup-for-constraints — this is a distinct destructive operation and must name "
+            "its reviewed report explicitly)."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
@@ -242,9 +381,10 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help=(
-            "--dedup-for-constraints --apply only: path to the reviewed dry-run report to "
+            "--dedup-for-constraints --apply: path to the reviewed dry-run report to "
             "cross-check the fresh plan against (THE USER GATE). Defaults to the newest "
-            "data/reports/dedup-*.txt — the tool prints which one it used."
+            "data/reports/dedup-*.txt — the tool prints which one it used. "
+            "--repair-fallbacks-apply: same idea, but REQUIRED (no default)."
         ),
     )
     args = ap.parse_args(argv)
@@ -252,6 +392,17 @@ def main(argv: list[str] | None = None) -> int:
     url = resolve_database_url()
     safe = url.split("@")[-1] if "@" in url else url  # never print credentials
     manager = DatabaseManager(url)
+
+    # Fix 2 (#123, honestly): --repair-fallbacks / --repair-fallbacks-apply run OUTSIDE the
+    # shared session block below — each warms its embeddings in its own short session (closed
+    # before any embedding network call) and then opens its OWN work session for plan/apply, so
+    # no embedding call is ever made while a work session is open. Handled here, before the
+    # `with manager.get_session()` block every other mode shares, precisely so these two modes
+    # never touch that shared session at all.
+    if args.repair_fallbacks:
+        return _run_repair_fallbacks(manager, safe)
+    if args.repair_fallbacks_apply:
+        return _run_repair_fallbacks_apply(manager, args, url, safe)
 
     with manager.get_session() as session:
         print(f"DB target: …@{safe}")
@@ -435,7 +586,8 @@ def main(argv: list[str] | None = None) -> int:
 
         print(
             "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
-            "--requeue-unenriched, or --dedup-for-constraints."
+            "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, or "
+            "--repair-fallbacks-apply."
         )
         return 1
 
