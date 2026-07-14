@@ -80,9 +80,37 @@ def test_adk_librarian_checks_history_before_import():
 
 
 def test_adk_librarian_defaults_to_three_recommendations():
-    # A2: count pinned in the orchestrator instruction so Gemini stops returning a single pick.
+    # A2/#125: count pinned in the orchestrator instruction so Gemini stops returning a single
+    # pick; scoped to the WHEN-presenting step, not an unconditional per-message mandate.
     mesh = create_agent_mesh()
-    assert "3 recommendations by default" in mesh["librarian"].instruction
+    text = mesh["librarian"].instruction
+    assert "WHEN you present recommendations" in text
+    assert "3 by default" in text
+
+
+def test_adk_librarian_no_longer_mandates_recs_every_message():
+    # #125 anti-regression: the old unconditional "PRESENT 3 recommendations by default" step
+    # forced a fresh rec set on every turn, including pure feedback turns.
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    assert "PRESENT 3 recommendations by default" not in text
+
+
+def test_adk_librarian_has_the_conversational_charter():
+    mesh = create_agent_mesh()
+    text = mesh["librarian"].instruction
+    assert "CONVERSATIONAL CHARTER" in text
+    assert "a turn may legitimately contain ZERO recommendations" in " ".join(text.split())
+    assert "MULTIPLE ROUNDS" in text
+
+
+def test_adk_librarian_instruction_is_the_extracted_constant():
+    # #125: extracted to a module constant so tests can assert charter parity without
+    # constructing an LlmAgent.
+    from agentic_librarian.agents.services import ADK_LIBRARIAN_INSTRUCTION
+
+    mesh = create_agent_mesh()
+    assert mesh["librarian"].instruction == ADK_LIBRARIAN_INSTRUCTION
 
 
 def test_critic_has_the_recommendation_candidates_tool():
