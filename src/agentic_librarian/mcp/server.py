@@ -103,12 +103,15 @@ _EXCLUDE_DEMOTE_DISTANCE = 0.35  # candidates this close to a negative rank belo
 
 def _trope_rank_select(query_vector, trope_ids, pool_limit: int, exclude_work_ids=None):
     """Works ranked by their best-matching trope: cosine distance to the query vector,
-    penalized for low link relevance (relevance 1.0 → ×1, relevance 0.0 → ×2)."""
+    penalized for low link relevance (relevance 1.0 → ×1, relevance 0.0 → ×2).
+    embedding IS NOT NULL everywhere a distance is aggregated: an unembedded trope can't
+    be semantically near anything, and a NULL distance surviving into min() would put a
+    Python None into the score maps (relevance_score itself is NOT NULL by schema)."""
     score = func.min(Trope.embedding.cosine_distance(query_vector) * (2.0 - WorkTrope.relevance_score)).label("score")
     stmt = (
         select(WorkTrope.work_id, score)
         .join(Trope, Trope.id == WorkTrope.trope_id)
-        .where(WorkTrope.trope_id.in_(trope_ids))
+        .where(WorkTrope.trope_id.in_(trope_ids), Trope.embedding.isnot(None))
     )
     if exclude_work_ids:
         stmt = stmt.where(WorkTrope.work_id.notin_(exclude_work_ids))
@@ -120,7 +123,7 @@ def _work_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_wo
     stmt = (
         select(WorkStyle.work_id, score)
         .join(Style, Style.id == WorkStyle.style_id)
-        .where(WorkStyle.style_id.in_(style_ids))
+        .where(WorkStyle.style_id.in_(style_ids), Style.embedding.isnot(None))
     )
     if exclude_work_ids:
         stmt = stmt.where(WorkStyle.work_id.notin_(exclude_work_ids))
@@ -134,7 +137,7 @@ def _author_style_rank_select(query_vector, style_ids, pool_limit: int, exclude_
         .join(Author, Author.id == WorkContributor.author_id)
         .join(AuthorStyle, AuthorStyle.author_id == Author.id)
         .join(Style, Style.id == AuthorStyle.style_id)
-        .where(AuthorStyle.style_id.in_(style_ids))
+        .where(AuthorStyle.style_id.in_(style_ids), Style.embedding.isnot(None))
     )
     if exclude_work_ids:
         stmt = stmt.where(WorkContributor.work_id.notin_(exclude_work_ids))
@@ -147,7 +150,7 @@ def _neg_trope_distance_select(query_vector, work_ids):
     return (
         select(WorkTrope.work_id, func.min(Trope.embedding.cosine_distance(query_vector)))
         .join(Trope, Trope.id == WorkTrope.trope_id)
-        .where(WorkTrope.work_id.in_(work_ids))
+        .where(WorkTrope.work_id.in_(work_ids), Trope.embedding.isnot(None))
         .group_by(WorkTrope.work_id)
     )
 
@@ -156,7 +159,7 @@ def _neg_style_distance_selects(query_vector, work_ids):
     work_arm = (
         select(WorkStyle.work_id, func.min(Style.embedding.cosine_distance(query_vector)))
         .join(Style, Style.id == WorkStyle.style_id)
-        .where(WorkStyle.work_id.in_(work_ids))
+        .where(WorkStyle.work_id.in_(work_ids), Style.embedding.isnot(None))
         .group_by(WorkStyle.work_id)
     )
     author_arm = (
@@ -164,7 +167,7 @@ def _neg_style_distance_selects(query_vector, work_ids):
         .join(Author, Author.id == WorkContributor.author_id)
         .join(AuthorStyle, AuthorStyle.author_id == Author.id)
         .join(Style, Style.id == AuthorStyle.style_id)
-        .where(WorkContributor.work_id.in_(work_ids))
+        .where(WorkContributor.work_id.in_(work_ids), Style.embedding.isnot(None))
         .group_by(WorkContributor.work_id)
     )
     return work_arm, author_arm
@@ -256,6 +259,7 @@ def search_internal_database(
             trope_ids = [
                 t.id
                 for t in session.query(Trope)
+                .filter(Trope.embedding.isnot(None))
                 .order_by(Trope.embedding.cosine_distance(avg_vector))
                 .limit(_POOL_NEAREST_TAGS)
                 .all()
@@ -271,6 +275,7 @@ def search_internal_database(
             style_ids = [
                 s.id
                 for s in session.query(Style)
+                .filter(Style.embedding.isnot(None))
                 .order_by(Style.embedding.cosine_distance(avg_style_vector))
                 .limit(_POOL_NEAREST_TAGS)
                 .all()
