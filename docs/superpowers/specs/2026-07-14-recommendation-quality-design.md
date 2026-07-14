@@ -162,8 +162,11 @@ Two changes, both non-destructive (aggregation-only — no data touched):
 
 A → B → C are independent of D and ship the visible fix (the #125 session replayed
 against A+B+C would have honored "less fantasy, more thriller or romantasy"). D makes the
-data honest; after D, PR-C's justified-only filter becomes redundant but harmless (all
-surviving links carry real provenance or are exact-name slugs excluded by lift anyway).
+data honest; after D, PR-C's justified-only filter keeps excluding D's exact-name slug
+links (NULL-justified by design) from taste profiles while retrieval still matches
+through them. One residual the filter never recovers: real scout links that were saved
+with NULL justification stay under-counted permanently — D's repair deliberately spares
+links that aren't re-derivable from genres/moods, so it cannot backfill their provenance.
 The sweep runs last so re-enriched works land on the fixed write path.
 
 ## Out of scope

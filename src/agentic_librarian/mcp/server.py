@@ -842,9 +842,11 @@ def get_user_trope_preferences(limit: int = 20) -> list[str]:
     genuine over-indexed favorites at the top while deflating tropes that are merely
     ubiquitous (fallback-pollution attractors — see #125/#70).
 
-    Known, accepted limitation: legacy real scout links saved before justification was
-    tracked have NULL justification and are under-counted here until PR-D's data repair
-    backfills them; they are indistinguishable from pollution without that repair.
+    Known, accepted limitation: real scout links with NULL justification (saved before
+    justification was tracked) are under-counted here PERMANENTLY — the #70 repair
+    deliberately spares them (it deletes only links re-derivable from the work's
+    genres/moods), so they remain NULL-justified and invisible to this aggregation.
+    Acceptable for a preference ranking; revisit only if legacy-heavy profiles look thin.
     """
     user_id = get_required_user_id()
     with db_manager.get_session() as session:
