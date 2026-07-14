@@ -92,6 +92,54 @@ def test_parse_rows_normalizes_format_rating_date_shelf():
     assert parsed[1].shelf == "to-read"
 
 
+def test_parse_rows_accepts_datetime_bearing_and_month_name_dates():
+    # Libby exports a "timestamp" column like "October 14, 2017 0:34" (naive local time,
+    # non-zero-padded hour); only the calendar date matters (GH user report 2026-07-14).
+    mapping = {
+        "title": "t",
+        "author": "a",
+        "format": None,
+        "date_completed": "d",
+        "rating": None,
+        "notes": None,
+        "shelf": None,
+    }
+    rows = [
+        {"t": "Libby Timestamp", "a": "X", "d": "October 14, 2017 0:34"},
+        {"t": "Month Name Only", "a": "X", "d": "November 06, 2017"},
+        {"t": "Abbrev Month", "a": "X", "d": "Oct 14, 2017"},
+        {"t": "US Datetime", "a": "X", "d": "10/14/2017 16:54"},
+        {"t": "ISO Datetime", "a": "X", "d": "2017-10-14 16:54:02"},
+    ]
+    parsed = parsing.parse_rows(rows, mapping)
+    expected = [
+        date(2017, 10, 14),
+        date(2017, 11, 6),
+        date(2017, 10, 14),
+        date(2017, 10, 14),
+        date(2017, 10, 14),
+    ]
+    for p, want in zip(parsed, expected, strict=True):
+        assert p.date_completed == want, p.raw_title
+        assert p.bad_date is False, p.raw_title
+
+
+def test_parse_rows_flags_future_datetime_bearing_dates():
+    mapping = {
+        "title": "t",
+        "author": "a",
+        "format": None,
+        "date_completed": "d",
+        "rating": None,
+        "notes": None,
+        "shelf": None,
+    }
+    rows = [{"t": "Future Libby", "a": "X", "d": "October 14, 2999 0:34"}]
+    parsed = parsing.parse_rows(rows, mapping)
+    assert parsed[0].date_completed is None
+    assert parsed[0].bad_date is True
+
+
 def test_parse_rows_flags_future_and_unparseable_dates_and_defaults_format():
     mapping = {
         "title": "t",

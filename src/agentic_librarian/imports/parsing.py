@@ -97,7 +97,20 @@ def _parse_date(text: str) -> tuple[date | None, bool]:
     unusable (unparseable or in the future). A blank string is (None, False)."""
     if not text:
         return None, False
-    for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%m/%d/%Y"):
+    # Datetime-bearing formats (Libby exports "October 14, 2017 0:34") are truncated to
+    # the calendar date — the time-of-day and its unstated timezone are irrelevant here.
+    for fmt in (
+        "%Y/%m/%d",
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%B %d, %Y %H:%M",
+        "%B %d, %Y",
+        "%b %d, %Y %H:%M",
+        "%b %d, %Y",
+        "%m/%d/%Y %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+    ):
         try:
             d = datetime.strptime(text, fmt).date()
         except ValueError:
