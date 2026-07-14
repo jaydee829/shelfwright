@@ -40,6 +40,35 @@ export default function ImportView() {
 
   const missing = REQUIRED.filter((f) => !mapping[f])
 
+  // Re-preview on every mapping edit so counts and the bad-date warning reflect what
+  // commit will actually do. Last-request-wins guards out-of-order responses; Continue is
+  // blocked while a preview is in flight or stale (a failed refresh would otherwise let
+  // the user proceed on counts computed from a previous mapping).
+  const previewSeq = useRef(0)
+  const [previewStale, setPreviewStale] = useState(false)
+  async function onMappingChange(field: keyof ColumnMapping, value: string | null) {
+    const next = { ...mapping, [field]: value }
+    setMapping(next)
+    if (!file) return
+    const seq = ++previewSeq.current
+    setBusy(true)
+    setError(null)
+    try {
+      const p = await previewImport(file, next)
+      if (seq === previewSeq.current) {
+        setPreview(p)
+        setPreviewStale(false)
+        setBusy(false)
+      }
+    } catch {
+      if (seq === previewSeq.current) {
+        setPreviewStale(true)
+        setBusy(false)
+        setError("Couldn't refresh the preview for that mapping — re-select a column to retry.")
+      }
+    }
+  }
+
   async function onCommit() {
     if (!file) return
     setBusy(true)
@@ -136,13 +165,20 @@ export default function ImportView() {
             <span>{preview.counts.to_read} to-read</span>
             <span>{preview.counts.currently_reading} currently-reading</span>
           </div>
+          {preview.counts.bad_date > 0 && (
+            <p className="import-warning">
+              ⚠ {preview.counts.bad_date} of {preview.counts.total} rows have dates that couldn't be read
+              {preview.bad_date_example ? <> (e.g. "{preview.bad_date_example}")</> : null}.
+              These rows will be skipped — pick a different column or fix the dates in your file.
+            </p>
+          )}
           <div className="import-map-fields">
             {FIELDS.map((field) => (
               <label key={field}>
                 {field}
                 <select
                   value={mapping[field] ?? ''}
-                  onChange={(e) => setMapping({ ...mapping, [field]: e.target.value || null })}
+                  onChange={(e) => onMappingChange(field, e.target.value || null)}
                 >
                   <option value="">—</option>
                   {preview.headers.map((h) => <option key={h} value={h}>{h}</option>)}
@@ -152,7 +188,7 @@ export default function ImportView() {
           </div>
           {missing.length > 0 && <p className="import-error">Map required columns: {missing.join(', ')}</p>}
           <div className="import-actions">
-            <button className="btn" disabled={missing.length > 0 || busy} onClick={() => setStep('review')}>Continue</button>
+            <button className="btn" disabled={missing.length > 0 || busy || previewStale} onClick={() => setStep('review')}>Continue</button>
           </div>
         </div>
       )}
@@ -160,6 +196,12 @@ export default function ImportView() {
       {step === 'review' && preview && (
         <div className="import-step">
           <p>{preview.counts.read_dated} books will be added to your history.</p>
+          {preview.counts.bad_date > 0 && (
+            <p className="import-warning">
+              ⚠ {preview.counts.bad_date} rows will be skipped (unreadable dates). Go back to adjust
+              the date column, or continue without them.
+            </p>
+          )}
           <label className="import-check-label">
             <input type="checkbox" checked={toRead} onChange={(e) => setToRead(e.target.checked)} />
             Import {preview.counts.to_read} to-read books as wishlist
