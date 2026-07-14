@@ -1,5 +1,34 @@
-from agentic_librarian.agents import prompts
+import pytest
+
+from agentic_librarian.agents import prompts, services
 from agentic_librarian.agents.prompts import CRITIC_INSTRUCTION
+
+# Phrases that must appear (whitespace-normalized) in BOTH the Claude LIBRARIAN_INSTRUCTION and
+# the ADK ADK_LIBRARIAN_INSTRUCTION (#125 conversational charter parity).
+CHARTER_PARITY_PHRASES = [
+    "a turn may legitimately contain ZERO recommendations",
+    "Clarifying questions are encouraged",
+    "ACT on that reaction",
+    "MULTIPLE ROUNDS",
+    "exclude_tropes/exclude_styles",
+    "never pitched again",
+]
+
+CHARTER_TEXTS = {
+    "claude": prompts.LIBRARIAN_INSTRUCTION,
+    "adk": services.ADK_LIBRARIAN_INSTRUCTION,
+}
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split())
+
+
+@pytest.mark.parametrize("phrase", CHARTER_PARITY_PHRASES)
+@pytest.mark.parametrize("backend", ["claude", "adk"])
+def test_charter_phrase_present_in_both_backends(backend, phrase):
+    text = _normalize(CHARTER_TEXTS[backend])
+    assert phrase in text
 
 
 def test_critic_commits_to_a_one_shot_recommendation():
@@ -37,7 +66,10 @@ def test_librarian_instruction_delegates_to_the_mesh():
     # get_recommendation_candidates is the catalog search; it no longer wraps
     # get_unacted_suggestions (#125 follow-up — a stale tool description was corrected).
     assert "get_recommendation_candidates" in text
-    assert "excludes books already" in text and "awaiting the user's reaction" in text
+    # #125: the sentence now wraps across a line ("excludes books\n   already suggested"),
+    # so pin it whitespace-normalized rather than as a single literal substring.
+    normalized = _normalize(text)
+    assert "excludes books already suggested" in normalized and "awaiting the user's reaction" in normalized
 
 
 def test_explorer_has_a_search_budget_and_keeps_its_contract():
@@ -106,9 +138,23 @@ def test_critic_defaults_to_three_recommendations():
     assert "3 books by default" in prompts.CRITIC_INSTRUCTION
 
 
-def test_librarian_defaults_to_three_recommendations():
-    # A2: the conversational Librarian presents 3 by default across both backends.
-    assert "3 recommendations by default" in prompts.LIBRARIAN_INSTRUCTION
+@pytest.mark.parametrize("backend", ["claude", "adk"])
+def test_librarian_defaults_to_three_recommendations_when_presenting(backend):
+    # #125: recommendation count (3 by default) is still pinned, but it is scoped to the
+    # WHEN-presenting step, not an unconditional per-message mandate (see anti-regression test).
+    text = CHARTER_TEXTS[backend]
+    assert "WHEN you present recommendations" in text
+    assert "3 by default" in text
+
+
+@pytest.mark.parametrize("backend", ["claude", "adk"])
+def test_librarian_no_longer_mandates_recs_every_message(backend):
+    # #125 anti-regression: the old unconditional "PRESENT 3 recommendations by default" step
+    # forced a fresh rec set on every turn, including pure feedback turns. It must be gone from
+    # both backends, replaced by the conditional "WHEN you present recommendations" framing.
+    text = CHARTER_TEXTS[backend]
+    assert "PRESENT 3 recommendations by default" not in text
+    assert "WHEN you present recommendations" in text
 
 
 def test_librarian_checks_history_before_importing():
