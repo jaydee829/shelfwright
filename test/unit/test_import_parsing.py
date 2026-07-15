@@ -184,3 +184,62 @@ def test_parse_rows_flags_future_and_unparseable_dates_and_defaults_format():
     assert all(p.raw_format == "ebook" for p in parsed)  # unmapped format -> default
     assert all(p.date_completed is None and p.bad_date is True for p in parsed)
     assert all(p.shelf == "" for p in parsed)  # unmapped shelf -> ''
+
+
+# --- _primary_author (#142): comma-joined/multi-author cells collapse to the primary
+# author at parse time so raw_author is clean before work get-or-create matching. ---
+@pytest.mark.parametrize(
+    ("raw", "expected", "case_id"),
+    [
+        ("", "", "empty_string"),
+        ("   ", "", "whitespace_only"),
+        ("Frank Herbert", "Frank Herbert", "no_separator_returned_trimmed"),
+        ("  Frank Herbert  ", "Frank Herbert", "no_separator_trims_surrounding_whitespace"),
+        (
+            "Casualfarmer, CasualFarmer",
+            "Casualfarmer",
+            "case_insensitive_duplicate_segments_take_first",
+        ),
+        (
+            "  Casualfarmer ,  CasualFarmer  ",
+            "Casualfarmer",
+            "duplicate_segments_with_whitespace_around_separator",
+        ),
+        ("A, B, C", "A", "two_plus_commas_take_first_segment"),
+        ("Author A, Author B, Author A", "Author A", "three_commas_take_first_segment"),
+        ("Jane Doe and John Smith", "Jane Doe", "explicit_and_separator_takes_first"),
+        ("Jane Doe & John Smith", "Jane Doe", "explicit_ampersand_separator_takes_first"),
+        (
+            "Jane Doe, John Smith",
+            "Jane Doe",
+            "single_comma_both_segments_multiword_takes_first",
+        ),
+        ("Ware, Ruth", "Ware, Ruth", "single_comma_last_first_kept_unchanged"),
+        (
+            "Le Guin, Ursula K.",
+            "Le Guin, Ursula K.",
+            "single_comma_last_first_with_initial_kept_unchanged",
+        ),
+        (", ", "", "degenerate_only_separator_yields_empty"),
+        (" and ", "", "degenerate_only_and_separator_yields_empty"),
+        (" & ", "", "degenerate_only_ampersand_separator_yields_empty"),
+    ],
+    ids=lambda param: param if isinstance(param, str) and param.isidentifier() else None,
+)
+def test_primary_author_decision_table(raw, expected, case_id):
+    assert parsing._primary_author(raw) == expected
+
+
+def test_parse_rows_normalizes_malformed_author_cell():
+    mapping = {
+        "title": "t",
+        "author": "a",
+        "format": None,
+        "date_completed": None,
+        "rating": None,
+        "notes": None,
+        "shelf": None,
+    }
+    rows = [{"t": "Beware of Chicken", "a": "Casualfarmer, CasualFarmer"}]
+    parsed = parsing.parse_rows(rows, mapping)
+    assert parsed[0].raw_author == "Casualfarmer"
