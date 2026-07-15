@@ -14,6 +14,7 @@ House rule: case-driven tests are parametrized, never loops inside one test body
 
 from __future__ import annotations
 
+import math
 from uuid import uuid4
 
 import pytest
@@ -24,9 +25,12 @@ from agentic_librarian.etl.dedup_backfill import (
     WorksMergeCluster,
     WorksMergeClusters,
     WorkStats,
+    _classify_isbn_group_pairs,
     _dedupe_detected_duplicate_rows,
+    _detect_fuzzy_pairs,
     _fold,
     _series_guard_blocks,
+    applyable_works_merge_clusters,
     fuzzy_similarity,
     parse_works_merge_report,
     pick_survivor,
@@ -105,6 +109,81 @@ def test_series_guard_symmetric():
     """The guard must not depend on argument order — (A, B) and (B, A) agree."""
     a, b = "Beware of Chicken", "Beware of Chicken 2"
     assert _series_guard_blocks(a, b) == _series_guard_blocks(b, a)
+
+
+# --------------------------------------------------------------------------------------------
+# H3 hardening (2026-07-15, real prod dry-run): _classify_isbn_group_pairs — an ISBN group's
+# pairwise classification into applyable (folded titles agree) vs mismatch (folded titles
+# disagree — report-only, never applied). The prod dry-run's real false-merge shapes are the
+# fixtures here: a 14-book "Ender chain" (one bogus shared ISBN, all titles distinct — must
+# produce ZERO applyable pairs), the Beware-of-Chicken-shaped group (a genuine same-ISBN
+# duplicate pair PLUS a sequel sharing its predecessor's ISBN), and a real typo pair (shared
+# ISBN, near-identical but non-equal folded titles).
+# --------------------------------------------------------------------------------------------
+
+
+def _fold_ids(*titles: str) -> tuple[list, dict]:
+    ids = [uuid4() for _ in titles]
+    fold_by_work = {wid: _fold(title) for wid, title in zip(ids, titles, strict=True)}
+    return ids, fold_by_work
+
+
+@pytest.mark.parametrize(
+    "case_name, titles, expect_applyable_count",
+    [
+        ("typo_pair_exit_strategy", ["Exit Stategy", "Exit Strategy"], 0),
+        (
+            "beware_group_one_applyable_pair_plus_sequel",
+            ["Beware of Chicken", "Beware of Chicken", "Beware of Chicken 2"],
+            1,
+        ),
+        (
+            "ender_chain_fourteen_distinct_titles_zero_applyable",
+            [
+                "Ender's Game",
+                "Ender's Shadow",
+                "Shadow of the Hegemon",
+                "The Hunger of the Gods",
+                "Fury of the Gods",
+                "The Silence of Unworthy Gods",
+                "The Gate of the Feral Gods",
+                "Shadow of the Giant",
+                "The Fury",
+                "The Shadow of the Gods",
+                "The Shadow",
+                "The Brightest Shadow",
+                "The Shadow Cabinet",
+                "The Gate of the Feral Gods: Dungeon Crawler Carl Book 4",
+            ],
+            0,
+        ),
+    ],
+)
+def test_classify_isbn_group_pairs_applyable_count(case_name, titles, expect_applyable_count):
+    ids, fold_by_work = _fold_ids(*titles)
+    applyable, mismatch = _classify_isbn_group_pairs(ids, fold_by_work)
+    assert len(applyable) == expect_applyable_count
+    # every pairwise combination is classified exactly once, into exactly one of the two lists
+    assert len(applyable) + len(mismatch) == math.comb(len(titles), 2)
+
+
+def test_classify_isbn_group_pairs_beware_shaped_sequel_never_applyable():
+    """The prod shape exactly: two equal-fold 'Beware of Chicken' works pair up applyable; the
+    differently-folded 'Beware of Chicken 2' sequel pairs with EACH of them as mismatch — never
+    applyable, and visible against every non-matching member it shares the ISBN group with."""
+    ids, fold_by_work = _fold_ids("Beware of Chicken", "Beware of Chicken", "Beware of Chicken 2")
+    boc_a, boc_b, boc_2 = ids
+    applyable, mismatch = _classify_isbn_group_pairs(ids, fold_by_work)
+
+    assert {frozenset(p) for p in applyable} == {frozenset((boc_a, boc_b))}
+    assert {frozenset(p) for p in mismatch} == {frozenset((boc_a, boc_2)), frozenset((boc_b, boc_2))}
+
+
+def test_classify_isbn_group_pairs_typo_pair_is_mismatch_only():
+    ids, fold_by_work = _fold_ids("Exit Stategy", "Exit Strategy")
+    applyable, mismatch = _classify_isbn_group_pairs(ids, fold_by_work)
+    assert applyable == []
+    assert {frozenset(p) for p in mismatch} == {frozenset(ids)}
 
 
 # --------------------------------------------------------------------------------------------
@@ -268,8 +347,29 @@ def test_transitive_cluster_collapses_into_one_cluster_one_survivor():
 
 
 def test_transitive_cluster_takes_the_strongest_class_of_any_edge():
-    """A~B is same_isbn (strong), B~C is fuzzy (weak) — the merged cluster is reported under
-    same_isbn, not fuzzy, and is therefore NOT report-only."""
+    """Among the THREE applyable classes only: A~B is same_isbn (strong), B~C is same_identity
+    (also applyable) — the merged cluster is reported under same_isbn (the strongest applyable
+    edge), still one cluster of all three."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    stats = {a: _stats(a, trope_links=1), b: _stats(b, trope_links=1), c: _stats(c, trope_links=1)}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[(a, b)],
+        same_identity_pairs=[(b, c)],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert len(clusters.same_isbn) == 1
+    assert set(clusters.same_isbn[0].work_ids) == {a, b, c}
+
+
+def test_fuzzy_edge_contagion_regression():
+    """H3 CONTRACT REVERSAL (2026-07-15): A~B is same_isbn (applyable), B~C is fuzzy
+    (report-only). Before the fix, ONE shared union-find let this fuzzy edge pull C into the
+    applyable same_isbn cluster (the exact amplification the prod dry-run caught). After the
+    fix: the applyable cluster stays EXACTLY {A, B}; C shows up only in the fuzzy report-only
+    cluster, and applyable_works_merge_clusters (the sole choke point apply reads through) never
+    contains C."""
     a, b, c = uuid4(), uuid4(), uuid4()
     stats = {a: _stats(a, trope_links=1), b: _stats(b, trope_links=1), c: _stats(c, trope_links=1)}
     clusters = plan_works_merge_clusters(
@@ -280,8 +380,14 @@ def test_transitive_cluster_takes_the_strongest_class_of_any_edge():
         stats_by_work=stats,
     )
     assert len(clusters.same_isbn) == 1
-    assert set(clusters.same_isbn[0].work_ids) == {a, b, c}
-    assert clusters.fuzzy_report_only == []
+    assert set(clusters.same_isbn[0].work_ids) == {a, b}
+
+    fuzzy_ids = {wid for cluster in clusters.fuzzy_report_only for wid in cluster.work_ids}
+    assert c in fuzzy_ids
+
+    applyable_ids = {wid for cluster in applyable_works_merge_clusters(clusters) for wid in cluster.work_ids}
+    assert c not in applyable_ids
+    assert applyable_ids == {a, b}
 
 
 def test_fuzzy_only_cluster_lands_in_fuzzy_report_only():
@@ -298,6 +404,181 @@ def test_fuzzy_only_cluster_lands_in_fuzzy_report_only():
     assert clusters.same_isbn == []
     assert clusters.same_identity == []
     assert clusters.detected_duplicates == []
+
+
+# --------------------------------------------------------------------------------------------
+# H3 hardening (2026-07-15): works_same_isbn_title_mismatch is a report-only class that clusters
+# in its OWN independent union-find — it can never join, grow, or relabel an applyable cluster.
+# The prod dry-run's real false-merge shapes are the fixtures: the Ender chain (14 distinct
+# books chained by one bogus shared ISBN — must produce ZERO applyable clusters), the
+# Beware-of-Chicken-shaped group (a real duplicate pair PLUS a sequel sharing the predecessor's
+# ISBN — the sequel must never enter an applyable cluster), and a real typo pair (report-only,
+# operator promotes by hand).
+# --------------------------------------------------------------------------------------------
+
+
+def test_isbn_mismatch_only_pair_never_applyable_typo_pair_shaped():
+    """'Exit Stategy'/'Exit Strategy'-shaped: shared ISBN, differing folds — mismatch report-only,
+    never in works_same_isbn, never applyable."""
+    a, b = uuid4(), uuid4()
+    stats = {a: _stats(a, trope_links=1), b: _stats(b, trope_links=1)}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[],
+        same_isbn_mismatch_pairs=[(a, b)],
+        same_identity_pairs=[],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert clusters.same_isbn == []
+    assert len(clusters.same_isbn_title_mismatch) == 1
+    assert set(clusters.same_isbn_title_mismatch[0].work_ids) == {a, b}
+    assert applyable_works_merge_clusters(clusters) == []
+
+
+def test_beware_shaped_group_one_applyable_pair_sequel_never_applyable():
+    """The prod shape exactly: {BoC, BoC, BoC2} within one ISBN group — one applyable pair (the
+    two equal-fold BoC works) and mismatch report entries for the sequel; the sequel must NEVER
+    appear in an applyable cluster."""
+    boc_a, boc_b, boc_2 = uuid4(), uuid4(), uuid4()
+    stats = {
+        boc_a: _stats(boc_a, trope_links=1, editions=1),
+        boc_b: _stats(boc_b, trope_links=15, editions=2),
+        boc_2: _stats(boc_2, trope_links=7, editions=1),
+    }
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[(boc_a, boc_b)],
+        same_isbn_mismatch_pairs=[(boc_a, boc_2), (boc_b, boc_2)],
+        same_identity_pairs=[],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert len(clusters.same_isbn) == 1
+    assert set(clusters.same_isbn[0].work_ids) == {boc_a, boc_b}
+
+    mismatch_ids = {wid for cluster in clusters.same_isbn_title_mismatch for wid in cluster.work_ids}
+    assert boc_2 in mismatch_ids
+
+    applyable_ids = {wid for cluster in applyable_works_merge_clusters(clusters) for wid in cluster.work_ids}
+    assert boc_2 not in applyable_ids
+    assert applyable_ids == {boc_a, boc_b}
+
+
+def test_ender_shaped_chain_zero_applyable_clusters():
+    """The prod dry-run's actual false-merge shape: N books all sharing one bogus ISBN, all
+    titles distinct -> every pairwise combination in the group is a mismatch, ZERO applyable
+    pairs, ZERO applyable clusters. Fed straight from _classify_isbn_group_pairs' real output so
+    this test exercises the same shape plan_works_merge would build from a live DB scan."""
+    titles = [
+        "Ender's Game",
+        "Ender's Shadow",
+        "Shadow of the Hegemon",
+        "The Hunger of the Gods",
+        "Fury of the Gods",
+        "The Silence of Unworthy Gods",
+        "The Gate of the Feral Gods",
+        "Shadow of the Giant",
+        "The Fury",
+        "The Shadow of the Gods",
+        "The Shadow",
+        "The Brightest Shadow",
+        "The Shadow Cabinet",
+        "The Gate of the Feral Gods: Dungeon Crawler Carl Book 4",
+    ]
+    ids = [uuid4() for _ in titles]
+    fold_by_work = {wid: _fold(title) for wid, title in zip(ids, titles, strict=True)}
+    applyable_pairs, mismatch_pairs = _classify_isbn_group_pairs(ids, fold_by_work)
+    assert applyable_pairs == []
+
+    stats = {wid: _stats(wid, trope_links=1) for wid in ids}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=applyable_pairs,
+        same_isbn_mismatch_pairs=mismatch_pairs,
+        same_identity_pairs=[],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert clusters.same_isbn == []
+    assert applyable_works_merge_clusters(clusters) == []
+    # Visible for operator triage, not silently dropped.
+    mismatch_ids = {wid for cluster in clusters.same_isbn_title_mismatch for wid in cluster.work_ids}
+    assert mismatch_ids == set(ids)
+
+
+def test_mismatch_pair_dropped_when_both_members_already_in_one_applyable_cluster():
+    """A report-only pair is only useful for triage if it points somewhere NEW — if both its
+    endpoints already sit together in one applyable cluster (e.g. same_isbn joined A-B, and
+    same_identity separately joined B-C into the SAME applyable cluster), a mismatch edge
+    between A and C adds nothing and must be dropped entirely, not shown as a redundant cluster."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    stats = {a: _stats(a, trope_links=1), b: _stats(b, trope_links=1), c: _stats(c, trope_links=1)}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[(a, b)],
+        same_isbn_mismatch_pairs=[(a, c)],
+        same_identity_pairs=[(b, c)],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert set(clusters.same_isbn[0].work_ids) == {a, b, c}
+    assert clusters.same_isbn_title_mismatch == []
+
+
+def test_mismatch_pair_kept_when_spanning_two_different_applyable_clusters():
+    """A mismatch pair whose two endpoints sit in TWO DIFFERENT applyable clusters (not one) is
+    still real triage information — kept for display, its own independent report-only cluster."""
+    a, b, c, d = uuid4(), uuid4(), uuid4(), uuid4()
+    stats = {x: _stats(x, trope_links=1) for x in (a, b, c, d)}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[(a, b), (c, d)],
+        same_isbn_mismatch_pairs=[(a, c)],
+        same_identity_pairs=[],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[],
+        stats_by_work=stats,
+    )
+    assert {frozenset(cl.work_ids) for cl in clusters.same_isbn} == {frozenset((a, b)), frozenset((c, d))}
+    assert len(clusters.same_isbn_title_mismatch) == 1
+    assert set(clusters.same_isbn_title_mismatch[0].work_ids) == {a, c}
+
+
+def test_mismatch_and_fuzzy_cluster_independently_never_share_a_union_find():
+    """A same_isbn_mismatch pair (A, B) and a fuzzy pair (B, C) share endpoint B but must NOT
+    merge into one report-only cluster — each report-only class clusters in its OWN independent
+    union-find (never each other's, per the module contract)."""
+    a, b, c = uuid4(), uuid4(), uuid4()
+    stats = {a: _stats(a, trope_links=1), b: _stats(b, trope_links=1), c: _stats(c, trope_links=1)}
+    clusters = plan_works_merge_clusters(
+        same_isbn_pairs=[],
+        same_isbn_mismatch_pairs=[(a, b)],
+        same_identity_pairs=[],
+        detected_duplicate_pairs=[],
+        fuzzy_pairs=[(b, c)],
+        stats_by_work=stats,
+    )
+    assert len(clusters.same_isbn_title_mismatch) == 1
+    assert set(clusters.same_isbn_title_mismatch[0].work_ids) == {a, b}
+    assert len(clusters.fuzzy_report_only) == 1
+    assert set(clusters.fuzzy_report_only[0].work_ids) == {b, c}
+
+
+# --------------------------------------------------------------------------------------------
+# H3 hardening: _detect_fuzzy_pairs must exclude pairs already caught by works_same_isbn_title_
+# mismatch — a differing-title ISBN pair is already visible under that class and should not ALSO
+# show up as a fuzzy pair.
+# --------------------------------------------------------------------------------------------
+
+
+def test_detect_fuzzy_pairs_excludes_mismatch_pair_via_already_paired():
+    a, b = uuid4(), uuid4()
+    title_by_work = {a: "Exit Stategy", b: "Exit Strategy"}
+    already_paired = {frozenset((a, b))}  # as plan_works_merge now seeds it from same_isbn_mismatch_pairs
+
+    pairs = _detect_fuzzy_pairs(title_by_work, already_paired)
+
+    assert pairs == []
 
 
 # --------------------------------------------------------------------------------------------

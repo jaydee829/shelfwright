@@ -723,30 +723,54 @@ def _plan_duplicate_works(session: Session) -> list[WorkDupReport]:
 # lives in the SAME FILE (per the design spec: "extend etl/dedup_backfill.py... do NOT build a
 # parallel tool") but does not thread through the constraint-gate's plan/apply machinery.
 #
-# Four detection classes, evidence-strongest first — each produces UNORDERED work-pair
-# groupings (a work id pair is a 2-tuple but is always compared/deduped as a frozenset so
-# (A, B) and (B, A) collapse to the same pair):
-#   1. works_same_isbn        — works sharing a non-null editions.isbn_13.
-#   2. works_same_identity    — fold(title) equal AND author-token overlap >= 1 full token,
-#                                with the series guard blocking sequel titles from matching.
-#   3. works_detected_duplicates — rows from the #141/#143 detected_duplicates feed, deduped as
-#                                unordered pairs (the table's composite PK is (work_id_a,
-#                                work_id_b), NOT order-normalized — both rows of one cluster can
-#                                exist; see DetectedDuplicate's docstring in db/models.py).
-#   4. works_fuzzy_report_only — token-set similarity on folded titles above a threshold, minus
-#                                pairs already caught by a stronger class above. REPORT ONLY
+# Detection classes, evidence-strongest first — each produces UNORDERED work-pair groupings (a
+# work id pair is a 2-tuple but is always compared/deduped as a frozenset so (A, B) and (B, A)
+# collapse to the same pair). THREE are applyable; TWO are report-only forever:
+#   1. works_same_isbn        — APPLYABLE. Two works sharing a non-null editions.isbn_13 AND
+#                                agreeing folded titles (fold(title_a) == fold(title_b)). A prod
+#                                dry-run (2026-07-15) found isbn_13 pollution in this catalog:
+#                                distinct books share an ISBN (chained 14 different novels into
+#                                one bogus cluster) and a sequel can carry its predecessor's ISBN
+#                                (Beware of Chicken 2 sharing book 1's ISBN) — "shared ISBN" alone
+#                                is no longer strong enough evidence to apply on its own.
+#   1b. works_same_isbn_title_mismatch — REPORT ONLY. The other half of an ISBN group: two works
+#                                sharing an ISBN whose folded titles DISAGREE. Never promoted to
+#                                applyable by this tool — operator triage only (a real typo pair
+#                                like 'Exit Stategy'/'Exit Strategy' the operator can promote by
+#                                hand, vs. the pollution/sequel shapes above that must never
+#                                merge). Structurally separate field, same treatment as fuzzy.
+#   2. works_same_identity    — APPLYABLE. fold(title) equal AND author-token overlap >= 1 full
+#                                token, with the series guard blocking sequel titles from matching.
+#   3. works_detected_duplicates — APPLYABLE. Rows from the #141/#143 detected_duplicates feed,
+#                                deduped as unordered pairs (the table's composite PK is
+#                                (work_id_a, work_id_b), NOT order-normalized — both rows of one
+#                                cluster can exist; see DetectedDuplicate's docstring in
+#                                db/models.py).
+#   4. works_fuzzy_report_only — REPORT ONLY. Token-set similarity on folded titles above a
+#                                threshold, minus pairs already caught by a stronger class above
+#                                (now including works_same_isbn_title_mismatch — a differing-title
+#                                ISBN pair should not ALSO show up as a fuzzy pair). REPORT ONLY
 #                                FOREVER: never promoted to an applyable class by this tool (the
-#                                design spec: "operator promotes pairs by hand if real"). Marked
-#                                structurally via WorksMergeClusters.fuzzy_report_only being a
-#                                SEPARATE field from the three applyable-shape lists, exactly the
-#                                way duplicate_works_report_only is a separate field on DedupPlan
-#                                — H2's future apply step can only reach the applyable fields.
+#                                design spec: "operator promotes pairs by hand if real").
 #
-# A pair that matches more than one class is reported ONCE, in its single strongest class
-# (works_same_isbn > works_same_identity > works_detected_duplicates > works_fuzzy_report_only).
-# Pairs are then unioned into transitive clusters (A~B, B~C -> one {A, B, C} cluster) via a
-# simple union-find; a cluster's reported class is the STRONGEST class of any edge that built
-# it, so a cluster with even one same_isbn edge is never fuzzy-report-only.
+# A pair that matches more than one class is reported ONCE, in its single strongest class,
+# ranked ONLY among the three applyable classes (works_same_isbn > works_same_identity >
+# works_detected_duplicates). Applyable pairs are unioned into transitive clusters (A~B, B~C ->
+# one {A, B, C} cluster) via ONE union-find over just those three classes; a cluster's reported
+# class is the STRONGEST applyable class of any edge that built it.
+#
+# CONTRACT REVERSAL (2026-07-15, the same prod dry-run): report-only classes
+# (works_same_isbn_title_mismatch, works_fuzzy_report_only) are NEVER part of that union-find —
+# each clusters in its OWN INDEPENDENT union-find, entirely separate from the applyable one and
+# from each other. The old contract ("a fuzzy-only edge pulled into a same_isbn cluster is
+# reported under same_isbn") is REVERSED: a report-only edge can never grow, shrink, or relabel
+# an applyable cluster — it is structurally incapable of adding a work to an applyable merge, not
+# just excluded by convention. (Previously, ONE union-find ran over every class's pairs together,
+# so a single report-only edge touching an applyable cluster silently added its other endpoint to
+# that applyable merge — the exact amplification the prod dry-run caught.) A report-only pair
+# whose both endpoints already sit together in one applyable cluster is dropped entirely (nothing
+# left to triage, it's merging anyway); a pair spanning two different applyable clusters, or
+# reaching a work outside any applyable cluster, is kept for operator-facing display.
 # --------------------------------------------------------------------------------------------
 
 _SERIES_TOKEN_WORDS = {"book", "volume", "vol", "part", "no"}
@@ -875,6 +899,7 @@ class WorksMergeCluster:
     it, and the per-work stats used for that selection (so the report/CLI can show its work)."""
 
     class_name: str  # one of "works_same_isbn" / "works_same_identity" / "works_detected_duplicates"
+    # (applyable) / "works_same_isbn_title_mismatch" / "works_fuzzy_report_only" (report only)
     work_ids: list[UUID]
     titles: list[str]
     survivor_id: UUID
@@ -883,14 +908,20 @@ class WorksMergeCluster:
 
 @dataclass
 class WorksMergeClusters:
-    """The four detection classes' output, evidence-strongest first. Only the first three are
-    ever eligible for a future apply step; fuzzy_report_only is a STRUCTURALLY separate field
-    (never merged into the other three, never given an apply-shaped dataclass) so a future
-    apply_works_merge (H2) cannot reach it by construction, not just by convention."""
+    """The detection classes' output, evidence-strongest first. Only same_isbn / same_identity /
+    detected_duplicates are ever eligible for a future apply step; same_isbn_title_mismatch and
+    fuzzy_report_only are STRUCTURALLY separate fields (never merged into the applyable three,
+    never given an apply-shaped dataclass, and — since the 2026-07-15 hardening — clustered in
+    their OWN independent union-finds rather than sharing the applyable one) so apply_works_merge
+    cannot reach them by construction, not just by convention, and a report-only edge can never
+    grow an applyable cluster."""
 
     same_isbn: list[WorksMergeCluster] = field(default_factory=list)
     same_identity: list[WorksMergeCluster] = field(default_factory=list)
     detected_duplicates: list[WorksMergeCluster] = field(default_factory=list)
+    # REPORT ONLY (2026-07-15 hardening): an ISBN group whose members' folded titles disagree —
+    # shared-ISBN pollution or a sequel carrying its predecessor's ISBN, never applyable.
+    same_isbn_title_mismatch: list[WorksMergeCluster] = field(default_factory=list)
     fuzzy_report_only: list[WorksMergeCluster] = field(default_factory=list)
     # Self-referential detected_duplicates feed rows (work_id_a == work_id_b) skipped at
     # ingestion — see _dedupe_detected_duplicate_rows. Surfaced here (not just logged) so a bad
@@ -900,6 +931,7 @@ class WorksMergeClusters:
     def summary(self) -> dict[str, int]:
         return {
             "works_same_isbn": len(self.same_isbn),
+            "works_same_isbn_title_mismatch": len(self.same_isbn_title_mismatch),
             "works_same_identity": len(self.same_identity),
             "works_detected_duplicates": len(self.detected_duplicates),
             "works_fuzzy_report_only": len(self.fuzzy_report_only),
@@ -907,13 +939,25 @@ class WorksMergeClusters:
         }
 
 
-# Class strength order, strongest first — index is used as the precedence rank (lower wins).
-_WORKS_MERGE_CLASS_ORDER = (
+# Applyable class strength order, strongest first — index is used as the precedence rank (lower
+# wins) among the THREE classes eligible for a future apply step. Report-only classes are never
+# ranked here (see _REPORT_ONLY_CLASSES) — each clusters independently, never joining this order.
+_APPLYABLE_CLASS_ORDER = (
     "works_same_isbn",
     "works_same_identity",
     "works_detected_duplicates",
+)
+
+# Report-only classes, each clustered in its own independent union-find (see
+# plan_works_merge_clusters) — never ranked against each other or against _APPLYABLE_CLASS_ORDER.
+_REPORT_ONLY_CLASSES = (
+    "works_same_isbn_title_mismatch",
     "works_fuzzy_report_only",
 )
+
+# Display ordering only (e.g. a future report iterating "every class in evidence-strength order")
+# — NOT used for precedence ranking; see _APPLYABLE_CLASS_ORDER for that.
+_WORKS_MERGE_CLASS_ORDER = _APPLYABLE_CLASS_ORDER + _REPORT_ONLY_CLASSES
 
 
 class _UnionFind:
@@ -937,6 +981,19 @@ class _UnionFind:
             self._parent[ra] = rb
 
 
+def _build_cluster(class_name: str, members: set[UUID], stats_by_work: dict[UUID, WorkStats]) -> WorksMergeCluster:
+    ordered = sorted(members, key=str)
+    candidates = [stats_by_work[wid] for wid in ordered]
+    survivor = pick_survivor(candidates)
+    return WorksMergeCluster(
+        class_name=class_name,
+        work_ids=ordered,
+        titles=[stats_by_work[wid].title for wid in ordered],
+        survivor_id=survivor.work_id,
+        stats_by_work={wid: stats_by_work[wid] for wid in ordered},
+    )
+
+
 def plan_works_merge_clusters(
     *,
     same_isbn_pairs: list[tuple[UUID, UUID]],
@@ -944,27 +1001,35 @@ def plan_works_merge_clusters(
     detected_duplicate_pairs: list[tuple[UUID, UUID]],
     fuzzy_pairs: list[tuple[UUID, UUID]],
     stats_by_work: dict[UUID, WorkStats],
+    same_isbn_mismatch_pairs: list[tuple[UUID, UUID]] = (),
 ) -> WorksMergeClusters:
     """Pure composition core (no DB access): given each class's already-detected pairs (as
     plain (id, id) 2-tuples — order does not matter, they are deduped as unordered pairs
     below), resolve cross-class overlap (a pair appears once, in its strongest class), collapse
     transitive clusters via union-find, and pick each cluster's survivor.
 
-    A cluster's reported class is the STRONGEST class of any edge that built it (see the
-    module-level comment above this section) — this is what makes
-    test_transitive_cluster_takes_the_strongest_class_of_any_edge pass: a fuzzy-only edge that
-    gets pulled into a same_isbn cluster is reported under same_isbn, not fuzzy."""
-    pairs_by_class: dict[str, list[frozenset]] = {
+    Two SEPARATE union-finds, per the 2026-07-15 hardening (see the module-level comment above
+    this section for the prod-dry-run contract reversal this fixes):
+
+    1. APPLYABLE union-find over ONLY same_isbn_pairs + same_identity_pairs +
+       detected_duplicate_pairs. A cluster's reported class is the STRONGEST of these three
+       classes among the edges that built it — this is what
+       test_fuzzy_edge_contagion_regression pins: a fuzzy-only edge touching an applyable
+       cluster can never add its other endpoint to that applyable cluster.
+    2. REPORT-ONLY clustering: same_isbn_mismatch_pairs and fuzzy_pairs each get their OWN
+       independent union-find (never each other's, never the applyable one). A report-only pair
+       whose both endpoints already sit together in one applyable cluster is dropped (nothing
+       left to triage — it's merging anyway); any other report-only pair is kept for display."""
+    applyable_pairs_by_class: dict[str, list[frozenset]] = {
         "works_same_isbn": [frozenset(p) for p in same_isbn_pairs],
         "works_same_identity": [frozenset(p) for p in same_identity_pairs],
         "works_detected_duplicates": [frozenset(p) for p in detected_duplicate_pairs],
-        "works_fuzzy_report_only": [frozenset(p) for p in fuzzy_pairs],
     }
 
-    # Cross-class precedence: a pair keeps only its strongest class's edge.
+    # Cross-class precedence (applyable classes only): a pair keeps only its strongest class's edge.
     best_class_for_pair: dict[frozenset, str] = {}
-    for class_name in _WORKS_MERGE_CLASS_ORDER:
-        for pair in pairs_by_class[class_name]:
+    for class_name in _APPLYABLE_CLASS_ORDER:
+        for pair in applyable_pairs_by_class[class_name]:
             if pair not in best_class_for_pair:
                 best_class_for_pair[pair] = class_name
 
@@ -974,14 +1039,14 @@ def plan_works_merge_clusters(
         uf.union(a, b)
 
     # Group surviving (deduped, precedence-resolved) pair edges by their cluster root, and
-    # track the strongest class among the edges that built each cluster.
+    # track the strongest applyable class among the edges that built each cluster.
     cluster_root_class_rank: dict[UUID, int] = {}
     cluster_members: dict[UUID, set[UUID]] = defaultdict(set)
     for pair, class_name in best_class_for_pair.items():
         a, b = tuple(pair)
         root = uf.find(a)
         cluster_members[root].update((a, b))
-        rank = _WORKS_MERGE_CLASS_ORDER.index(class_name)
+        rank = _APPLYABLE_CLASS_ORDER.index(class_name)
         cluster_root_class_rank[root] = min(rank, cluster_root_class_rank.get(root, rank))
 
     out = WorksMergeClusters()
@@ -989,41 +1054,101 @@ def plan_works_merge_clusters(
         "works_same_isbn": out.same_isbn,
         "works_same_identity": out.same_identity,
         "works_detected_duplicates": out.detected_duplicates,
-        "works_fuzzy_report_only": out.fuzzy_report_only,
     }
+    # applyable_root_by_work: which applyable cluster (by root id) each work currently sits in,
+    # used below to drop report-only pairs that are entirely subsumed by one applyable cluster.
+    applyable_root_by_work: dict[UUID, UUID] = {}
     # Deterministic ordering: iterate roots sorted by string so plan output (and therefore any
     # future report/token emission) is stable across re-plans of unchanged data.
     for root in sorted(cluster_members, key=str):
         members = cluster_members[root]
-        class_name = _WORKS_MERGE_CLASS_ORDER[cluster_root_class_rank[root]]
-        candidates = [stats_by_work[wid] for wid in members]
-        survivor = pick_survivor(candidates)
-        cluster = WorksMergeCluster(
-            class_name=class_name,
-            work_ids=sorted(members, key=str),
-            titles=[stats_by_work[wid].title for wid in sorted(members, key=str)],
-            survivor_id=survivor.work_id,
-            stats_by_work={wid: stats_by_work[wid] for wid in members},
-        )
+        class_name = _APPLYABLE_CLASS_ORDER[cluster_root_class_rank[root]]
+        cluster = _build_cluster(class_name, members, stats_by_work)
         dest_by_class_name[class_name].append(cluster)
+        for wid in members:
+            applyable_root_by_work[wid] = root
+
+    def _cluster_report_only(class_name: str, pairs: list[tuple[UUID, UUID]]) -> list[WorksMergeCluster]:
+        """Independent union-find for ONE report-only class — never shares a union-find with any
+        other class, applyable or report-only (see this function's docstring)."""
+        uf_report = _UnionFind()
+        kept_pairs: set[frozenset] = set()
+        for a, b in pairs:
+            pair = frozenset((a, b))
+            if pair in kept_pairs:
+                continue
+            root_a = applyable_root_by_work.get(a)
+            root_b = applyable_root_by_work.get(b)
+            if root_a is not None and root_a == root_b:
+                continue  # both endpoints already merging in the SAME applyable cluster
+            kept_pairs.add(pair)
+            uf_report.union(a, b)
+
+        members_by_root: dict[UUID, set[UUID]] = defaultdict(set)
+        for pair in kept_pairs:
+            a, b = tuple(pair)
+            root = uf_report.find(a)
+            members_by_root[root].update((a, b))
+
+        return [
+            _build_cluster(class_name, members_by_root[root], stats_by_work)
+            for root in sorted(members_by_root, key=str)
+        ]
+
+    out.same_isbn_title_mismatch = _cluster_report_only("works_same_isbn_title_mismatch", same_isbn_mismatch_pairs)
+    out.fuzzy_report_only = _cluster_report_only("works_fuzzy_report_only", fuzzy_pairs)
     return out
 
 
-def _detect_same_isbn_pairs(session: Session) -> list[tuple[UUID, UUID]]:
-    """works_same_isbn: two+ works sharing a non-null editions.isbn_13. Column-explicit (no
-    Work entity load) — matches the house convention elsewhere in this module, though this
-    query does not touch deep_enriched_at itself (the caller gathers WorkStats separately)."""
+def _classify_isbn_group_pairs(
+    work_ids: list[UUID], fold_by_work: dict[UUID, str]
+) -> tuple[list[tuple[UUID, UUID]], list[tuple[UUID, UUID]]]:
+    """Pure (no session): given ONE ISBN group's work ids, classify every pairwise combination
+    (full O(n^2) — groups are tiny in practice, see the module comment's Fix-1 note) by folded-
+    title agreement into (applyable_pairs, mismatch_pairs). Star-pairing (only ordered[0] vs the
+    rest) is NOT enough here even though the union-find would still transitively close the
+    applyable side: the mismatch side needs every member compared against every OTHER member so
+    a mismatching outlier (e.g. a sequel carrying its predecessor's ISBN) is visible against
+    every equal-fold member it was grouped with, not just the group's first id."""
+    ordered = sorted(work_ids, key=str)
+    applyable: list[tuple[UUID, UUID]] = []
+    mismatch: list[tuple[UUID, UUID]] = []
+    for i, wa in enumerate(ordered):
+        for wb in ordered[i + 1 :]:
+            if fold_by_work.get(wa) == fold_by_work.get(wb):
+                applyable.append((wa, wb))
+            else:
+                mismatch.append((wa, wb))
+    return applyable, mismatch
+
+
+def _detect_same_isbn_pairs(
+    session: Session, fold_by_work: dict[UUID, str]
+) -> tuple[list[tuple[UUID, UUID]], list[tuple[UUID, UUID]]]:
+    """works_same_isbn (+ its report-only sibling works_same_isbn_title_mismatch): two+ works
+    sharing a non-null editions.isbn_13. Column-explicit (no Work entity load) — matches the
+    house convention elsewhere in this module, though this query does not touch
+    deep_enriched_at itself (the caller gathers WorkStats separately).
+
+    2026-07-15 hardening: shared ISBN alone is no longer applyable evidence — this prod catalog
+    has ISBN pollution (distinct books sharing an isbn_13, a sequel carrying its predecessor's)
+    that chained 14 unrelated books into one bogus applyable cluster in a real dry-run. A pair
+    is applyable ONLY if its members' folded titles also agree; otherwise it is reported under
+    works_same_isbn_title_mismatch (operator triage only, never applied by this tool). Returns
+    (applyable_pairs, mismatch_pairs)."""
     rows = session.query(Edition.work_id, Edition.isbn_13).filter(Edition.isbn_13.isnot(None)).all()
     groups: dict[str, set[UUID]] = defaultdict(set)
     for work_id, isbn in rows:
         groups[isbn].add(work_id)
-    pairs: list[tuple[UUID, UUID]] = []
+    applyable: list[tuple[UUID, UUID]] = []
+    mismatch: list[tuple[UUID, UUID]] = []
     for work_ids in groups.values():
         if len(work_ids) < 2:
             continue
-        ordered = sorted(work_ids, key=str)
-        pairs.extend((ordered[0], wid) for wid in ordered[1:])
-    return pairs
+        group_applyable, group_mismatch = _classify_isbn_group_pairs(list(work_ids), fold_by_work)
+        applyable.extend(group_applyable)
+        mismatch.extend(group_mismatch)
+    return applyable, mismatch
 
 
 def _author_tokens(name: str) -> set[str]:
@@ -1163,8 +1288,9 @@ def plan_works_merge(session: Session) -> WorksMergeClusters:
     this plan's clusters."""
     stats_by_work = _gather_work_stats(session)
     title_by_work = {wid: s.title for wid, s in stats_by_work.items()}
+    fold_by_work = {wid: _fold(title) for wid, title in title_by_work.items()}
 
-    same_isbn_pairs = _detect_same_isbn_pairs(session)
+    same_isbn_pairs, same_isbn_mismatch_pairs = _detect_same_isbn_pairs(session, fold_by_work)
     same_identity_pairs = [
         (a, b)
         for a, b in _detect_same_identity_pairs(session)
@@ -1172,11 +1298,18 @@ def plan_works_merge(session: Session) -> WorksMergeClusters:
     ]
     detected_duplicate_pairs, ignored_self_detections = _detect_detected_duplicate_pairs(session)
 
-    already_paired = {frozenset(p) for p in same_isbn_pairs + same_identity_pairs + detected_duplicate_pairs}
+    # already_paired also includes same_isbn_mismatch_pairs (Fix 2's note): a differing-title
+    # ISBN pair is already visible under works_same_isbn_title_mismatch and should not ALSO show
+    # up as a fuzzy pair.
+    already_paired = {
+        frozenset(p)
+        for p in same_isbn_pairs + same_isbn_mismatch_pairs + same_identity_pairs + detected_duplicate_pairs
+    }
     fuzzy_pairs = _detect_fuzzy_pairs(title_by_work, already_paired)
 
     clusters = plan_works_merge_clusters(
         same_isbn_pairs=same_isbn_pairs,
+        same_isbn_mismatch_pairs=same_isbn_mismatch_pairs,
         same_identity_pairs=same_identity_pairs,
         detected_duplicate_pairs=detected_duplicate_pairs,
         fuzzy_pairs=fuzzy_pairs,
@@ -1192,9 +1325,9 @@ def render_works_merge_report(clusters: WorksMergeClusters, *, db_target: str | 
     write_report): a summary block, then per-class cluster sections showing every work id +
     title in the cluster and which one was picked as survivor. No machine-readable token block
     here — plan_id_set-shaped token emission is H2's job (the apply step doesn't exist yet), so
-    there is nothing to gate against drift yet. fuzzy_report_only is called out explicitly as
-    NEVER APPLIED so an operator reading a persisted copy of this text (not just the live CLI
-    output) sees the same warning."""
+    there is nothing to gate against drift yet. same_isbn_title_mismatch and fuzzy_report_only
+    are both called out explicitly as NEVER APPLIED so an operator reading a persisted copy of
+    this text (not just the live CLI output) sees the same warning."""
     lines: list[str] = ["Works-merge plan report", "=" * 60, ""]
     if db_target is not None:
         lines.append(f"db target: {db_target}")
@@ -1223,6 +1356,7 @@ def render_works_merge_report(clusters: WorksMergeClusters, *, db_target: str | 
         lines.append("")
 
     _render_section("works_same_isbn", clusters.same_isbn, never_applied=False)
+    _render_section("works_same_isbn_title_mismatch", clusters.same_isbn_title_mismatch, never_applied=True)
     _render_section("works_same_identity", clusters.same_identity, never_applied=False)
     _render_section("works_detected_duplicates", clusters.detected_duplicates, never_applied=False)
     _render_section("works_fuzzy_report_only", clusters.fuzzy_report_only, never_applied=True)
@@ -1832,11 +1966,12 @@ def compose_cluster_merge(session: Session, cluster: WorksMergeCluster) -> WorkM
 def applyable_works_merge_clusters(clusters: WorksMergeClusters) -> list[WorksMergeCluster]:
     """The ONLY clusters compose_cluster_merge/apply_works_merge ever iterate — same_isbn,
     same_identity, detected_duplicates, in that (evidence-strongest-first) order.
-    fuzzy_report_only is NEVER included: this is the single choke point that keeps the fuzzy
-    class structurally unreachable by apply (see the module comment above compose_cluster_merge)
-    — every caller (plan_works_merge_apply, apply_works_merge, the token/report functions below)
-    goes through this function rather than reading WorksMergeClusters' fields directly, so
-    "never apply fuzzy" is enforced in exactly one place."""
+    same_isbn_title_mismatch and fuzzy_report_only are NEVER included: this is the single choke
+    point that keeps both report-only classes structurally unreachable by apply (see the module
+    comment above compose_cluster_merge) — every caller (plan_works_merge_apply,
+    apply_works_merge, the token/report functions below) goes through this function rather than
+    reading WorksMergeClusters' fields directly, so "never apply report-only" is enforced in
+    exactly one place."""
     return [*clusters.same_isbn, *clusters.same_identity, *clusters.detected_duplicates]
 
 

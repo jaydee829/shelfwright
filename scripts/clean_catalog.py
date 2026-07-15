@@ -284,6 +284,7 @@ def _run_merge_works(manager: DatabaseManager, safe: str) -> int:
                 print(f"  cluster {cluster.work_ids}  survivor={cluster.survivor_id}  titles={cluster.titles}")
 
         _print_clusters("works_same_isbn", clusters.same_isbn, never_applied=False)
+        _print_clusters("works_same_isbn_title_mismatch", clusters.same_isbn_title_mismatch, never_applied=True)
         _print_clusters("works_same_identity", clusters.same_identity, never_applied=False)
         _print_clusters("works_detected_duplicates", clusters.detected_duplicates, never_applied=False)
         _print_clusters("works_fuzzy_report_only", clusters.fuzzy_report_only, never_applied=True)
@@ -472,11 +473,16 @@ def main(argv: list[str] | None = None) -> int:
         "--merge-works",
         action="store_true",
         help=(
-            "Spec 2026-07-14 PR-2: DETECTION + COMPOSITION PLANNING for the works-merge tool — "
-            "always a dry-run, this flag never applies. Prints the four detection classes "
-            "(strongest evidence first): works_same_isbn, works_same_identity, "
+            "Spec 2026-07-14 PR-2 (hardened 2026-07-15 after a prod dry-run caught two "
+            "amplifiers): DETECTION + COMPOSITION PLANNING for the works-merge tool — always a "
+            "dry-run, this flag never applies. Prints the detection classes (strongest evidence "
+            "first): works_same_isbn (now requires folded-title agreement within an ISBN group — "
+            "shared ISBN alone is not applyable evidence, this catalog has ISBN pollution), "
+            "works_same_isbn_title_mismatch (an ISBN-sharing pair whose titles DISAGREE — report "
+            "only, e.g. a sequel carrying its predecessor's ISBN), works_same_identity, "
             "works_detected_duplicates (the #141/#143 feed), and works_fuzzy_report_only "
-            "(NEVER applied by design — operator promotes pairs by hand). Each cluster shows "
+            "(NEVER applied by design — operator promotes pairs by hand). Report-only classes "
+            "each cluster independently and can never grow an applyable cluster. Each cluster shows "
             "its deterministic survivor pick (most justified trope links -> newest "
             "deep_enriched_at -> most editions -> lowest UUID), plus the per-cluster merge "
             "composition (editions/suggestions/trope+style links/contributors/detected_"
@@ -496,9 +502,9 @@ def main(argv: list[str] | None = None) -> int:
             "same ids counts) — see etl/dedup_backfill.py's apply_works_merge. Requires --yes "
             "and --report (no default, same as --repair-fallbacks-apply — a distinct "
             "destructive operation that deletes Work rows carrying live user reading history; "
-            "must name its reviewed report explicitly). works_fuzzy_report_only clusters are "
-            "structurally unreachable by this gate — they are never part of the applyable "
-            "composition, by construction, not by a runtime check."
+            "must name its reviewed report explicitly). works_same_isbn_title_mismatch and "
+            "works_fuzzy_report_only clusters are structurally unreachable by this gate — they "
+            "are never part of the applyable composition, by construction, not by a runtime check."
         ),
     )
     ap.add_argument(

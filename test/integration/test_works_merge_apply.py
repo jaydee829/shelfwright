@@ -659,6 +659,7 @@ def test_beware_shaped_full_e2e_through_apply(db_url):
         converged = db_.plan_works_merge(session)
         assert converged.summary() == {
             "works_same_isbn": 0,
+            "works_same_isbn_title_mismatch": 0,
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 0,
@@ -749,6 +750,7 @@ def test_fuzzy_only_cluster_never_consumes_tokens_through_apply(db_url):
         clusters = db_.plan_works_merge(session)
         assert clusters.summary() == {
             "works_same_isbn": 0,
+            "works_same_isbn_title_mismatch": 0,
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 1,
@@ -853,3 +855,105 @@ def test_narrator_union_through_apply_repoint_and_drop(db_url):
             ).all()
         }
         assert remaining_narrators == {shared_narrator.id, new_narrator.id}
+
+
+# --------------------------------------------------------------------------------------------
+# 8. H3 hardening (2026-07-15, real prod dry-run): the ISBN-title-mismatch gate through the
+# REAL apply path — the exact false-merge shapes the dry-run caught must survive the actual
+# apply gate correctly, not just the pure planner.
+# --------------------------------------------------------------------------------------------
+
+
+def test_beware_shaped_triple_apply_merges_only_equal_pair_sequel_untouched(db_url):
+    """The prod shape through the ACTUAL apply gate: {BoC, BoC, BoC2} all sharing one ISBN.
+    apply_works_merge must merge ONLY the two equal-fold 'Beware of Chicken' works; the sequel
+    (mismatch, report-only) survives completely untouched — including its own edition and
+    reading history — never folded into the merge."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author = Author(name="CasualFarmer")
+        boc_dirty = _work("Beware of Chicken")
+        boc_clean = _work("Beware of Chicken", deep_enriched_at=datetime(2026, 6, 12, tzinfo=UTC))
+        boc_2 = _work("Beware of Chicken 2")
+        session.add_all([author, boc_dirty, boc_clean, boc_2])
+        session.flush()
+        session.add(WorkContributor(work_id=boc_dirty.id, author_id=author.id, role="Author"))
+        session.add(WorkContributor(work_id=boc_clean.id, author_id=author.id, role="Author"))
+        session.add(WorkContributor(work_id=boc_2.id, author_id=author.id, role="Author"))
+        dirty_edition = Edition(work_id=boc_dirty.id, isbn_13="9781039452275", format="ebook")
+        clean_edition = Edition(work_id=boc_clean.id, isbn_13="9781039452275", format="audiobook")
+        sequel_edition = Edition(work_id=boc_2.id, isbn_13="9781039452275", format="ebook")
+        session.add_all([dirty_edition, clean_edition, sequel_edition])
+        session.flush()
+        sequel_read = ReadingHistory(
+            edition_id=sequel_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 6, 1)
+        )
+        session.add(sequel_read)
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary()["works_same_isbn"] == 1
+        assert boc_2.id in {wid for c in clusters.same_isbn_title_mismatch for wid in c.work_ids}
+
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["delete_work"] == 1
+        assert session.query(Work).count() == 2
+
+        # The sequel survived completely untouched — same id, same edition, same read.
+        surviving_sequel = session.get(Work, boc_2.id)
+        assert surviving_sequel is not None
+        assert surviving_sequel.title == "Beware of Chicken 2"
+        surviving_sequel_edition = session.get(Edition, sequel_edition.id)
+        assert surviving_sequel_edition is not None
+        assert surviving_sequel_edition.work_id == boc_2.id
+        remaining_sequel_reads = session.query(ReadingHistory).filter_by(edition_id=sequel_edition.id).all()
+        assert [rh.id for rh in remaining_sequel_reads] == [sequel_read.id]
+
+        # Exactly one of {dirty, clean} survives — deep_enriched_at newest wins the tiebreak.
+        assert session.get(Work, boc_dirty.id) is None
+        assert session.get(Work, boc_clean.id) is not None
+
+        converged = db_.plan_works_merge(session)
+        assert converged.summary()["works_same_isbn"] == 0
+
+
+def test_ender_shaped_chain_apply_is_a_no_op_snapshot_equality(db_url):
+    """The prod dry-run's actual false-merge shape through the real apply gate: several
+    DISTINCT books sharing one bogus ISBN. Zero applyable clusters means apply_works_merge
+    composes and executes nothing for this chain — a full works/editions snapshot is
+    byte-identical before and after."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        titles = ["Ender's Game", "Ender's Shadow", "Shadow of the Hegemon", "The Shadow Cabinet"]
+        works = [_work(t) for t in titles]
+        session.add_all(works)
+        session.flush()
+        for w in works:
+            session.add(Edition(work_id=w.id, isbn_13="9780000000000", format="ebook"))
+        session.flush()
+
+        def _snapshot():
+            return {
+                "works": {(w.id, w.title) for w in session.query(Work).all()},
+                "editions": {(e.id, e.work_id, e.isbn_13, e.format) for e in session.query(Edition).all()},
+            }
+
+        before = _snapshot()
+
+        clusters = db_.plan_works_merge(session)
+        assert db_.applyable_works_merge_clusters(clusters) == []
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        assert compositions == []
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["delete_work"] == 0
+        after = _snapshot()
+        assert after == before

@@ -38,6 +38,7 @@ def test_empty_db_plan_is_empty(db_url):
         clusters = db_.plan_works_merge(session)
         assert clusters.summary() == {
             "works_same_isbn": 0,
+            "works_same_isbn_title_mismatch": 0,
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 0,
@@ -125,11 +126,71 @@ def test_beware_of_chicken_2_sequel_is_never_a_pair(db_url):
         clusters = db_.plan_works_merge(session)
         assert clusters.summary() == {
             "works_same_isbn": 0,
+            "works_same_isbn_title_mismatch": 0,
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 0,
             "ignored_self_detections": 0,
         }
+
+
+def test_beware_shaped_triple_plan_applyable_pair_plus_mismatch_sequel(db_url):
+    """H3 hardening (2026-07-15, real prod dry-run): TWO 'Beware of Chicken' works sharing an
+    ISBN (a genuine duplicate pair) PLUS 'Beware of Chicken 2' sharing THE SAME ISBN (the
+    sequel carrying its predecessor's ISBN — real prod pollution). plan_works_merge must
+    produce ONE applyable same_isbn cluster (just the two equal-fold works) and mismatch report
+    entries for the sequel — the sequel must never enter an applyable cluster."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author = Author(name="CasualFarmer")
+        boc_dirty = _work("Beware of Chicken")
+        boc_clean = _work("Beware of Chicken", deep_enriched_at=datetime(2026, 6, 12, tzinfo=UTC))
+        boc_2 = _work("Beware of Chicken 2")
+        session.add_all([author, boc_dirty, boc_clean, boc_2])
+        session.flush()
+        session.add(WorkContributor(work_id=boc_dirty.id, author_id=author.id, role="Author"))
+        session.add(WorkContributor(work_id=boc_clean.id, author_id=author.id, role="Author"))
+        session.add(WorkContributor(work_id=boc_2.id, author_id=author.id, role="Author"))
+        session.add(Edition(work_id=boc_dirty.id, isbn_13="9781039452275", format="ebook"))
+        session.add(Edition(work_id=boc_clean.id, isbn_13="9781039452275", format="audiobook"))
+        session.add(Edition(work_id=boc_2.id, isbn_13="9781039452275", format="ebook"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+
+        assert clusters.summary()["works_same_isbn"] == 1
+        assert set(clusters.same_isbn[0].work_ids) == {boc_dirty.id, boc_clean.id}
+
+        mismatch_ids = {wid for c in clusters.same_isbn_title_mismatch for wid in c.work_ids}
+        assert boc_2.id in mismatch_ids
+
+        applyable_ids = {wid for c in db_.applyable_works_merge_clusters(clusters) for wid in c.work_ids}
+        assert boc_2.id not in applyable_ids
+        assert applyable_ids == {boc_dirty.id, boc_clean.id}
+
+
+def test_ender_shaped_chain_plan_zero_applyable_clusters(db_url):
+    """The prod dry-run's actual false-merge shape: several DISTINCT books sharing ONE bogus
+    ISBN (the real report chained 14 unrelated novels this way). plan_works_merge must produce
+    ZERO applyable same_isbn clusters — only a report-only mismatch cluster, visible for
+    operator triage."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        titles = ["Ender's Game", "Ender's Shadow", "Shadow of the Hegemon", "The Shadow Cabinet"]
+        works = [_work(t) for t in titles]
+        session.add_all(works)
+        session.flush()
+        for w in works:
+            session.add(Edition(work_id=w.id, isbn_13="9780000000000", format="ebook"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+
+        assert clusters.same_isbn == []
+        assert clusters.summary()["works_same_isbn"] == 0
+        mismatch_ids = {wid for c in clusters.same_isbn_title_mismatch for wid in c.work_ids}
+        assert mismatch_ids == {w.id for w in works}
+        assert db_.applyable_works_merge_clusters(clusters) == []
 
 
 def test_detected_duplicates_row_lands_in_its_own_class_with_correct_survivor(db_url):
