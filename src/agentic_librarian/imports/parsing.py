@@ -81,7 +81,10 @@ _ISO_DATETIME_PREFIX = re.compile(r"\d{4}-\d{2}-\d{2}[T ]")
 @dataclass
 class ParsedRow:
     raw_title: str
-    raw_author: str
+    raw_author: str  # parse-normalized primary author (#142, via _primary_author) — NOT the
+    # verbatim CSV cell; a comma/'and'/'&'-joined cell is already collapsed here. Preview and
+    # commit both call parse_rows, so they re-parse identically and the user previews exactly
+    # what will be created.
     raw_format: str  # normalized vocab; defaults to 'ebook'
     raw_date: str  # original text (may be '')
     date_completed: date | None  # parsed; None if blank/unparseable/future

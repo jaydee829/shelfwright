@@ -97,6 +97,14 @@ then `deep_enriched_at` newest, then most editions, then lowest UUID (tie determ
    action (state this in the module docstring so nobody "fixes" it later).
 6. Loser Work row deleted last; orphaned Authors reported via the existing
    `_plan_orphan_authors` loop discipline (re-run dry-run until clean, the 6.3 pattern).
+   Deleting a work must first delete its `detected_duplicates` rows on BOTH sides
+   (`work_id_a` and `work_id_b`) — the FKs deliberately have no ON DELETE behavior (a
+   dangling detection referencing a now-gone work is a plan bug, and the deliberate choice
+   is to fail loud on the FK rather than silently cascade). PR-2 must also treat the
+   `detected_duplicates` feed as UNORDERED pairs: both `(A, B)` and `(B, A)` rows can exist
+   for the same cluster (the composite PK is `(work_id_a, work_id_b)`, not order-normalized),
+   so detection/planning must de-duplicate by the unordered pair, not assume a single
+   canonical row per cluster.
 
 **Gate:** identical to dedup/repair: op-tagged tokens per action (repoint/drop/link-copy
 tagged with their op + ids), report under `data/reports/works-merge-<UTC>.txt` with the DB

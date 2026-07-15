@@ -208,6 +208,7 @@ def test_parse_rows_flags_future_and_unparseable_dates_and_defaults_format():
         ("A, B, C", "A", "two_plus_commas_take_first_segment"),
         ("Author A, Author B, Author A", "Author A", "three_commas_take_first_segment"),
         ("Jane Doe and John Smith", "Jane Doe", "explicit_and_separator_takes_first"),
+        ("X and Y", "X", "single_token_names_and_separator_takes_first"),
         ("Jane Doe & John Smith", "Jane Doe", "explicit_ampersand_separator_takes_first"),
         (
             "Jane Doe, John Smith",

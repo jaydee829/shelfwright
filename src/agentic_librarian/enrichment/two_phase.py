@@ -216,7 +216,19 @@ def enrich_deep(work_id: UUID) -> str:
                      existing Work (the twin) instead of the invoked one. The invoked row is
                      stamped deep_enriched_at (the pass DID complete) and a detected_duplicates
                      row is recorded; the twin's data is untouched by this function beyond
-                     persist's own write. Non-retryable success — see api/internal.py."""
+                     persist's own write. Non-retryable success — see api/internal.py.
+
+    Reviewer-found bug (fixed here): the redirect branch used to INSERT the detected_duplicates
+    row (work_id_a=work_id) BEFORE re-loading the invoked work by id. If the invoked row had
+    been deleted mid-pass, that insert FK-violated on work_id_a, and the raised exception rolled
+    back the WHOLE write session — including the twin's already-`persist`ed pass data in the
+    same transaction — even though the function documents a clean "missing" return for exactly
+    this case. The existence check now runs FIRST, before any write, so a vanished invoked row
+    takes the "missing" path without touching the twin's legitimately-persisted data. Residual:
+    there is still a TOCTOU window between this get() and the session's eventual commit — the
+    invoked row could be deleted in that gap and the FK violation is possible in principle, but
+    it is now a millisecond window instead of spanning the full scout call, matching the same
+    residual accepted elsewhere in this module (#94/#95)."""
     with db_manager.get_session() as session:
         work = session.get(Work, work_id)
         if work is None:
@@ -262,16 +274,25 @@ def enrich_deep(work_id: UUID) -> str:
         # book, dirty invoked-row identity. Do NOT undo the twin's write. Record the redirect
         # (upsert-or-ignore: a redelivered Cloud Tasks retry must not pile up duplicate rows)
         # and stamp the INVOKED row, re-loaded by id since `persisted` is the twin, not it.
-        session.execute(
-            pg_insert(DetectedDuplicate)
-            .values(work_id_a=work_id, work_id_b=persisted.id, source="deep_pass_redirect")
-            .on_conflict_do_nothing(index_elements=["work_id_a", "work_id_b"])
-        )
+        #
+        # Existence check FIRST, before the detected_duplicates insert (reviewer finding): the
+        # invoked row may have been deleted while the slow scouts ran with no session held. If
+        # it's gone, work_id_a=work_id would FK-violate on insert and roll back this whole write
+        # session — including the twin's persist above, in the SAME transaction — turning the
+        # documented "missing" return into unreachable dead code and destroying the twin's
+        # legitimate data as collateral damage. Checking first keeps the vanished-row case a
+        # clean no-op read. A millisecond TOCTOU window remains between this get() and commit
+        # (same residual accepted elsewhere in this module, #94/#95).
         invoked = session.get(Work, work_id)
         if invoked is None:
             # The invoked row was deleted while the slow scouts were running (same
             # deleted-mid-pass honesty rule as the other "missing" cases above).
             return "missing"
+        session.execute(
+            pg_insert(DetectedDuplicate)
+            .values(work_id_a=work_id, work_id_b=persisted.id, source="deep_pass_redirect")
+            .on_conflict_do_nothing(index_elements=["work_id_a", "work_id_b"])
+        )
         invoked.deep_enriched_at = datetime.now(UTC)
         session.flush()
         return "redirected"

@@ -174,8 +174,14 @@ def test_enrich_deep_redirect_stamps_invoked_row_not_twin(monkeypatch):
 
 def test_enrich_deep_redirect_invoked_row_vanished_mid_pass(monkeypatch):
     """If the invoked row vanished mid-pass (deleted while the slow scouts ran with no
-    session held) by the time the redirect stamp tries to re-load it, treat this the same
-    as the existing deleted-mid-pass path: "missing", not a lie."""
+    session held), enrich_deep must report "missing" -- and, per the reviewer finding, it
+    must do so WITHOUT ever attempting the detected_duplicates insert, since work_id_a
+    would reference a work id that no longer exists. A fake session's no-op execute() can't
+    see a real FK violation, so this test asserts on call ORDER (get before execute) and
+    that execute is never reached at all -- the only way a unit test (no real Postgres) can
+    certify the fix without a full db_integration round-trip (see
+    test/integration/test_two_phase_deep.py::test_enrich_deep_redirect_missing_invoked_row_
+    leaves_twin_data_intact_no_detection for the real-FK version)."""
     from uuid import uuid4
 
     invoked_id = uuid4()
@@ -202,3 +208,9 @@ def test_enrich_deep_redirect_invoked_row_vanished_mid_pass(monkeypatch):
     result = two_phase.enrich_deep(invoked_id)
 
     assert result == "missing"
+    # the existence check must run BEFORE the detected_duplicates insert is attempted --
+    # this is the actual fix: previously execute() ran first and would FK-violate for real
+    # (rolling back the twin's persist in the same transaction) instead of short-circuiting
+    # here. A fake session can't raise the FK error itself, so we pin the call ordering.
+    assert calls == [("get", invoked_id)]
+    assert not any(c[0] == "execute" for c in calls)
