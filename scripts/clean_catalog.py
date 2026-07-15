@@ -479,8 +479,12 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.requeue_unenriched:
             candidates = enrichment_sweep.plan_requeue(session)
-            print(f"\n{len(candidates)} works would be requeued for deep enrichment.")
-            for c in candidates[:80]:
+            # GH #141: pending_merge works need the works-merge tool, not another paid deep
+            # pass — split them out of the enqueue loop and print under their own heading.
+            enrichable = [c for c in candidates if c.reason != "pending_merge"]
+            pending_merge = [c for c in candidates if c.reason == "pending_merge"]
+            print(f"\n{len(enrichable)} works would be requeued for deep enrichment.")
+            for c in enrichable[:80]:
                 # Adversarial-pass finding (#95 #97): show deep_enriched_at next to no_real_trope
                 # entries so a REPEAT sweep lets the operator see "already re-attempted after X"
                 # — see the runbook's step 6 repeat-cost warning (each re-enqueue costs up to 9
@@ -488,13 +492,16 @@ def main(argv: list[str] | None = None) -> int:
                 # re-enqueued forever).
                 stamp = f"  (deep_enriched_at={c.deep_enriched_at})" if c.deep_enriched_at else ""
                 print(f"  [{c.reason:20}] {c.title[:60]}  ({c.work_id}){stamp}")
+            print(f"\n{len(pending_merge)} works are pending a merge (see the works-merge tool) — NEVER enqueued:")
+            for c in pending_merge[:80]:
+                print(f"  [pending_merge        ] {c.title[:60]}  ({c.work_id})")
             early = _refuse(args, url, safe)
             if early is not None:
                 return early
             from agentic_librarian.enrichment.tasks import enqueue_enrichment
 
-            enqueued = sum(1 for c in candidates if enqueue_enrichment(str(c.work_id)))
-            print(f"\napplied: enqueued {enqueued}/{len(candidates)} works (see logs for any that skipped).")
+            enqueued = sum(1 for c in enrichable if enqueue_enrichment(str(c.work_id)))
+            print(f"\napplied: enqueued {enqueued}/{len(enrichable)} works (see logs for any that skipped).")
             return 0
 
         if args.dedup_for_constraints:

@@ -390,6 +390,23 @@ class AvailabilityCache(Base):
     )  # caller always supplies the fetch time; no default by design
 
 
+class DetectedDuplicate(Base):
+    """GH #141: recorded when the deep pass's write-session dedup re-check resolves the
+    invoked work's scout-canonical identity to a DIFFERENT existing work (a "redirect") —
+    the persist legitimately lands on the twin (same book), so this table is the works-merge
+    tool's queryable feed instead of a silent mis-stamp. work_id_a = the invoked/dirty work,
+    work_id_b = the resolved twin. Composite PK so a repeat detection (e.g. a redelivered
+    Cloud Tasks retry) upserts-or-ignores rather than piling up duplicate rows — see
+    two_phase.enrich_deep's ON CONFLICT DO NOTHING insert."""
+
+    __tablename__ = "detected_duplicates"
+
+    work_id_a: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True, nullable=False)
+    work_id_b: Mapped[UUID] = mapped_column(ForeignKey("works.id"), primary_key=True, nullable=False, index=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ImportJob(Base):
     """One bulk-import upload (Spec 2026-06-18). Progress is derived from import_rows,
     not stored here — so Cloud Tasks redelivery can never double-count."""

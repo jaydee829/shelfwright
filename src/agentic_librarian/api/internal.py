@@ -94,6 +94,12 @@ def enrich(
     if result == "missing":
         # Non-retryable: the work no longer exists. 404 stops Cloud Tasks from retrying.
         raise HTTPException(status_code=404, detail="work not found")
+    if result == "redirected":
+        # GH #141: the pass completed but persist landed its data on a different (twin) work
+        # — a detected_duplicates row now records it for the works-merge tool. Non-retryable
+        # success: the invoked work IS stamped, and retrying would only burn another paid
+        # deep pass for data that already lives on the twin.
+        return {"work_id": str(work_id), "status": "redirected"}
     if result == "empty":
         if _has_real_trope(work_id):
             # The work already has a real fingerprint from a prior pass; this empty pass
