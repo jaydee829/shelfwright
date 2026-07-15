@@ -41,7 +41,8 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -58,6 +59,7 @@ from agentic_librarian.db.models import (
     Suggestions,
     Work,
     WorkContributor,
+    WorkStyle,
     WorkTrope,
     edition_narrators,
 )
@@ -1472,3 +1474,737 @@ def plan_delta(reviewed: dict[str, set[str]], fresh: DedupPlan) -> dict[str, set
     ordinary `skipped_stale` territory at apply time, not a plan drift)."""
     fresh_ids = plan_id_set(fresh)
     return {name: fresh_ids.get(name, set()) - reviewed.get(name, set()) for name in PLAN_ID_SET_CLASSES}
+
+
+# --------------------------------------------------------------------------------------------
+# Works-merge APPLY (H2, Spec 2026-07-14 "Merge composition" / "Gate" / item 6). Builds the
+# actual merge composition on top of plan_works_merge's clusters (same module, same file, per
+# the design spec — "extend etl/dedup_backfill.py... do NOT build a parallel tool").
+#
+# ONLY same_isbn / same_identity / detected_duplicates clusters are ever composed —
+# fuzzy_report_only is STRUCTURALLY unreachable here: compose_cluster_merge and
+# apply_works_merge only ever iterate WorksMergeClusters.same_isbn/.same_identity/
+# .detected_duplicates (see applyable_works_merge_clusters below), never .fuzzy_report_only.
+# There is no code path, however careless, that could reach it — the field simply isn't in the
+# iteration.
+#
+# DISJOINTNESS PROOF (deliverable 2 — the deferred-intersections discipline, reasoned through
+# rather than found empirically): after plan_works_merge_clusters' union-find, every cluster is a
+# disjoint SET OF WORK IDS — no work id appears in two clusters (union-find guarantees this by
+# construction: any pair that shares a work id gets unioned into the SAME cluster). Every row this
+# composition ever touches (editions, reading_history, edition_narrators, suggestions, work_tropes,
+# work_styles, work_contributors, detected_duplicates) hangs off exactly one work id via a
+# NOT-NULL foreign key (Edition.work_id, ReadingHistory.edition_id -> Edition.work_id transitively,
+# Suggestions.work_id, WorkTrope.work_id, WorkStyle.work_id, WorkContributor.work_id,
+# DetectedDuplicate.work_id_a/work_id_b). A row can only be "in play" for a cluster if its owning
+# work id is a member of that cluster's work_ids set. Since work_ids sets are disjoint across
+# clusters in one plan, a row belonging to work W can only ever be named by the ONE cluster that
+# contains W — never by two different clusters in the same plan. This rules out the dedup_backfill
+# 6.3 hazard (a row touched by two independently-computed classes from the same snapshot) BY
+# CONSTRUCTION, not by scanning for overlaps after the fact.
+#
+# The one genuine cross-cluster collision surface the spec calls out is a UNIQUENESS constraint
+# spanning rows from DIFFERENT works: uq_suggestions_active is (user_id, work_id) WHERE
+# status='Suggested' — repointing a loser's suggestion onto ITS OWN cluster's survivor can collide
+# with that survivor's own pre-existing active suggestion (handled in-cluster, below, as
+# drop_duplicate_suggestion). That collision is always WITHIN one cluster (the loser and survivor
+# are members of the same cluster, by definition of the repoint) — never across two clusters,
+# because the colliding row (survivor's own suggestion) only becomes "in play" for whichever
+# cluster its OWN work id belongs to. A genuine cross-cluster version of this (same user, active
+# suggestion on the survivors of TWO DIFFERENT clusters, where those two survivor works are
+# somehow the same book split into two separate clusters) cannot arise: if two works were the same
+# book, detection would have paired them and union-find would have merged them into ONE cluster.
+# So there is nothing to defer here — the deferred_intersections mechanism dedup_backfill needed
+# (two INDEPENDENTLY-classed groups touching the same row) has no analogue in this composition,
+# and this section documents that rather than building unused deferral plumbing. If a future
+# detection class ever produces overlapping (non-disjoint) clusters, this proof breaks and a
+# deferral mechanism would need to be added then — not before.
+# --------------------------------------------------------------------------------------------
+
+
+@dataclass
+class WorkMergeComposition:
+    """Every op one cluster's merge composition performs, in apply order. Built by
+    compose_cluster_merge against CURRENT session state (read-only) — apply_works_merge executes
+    exactly what this names, same "apply what was shown" discipline as apply_dedup."""
+
+    cluster: WorksMergeCluster
+    survivor_id: UUID
+    loser_ids: list[UUID]
+
+    # 1. Editions: whole-edition repoints (no format collision) vs merges (loser edition dropped,
+    # its reading_history/edition_narrators repointed onto the survivor's same-format edition).
+    repoint_edition_ids: list[UUID] = field(default_factory=list)
+    merge_editions: list[EditionMergeGroup] = field(default_factory=list)
+    dropped_duplicate_reads: int = 0
+
+    # 2. Suggestions.
+    repoint_suggestion_ids: list[UUID] = field(default_factory=list)
+    drop_duplicate_suggestion_ids: list[UUID] = field(default_factory=list)
+
+    # 3. Trope/style links: union onto the survivor.
+    copy_trope_links: list[tuple[UUID, UUID, float, str | None]] = field(default_factory=list)
+    drop_trope_links: list[tuple[UUID, UUID]] = field(default_factory=list)
+    copy_style_links: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+    drop_style_links: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+
+    # 4. Contributors: union by (author_id, role).
+    copy_contributors: list[tuple[UUID, str]] = field(default_factory=list)
+    drop_contributors: list[tuple[UUID, UUID, str]] = field(default_factory=list)
+    malformed_author_candidates: list[UUID] = field(default_factory=list)
+
+    # 5. detected_duplicates rows referencing ANY loser on either side — deleted before the losers.
+    delete_detection_pairs: list[tuple[UUID, UUID]] = field(default_factory=list)
+
+    # 6. Loser Work rows, deleted last.
+    delete_work_ids: list[UUID] = field(default_factory=list)
+
+
+def compose_cluster_merge(session: Session, cluster: WorksMergeCluster) -> WorkMergeComposition:
+    """READ ONLY. Composes one cluster's merge — every op needed to fold cluster.work_ids onto
+    cluster.survivor_id — against CURRENT session state. See the module-level disjointness proof
+    above for why composing clusters independently (no cross-cluster deferral) is safe.
+
+    Ordered exactly per the design spec: editions -> suggestions -> trope/style links ->
+    contributors -> detected_duplicates -> Work rows. apply_works_merge executes in this order."""
+    survivor_id = cluster.survivor_id
+    loser_ids = sorted((wid for wid in cluster.work_ids if wid != survivor_id), key=str)
+    comp = WorkMergeComposition(cluster=cluster, survivor_id=survivor_id, loser_ids=loser_ids)
+
+    # --- 1. Editions -------------------------------------------------------------------------
+    survivor_editions_by_fmt: dict[str, Edition] = {
+        (e.format or ""): e for e in session.query(Edition).filter_by(work_id=survivor_id).order_by(Edition.id).all()
+    }
+    survivor_dates_by_edition_user: dict[UUID, dict[UUID, set]] = defaultdict(lambda: defaultdict(set))
+    for survivor_edition in survivor_editions_by_fmt.values():
+        for rh in (
+            session.query(ReadingHistory).filter_by(edition_id=survivor_edition.id).order_by(ReadingHistory.id).all()
+        ):
+            survivor_dates_by_edition_user[survivor_edition.id][rh.user_id].add(rh.date_completed)
+    survivor_narrators_by_edition: dict[UUID, set[UUID]] = {}
+    for survivor_edition in survivor_editions_by_fmt.values():
+        survivor_narrators_by_edition[survivor_edition.id] = {
+            row.narrator_id
+            for row in session.execute(
+                select(edition_narrators.c.narrator_id)
+                .where(edition_narrators.c.edition_id == survivor_edition.id)
+                .order_by(edition_narrators.c.narrator_id)
+            ).all()
+        }
+
+    for loser_id in loser_ids:
+        for loser_edition in session.query(Edition).filter_by(work_id=loser_id).order_by(Edition.id).all():
+            fmt_key = loser_edition.format or ""
+            collision = survivor_editions_by_fmt.get(fmt_key)
+            if collision is None:
+                # No same-format edition on the survivor yet -> whole-edition repoint. Register
+                # it as the survivor's edition for this format so a SECOND loser edition of the
+                # same format (rare but possible across a 3+-work cluster) merges into THIS one
+                # rather than repointing independently, per the module's collision handling.
+                comp.repoint_edition_ids.append(loser_edition.id)
+                survivor_editions_by_fmt[fmt_key] = loser_edition
+                dates_by_user: dict[UUID, set] = defaultdict(set)
+                for rh in session.query(ReadingHistory).filter_by(edition_id=loser_edition.id).all():
+                    dates_by_user[rh.user_id].add(rh.date_completed)
+                survivor_dates_by_edition_user[loser_edition.id] = dates_by_user
+                survivor_narrators_by_edition[loser_edition.id] = {
+                    row.narrator_id
+                    for row in session.execute(
+                        select(edition_narrators.c.narrator_id).where(
+                            edition_narrators.c.edition_id == loser_edition.id
+                        )
+                    ).all()
+                }
+                continue
+
+            # uq_editions_work_format collision: keep the survivor's (or the first-registered)
+            # edition, merge the loser edition's reading_history + edition_narrators onto it.
+            merge_group = next((mg for mg in comp.merge_editions if mg.survivor_id == collision.id), None)
+            if merge_group is None:
+                merge_group = EditionMergeGroup(
+                    survivor_id=collision.id, work_id=survivor_id, fmt=fmt_key or None, loser_ids=[]
+                )
+                comp.merge_editions.append(merge_group)
+            merge_group.loser_ids.append(loser_edition.id)
+
+            dates_by_user = survivor_dates_by_edition_user[collision.id]
+            for rh in (
+                session.query(ReadingHistory).filter_by(edition_id=loser_edition.id).order_by(ReadingHistory.id).all()
+            ):
+                if rh.date_completed in dates_by_user.get(rh.user_id, set()):
+                    merge_group.delete_reading_history.append(rh.id)
+                    comp.dropped_duplicate_reads += 1
+                else:
+                    merge_group.repoint_reading_history.append(rh.id)
+                    dates_by_user.setdefault(rh.user_id, set()).add(rh.date_completed)
+
+            narrator_ids = survivor_narrators_by_edition.setdefault(collision.id, set())
+            for row in session.execute(
+                select(edition_narrators.c.narrator_id)
+                .where(edition_narrators.c.edition_id == loser_edition.id)
+                .order_by(edition_narrators.c.narrator_id)
+            ).all():
+                nid = row.narrator_id
+                if nid in narrator_ids:
+                    merge_group.delete_narrators.append((loser_edition.id, nid))
+                else:
+                    merge_group.repoint_narrators.append((loser_edition.id, nid))
+                    narrator_ids.add(nid)
+
+    # --- 2. Suggestions ------------------------------------------------------------------------
+    survivor_active_users = {
+        s.user_id
+        for s in session.query(Suggestions)
+        .filter_by(work_id=survivor_id, status="Suggested")
+        .order_by(Suggestions.id)
+        .all()
+    }
+    for loser_id in loser_ids:
+        for s in (
+            session.query(Suggestions).filter_by(work_id=loser_id, status="Suggested").order_by(Suggestions.id).all()
+        ):
+            if s.user_id in survivor_active_users:
+                comp.drop_duplicate_suggestion_ids.append(s.id)
+            else:
+                comp.repoint_suggestion_ids.append(s.id)
+                survivor_active_users.add(s.user_id)
+        # Non-'Suggested' (Accepted/Rejected/etc.) suggestions carry no active-uniqueness
+        # constraint — always repoint, never drop.
+        for s in (
+            session.query(Suggestions)
+            .filter(Suggestions.work_id == loser_id, Suggestions.status != "Suggested")
+            .order_by(Suggestions.id)
+            .all()
+        ):
+            comp.repoint_suggestion_ids.append(s.id)
+
+    # --- 3. Trope/style links: union ------------------------------------------------------------
+    survivor_trope_ids = {
+        wt.trope_id for wt in session.query(WorkTrope).filter_by(work_id=survivor_id).order_by(WorkTrope.trope_id).all()
+    }
+    survivor_style_keys = {
+        (ws.style_id, ws.attribute_type)
+        for ws in session.query(WorkStyle)
+        .filter_by(work_id=survivor_id)
+        .order_by(WorkStyle.style_id, WorkStyle.attribute_type)
+        .all()
+    }
+    for loser_id in loser_ids:
+        for wt in session.query(WorkTrope).filter_by(work_id=loser_id).order_by(WorkTrope.trope_id).all():
+            if wt.trope_id in survivor_trope_ids:
+                comp.drop_trope_links.append((loser_id, wt.trope_id))
+            else:
+                comp.copy_trope_links.append((loser_id, wt.trope_id, wt.relevance_score, wt.justification))
+                survivor_trope_ids.add(wt.trope_id)
+        for ws in (
+            session.query(WorkStyle)
+            .filter_by(work_id=loser_id)
+            .order_by(WorkStyle.style_id, WorkStyle.attribute_type)
+            .all()
+        ):
+            key = (ws.style_id, ws.attribute_type)
+            if key in survivor_style_keys:
+                comp.drop_style_links.append((loser_id, ws.style_id, ws.attribute_type))
+            else:
+                comp.copy_style_links.append((loser_id, ws.style_id, ws.attribute_type))
+                survivor_style_keys.add(key)
+
+    # --- 4. Contributors: union by (author_id, role) --------------------------------------------
+    survivor_contributors = (
+        session.query(WorkContributor)
+        .filter_by(work_id=survivor_id)
+        .order_by(WorkContributor.author_id, WorkContributor.role)
+        .all()
+    )
+    survivor_keys = {(wc.author_id, wc.role) for wc in survivor_contributors}
+    survivor_names_by_role: dict[str, set[str]] = defaultdict(set)
+    for wc in survivor_contributors:
+        author = session.get(Author, wc.author_id)
+        if author is not None:
+            survivor_names_by_role[wc.role].add(author.name.strip().casefold())
+
+    for loser_id in loser_ids:
+        for wc in (
+            session.query(WorkContributor)
+            .filter_by(work_id=loser_id)
+            .order_by(WorkContributor.author_id, WorkContributor.role)
+            .all()
+        ):
+            key = (wc.author_id, wc.role)
+            if key in survivor_keys:
+                comp.drop_contributors.append((loser_id, wc.author_id, wc.role))
+                continue
+            author = session.get(Author, wc.author_id)
+            name_cf = author.name.strip().casefold() if author is not None else None
+            if name_cf is not None and name_cf in survivor_names_by_role.get(wc.role, set()):
+                # A DIFFERENT Author row already on the survivor case-folds equal (the #142
+                # malformed-comma-joined-author shape) — report, never mutate an Author here.
+                comp.malformed_author_candidates.append(wc.author_id)
+                continue
+            comp.copy_contributors.append((wc.author_id, wc.role))
+            survivor_keys.add(key)
+            if name_cf is not None:
+                survivor_names_by_role[wc.role].add(name_cf)
+
+    # --- 5. detected_duplicates: delete every row referencing ANY loser on either side. Not
+    # restricted to rows where BOTH sides are cluster members: a loser could in principle be
+    # named in a detection row against a work id outside this cluster (e.g. a stale detection
+    # from before this cluster's shape settled) — the spec is unconditional ("delete ALL rows
+    # referencing any loser on EITHER side"), since the FKs fail loud on a dangling reference
+    # once the loser Work row is deleted below, and a dangling detection is never valid to keep.
+    loser_id_set = set(loser_ids)
+    for row in session.query(DetectedDuplicate.work_id_a, DetectedDuplicate.work_id_b).all():
+        a, b = row
+        if a in loser_id_set or b in loser_id_set:
+            comp.delete_detection_pairs.append((a, b))
+
+    # --- 6. Loser Work rows, last -----------------------------------------------------------------
+    comp.delete_work_ids = list(loser_ids)
+
+    return comp
+
+
+def applyable_works_merge_clusters(clusters: WorksMergeClusters) -> list[WorksMergeCluster]:
+    """The ONLY clusters compose_cluster_merge/apply_works_merge ever iterate — same_isbn,
+    same_identity, detected_duplicates, in that (evidence-strongest-first) order.
+    fuzzy_report_only is NEVER included: this is the single choke point that keeps the fuzzy
+    class structurally unreachable by apply (see the module comment above compose_cluster_merge)
+    — every caller (plan_works_merge_apply, apply_works_merge, the token/report functions below)
+    goes through this function rather than reading WorksMergeClusters' fields directly, so
+    "never apply fuzzy" is enforced in exactly one place."""
+    return [*clusters.same_isbn, *clusters.same_identity, *clusters.detected_duplicates]
+
+
+def plan_works_merge_apply(session: Session) -> list[WorkMergeComposition]:
+    """READ ONLY. Detects clusters fresh (plan_works_merge) and composes each applyable one
+    (applyable_works_merge_clusters) against CURRENT session state. This is what both the
+    dry-run report and apply_works_merge's fresh re-plan call — always the same function, so
+    "what dry-run showed" and "what a fresh re-plan sees" are computed identically."""
+    clusters = plan_works_merge(session)
+    return [compose_cluster_merge(session, cluster) for cluster in applyable_works_merge_clusters(clusters)]
+
+
+# --------------------------------------------------------------------------------------------
+# Op-tagged tokens (mirrors plan_id_set / fallback_repair.plan_tokens EXACTLY — see plan_id_set's
+# docstring for why the op-tag is load-bearing: an operation FLIP on the same id between the
+# reviewed report and a fresh apply-time re-plan must show up as a NEW token, not an unchanged
+# bare id, so plan_delta's refuse-on-addition catches it.
+# --------------------------------------------------------------------------------------------
+
+WORKS_MERGE_OPS = (
+    "repoint_edition",
+    "merge_edition",
+    "repoint_read",
+    "drop_duplicate_read",
+    "repoint_narrator",
+    "drop_narrator",
+    "repoint_suggestion",
+    "drop_duplicate_suggestion",
+    "copy_link",
+    "drop_link",
+    "copy_contributor",
+    "drop_contributor",
+    "delete_detection",
+    "delete_work",
+)
+
+
+def works_merge_tokens(compositions: list[WorkMergeComposition]) -> set[str]:
+    """Every op every composition performs, as one flat set of opaque `<op>:<...>` tokens — one
+    set (not per-class, unlike plan_id_set/fallback_repair's PLAN_*_CLASSES) since this gate has
+    a single applyable action surface, not several independently-reviewable classes. Composite
+    identifiers stringify as `<op>:<tuple-repr>`, same convention as plan_id_set."""
+    tokens: set[str] = set()
+    for comp in compositions:
+        tokens.add(f"merge_cluster:{comp.survivor_id}:{sorted(str(x) for x in comp.loser_ids)}")
+        tokens.update(f"repoint_edition:{eid}" for eid in comp.repoint_edition_ids)
+        for mg in comp.merge_editions:
+            tokens.add(f"merge_edition:{(mg.survivor_id, sorted(str(x) for x in mg.loser_ids))}")
+            tokens.update(f"repoint_read:{rh_id}" for rh_id in mg.repoint_reading_history)
+            tokens.update(f"drop_duplicate_read:{rh_id}" for rh_id in mg.delete_reading_history)
+            tokens.update(f"repoint_narrator:{item}" for item in mg.repoint_narrators)
+            tokens.update(f"drop_narrator:{item}" for item in mg.delete_narrators)
+        tokens.update(f"repoint_suggestion:{sid}" for sid in comp.repoint_suggestion_ids)
+        tokens.update(f"drop_duplicate_suggestion:{sid}" for sid in comp.drop_duplicate_suggestion_ids)
+        tokens.update(f"copy_link:trope:{item}" for item in comp.copy_trope_links)
+        tokens.update(f"drop_link:trope:{item}" for item in comp.drop_trope_links)
+        tokens.update(f"copy_link:style:{item}" for item in comp.copy_style_links)
+        tokens.update(f"drop_link:style:{item}" for item in comp.drop_style_links)
+        tokens.update(f"copy_contributor:{(comp.survivor_id, item)}" for item in comp.copy_contributors)
+        tokens.update(f"drop_contributor:{item}" for item in comp.drop_contributors)
+        tokens.update(f"delete_detection:{item}" for item in comp.delete_detection_pairs)
+        tokens.update(f"delete_work:{wid}" for wid in comp.delete_work_ids)
+    return tokens
+
+
+def works_merge_delta(reviewed: set[str], fresh_compositions: list[WorkMergeComposition]) -> set[str]:
+    """Tokens present in the FRESH compositions but NOT in the REVIEWED token set. Empty means
+    fresh is a subset of reviewed — safe to apply. Mirrors plan_delta/fallback_repair.plan_delta,
+    single flat set instead of per-class since works_merge_tokens is single-set (see its
+    docstring)."""
+    return works_merge_tokens(fresh_compositions) - reviewed
+
+
+# --------------------------------------------------------------------------------------------
+# Report: human-readable cluster sections (reuses render_works_merge_report's per-cluster
+# rendering) + the machine-readable token block + fail-closed END-marker parser. Mirrors
+# fallback_repair.write_report/parse_report EXACTLY.
+# --------------------------------------------------------------------------------------------
+
+
+def render_works_merge_apply_report(
+    clusters: WorksMergeClusters, compositions: list[WorkMergeComposition], *, db_target: str | None = None
+) -> str:
+    """Human-readable cluster sections (H1's render_works_merge_report) PLUS a per-composition
+    op summary PLUS the '== PLAN TOKENS ==' machine-readable block apply_works_merge's drift
+    gate cross-checks a fresh re-plan against. fuzzy_report_only is rendered same as before
+    (never-applied marker) — it is NEVER part of `compositions` (see
+    applyable_works_merge_clusters), so it never appears in the token block."""
+    lines: list[str] = [render_works_merge_report(clusters, db_target=db_target), ""]
+
+    lines.append("=== apply composition (per applyable cluster) ===")
+    for comp in compositions:
+        lines.append(f"  cluster survivor={comp.survivor_id}  losers={comp.loser_ids}")
+        lines.append(
+            f"    repoint_editions={comp.repoint_edition_ids}  "
+            f"merge_editions={len(comp.merge_editions)}  dropped_duplicate_reads={comp.dropped_duplicate_reads}"
+        )
+        lines.append(
+            f"    repoint_suggestions={comp.repoint_suggestion_ids}  "
+            f"drop_duplicate_suggestions={comp.drop_duplicate_suggestion_ids}"
+        )
+        lines.append(
+            f"    copy_trope_links={len(comp.copy_trope_links)}  drop_trope_links={len(comp.drop_trope_links)}  "
+            f"copy_style_links={len(comp.copy_style_links)}  drop_style_links={len(comp.drop_style_links)}"
+        )
+        lines.append(f"    copy_contributors={comp.copy_contributors}  drop_contributors={comp.drop_contributors}")
+        if comp.malformed_author_candidates:
+            lines.append(
+                f"    malformed_author_candidates={comp.malformed_author_candidates}  "
+                "(report-only — no author mutation)"
+            )
+        lines.append(f"    delete_detection_pairs={comp.delete_detection_pairs}")
+        lines.append(f"    delete_work_ids={comp.delete_work_ids}")
+    lines.append("")
+
+    lines.append("== PLAN TOKENS ==")
+    tokens = sorted(works_merge_tokens(compositions))
+    lines.append(f"[works_merge] {len(tokens)}")
+    lines.extend(tokens)
+    lines.append("== END PLAN TOKENS ==")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_works_merge_apply_report(
+    clusters: WorksMergeClusters,
+    compositions: list[WorkMergeComposition],
+    reports_dir: Path | None = None,
+    db_target: str | None = None,
+) -> Path:
+    """Persists render_works_merge_apply_report to data/reports/works-merge-<UTC>.txt —
+    SAME filename prefix as H1's planning-only report (_write_works_merge_report in
+    scripts/clean_catalog.py), since this supersedes it as the operator-facing artifact once
+    apply exists; microsecond timestamp keeps a dry-run's write and an apply's fresh-plan write
+    from colliding on the same path (mirrors _write_dedup_report's collision-avoidance
+    reasoning)."""
+    reports_dir = reports_dir or Path("data/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    ts = now.strftime("%Y%m%dT%H%M%S") + f"{now.microsecond:06d}Z"
+    path = reports_dir / f"works-merge-{ts}.txt"
+    path.write_text(render_works_merge_apply_report(clusters, compositions, db_target=db_target), encoding="utf-8")
+    return path
+
+
+def parse_works_merge_report(report_text: str) -> set[str]:
+    """Parse the '== PLAN TOKENS ==' block back into the flat token set works_merge_tokens
+    produces. Fail-closed (mirrors fallback_repair.parse_report EXACTLY): raises ValueError if
+    the start marker is missing, if the END marker is missing (truncated report), or if a
+    class-header-shaped line (`[...]`) doesn't actually parse as one."""
+    lines = report_text.splitlines()
+    try:
+        start = lines.index("== PLAN TOKENS ==")
+    except ValueError as exc:
+        raise ValueError(
+            "report has no '== PLAN TOKENS ==' section — not a works-merge apply report, or an old-format one"
+        ) from exc
+
+    try:
+        end = lines.index("== END PLAN TOKENS ==", start + 1)
+    except ValueError as exc:
+        raise ValueError("report has no '== END PLAN TOKENS ==' terminator — truncated or corrupt report") from exc
+
+    out: set[str] = set()
+    for line in lines[start + 1 : end]:
+        if line.startswith("["):
+            if "]" not in line:
+                raise ValueError(f"malformed class-header line in PLAN TOKENS block: {line!r}")
+            continue
+        if line:
+            out.add(line)
+    return out
+
+
+# --------------------------------------------------------------------------------------------
+# Apply — THE USER GATE (mirrors fallback_repair.apply_fallback_repair / apply_dedup exactly)
+# --------------------------------------------------------------------------------------------
+
+
+class WorksMergeDriftError(ValueError):
+    """Raised instead of a bare ValueError when apply_works_merge's fresh re-plan drifted from
+    the reviewed report — mirrors FallbackRepairDriftError exactly. Carries the offending delta
+    TOKENS (not just a count) and the path of a fresh report written from the drifted
+    compositions, ready for immediate re-review."""
+
+    def __init__(self, delta: set[str], fresh_report_path: Path):
+        self.delta = delta
+        self.fresh_report_path = fresh_report_path
+        super().__init__(
+            f"REFUSING apply_works_merge: fresh plan drifted from the reviewed report (+{len(delta)} new "
+            f"token(s)). A fresh report was written to {fresh_report_path} — re-review it before re-applying."
+        )
+
+
+def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str, int]:
+    """--merge-works-apply is a SEPARATE invocation from the reviewed --merge-works dry-run.
+    Re-plans FRESH (plan_works_merge_apply — same function the dry-run report was built from)
+    and REFUSES (raises WorksMergeDriftError, no partial writes — nothing is flushed before the
+    drift check completes) if the fresh token set contains ANY token absent from the reviewed
+    set — including an operation flip on the same id (op-tagged tokens, see works_merge_tokens).
+    fresh ⊆ reviewed is fine (skipped_stale territory, reported not refused).
+
+    Executes ALL applyable clusters' compositions in ONE transaction, in per-cluster order
+    (editions -> suggestions -> links -> contributors -> detected_duplicates -> Work deletes),
+    matching the design spec's ordered steps. Every row lookup re-verifies against the session
+    at apply time (session.get) and anything vanished since the fresh plan was composed a moment
+    ago is counted under skipped_stale rather than raising — the ordinary "apply what was shown,
+    tolerate the sub-second race" discipline every other gated tool in this module follows.
+
+    fuzzy_report_only clusters are never in `fresh_compositions` at all (applyable_works_merge_
+    clusters) — the structural exclusion holds through this gate by construction, not by a
+    runtime check here."""
+    reviewed_tokens = parse_works_merge_report(Path(reviewed_report_path).read_text(encoding="utf-8"))
+
+    fresh_clusters = plan_works_merge(session)
+    fresh_compositions = [
+        compose_cluster_merge(session, cluster) for cluster in applyable_works_merge_clusters(fresh_clusters)
+    ]
+    fresh_tokens = works_merge_tokens(fresh_compositions)
+    delta = fresh_tokens - reviewed_tokens
+    if delta:
+        fresh_report_path = write_works_merge_apply_report(fresh_clusters, fresh_compositions)
+        raise WorksMergeDriftError(delta, fresh_report_path)
+
+    shrinkage = len(reviewed_tokens - fresh_tokens)
+
+    result = {
+        "repoint_edition": 0,
+        "merge_edition": 0,
+        "repoint_read": 0,
+        "drop_duplicate_read": 0,
+        "repoint_narrator": 0,
+        "drop_narrator": 0,
+        "repoint_suggestion": 0,
+        "drop_duplicate_suggestion": 0,
+        "copy_link": 0,
+        "drop_link": 0,
+        "copy_contributor": 0,
+        "drop_contributor": 0,
+        "delete_detection": 0,
+        "delete_work": 0,
+        "skipped_stale": shrinkage,
+    }
+
+    for comp in fresh_compositions:
+        if session.get(Work, comp.survivor_id) is None:
+            result["skipped_stale"] += 1
+            continue
+
+        # 1a. Whole-edition repoints.
+        for eid in comp.repoint_edition_ids:
+            e = session.get(Edition, eid)
+            if e is None:
+                result["skipped_stale"] += 1
+                continue
+            e.work_id = comp.survivor_id
+            result["repoint_edition"] += 1
+        session.flush()
+
+        # 1b. Edition merges (format collision).
+        for mg in comp.merge_editions:
+            if session.get(Edition, mg.survivor_id) is None:
+                result["skipped_stale"] += 1
+                continue
+            for rh_id in mg.repoint_reading_history:
+                rh = session.get(ReadingHistory, rh_id)
+                if rh is None:
+                    result["skipped_stale"] += 1
+                    continue
+                rh.edition_id = mg.survivor_id
+                result["repoint_read"] += 1
+            for rh_id in mg.delete_reading_history:
+                rh = session.get(ReadingHistory, rh_id)
+                if rh is None:
+                    result["skipped_stale"] += 1
+                    continue
+                session.delete(rh)
+                result["drop_duplicate_read"] += 1
+            session.flush()
+
+            for edition_id, narrator_id in mg.repoint_narrators:
+                exists = session.execute(
+                    select(edition_narrators.c.edition_id).where(
+                        edition_narrators.c.edition_id == edition_id, edition_narrators.c.narrator_id == narrator_id
+                    )
+                ).first()
+                if exists is None:
+                    result["skipped_stale"] += 1
+                    continue
+                session.execute(
+                    delete(edition_narrators).where(
+                        edition_narrators.c.edition_id == edition_id, edition_narrators.c.narrator_id == narrator_id
+                    )
+                )
+                session.execute(edition_narrators.insert().values(edition_id=mg.survivor_id, narrator_id=narrator_id))
+                result["repoint_narrator"] += 1
+            for edition_id, narrator_id in mg.delete_narrators:
+                session.execute(
+                    delete(edition_narrators).where(
+                        edition_narrators.c.edition_id == edition_id, edition_narrators.c.narrator_id == narrator_id
+                    )
+                )
+                result["drop_narrator"] += 1
+            session.flush()
+
+            for loser_edition_id in mg.loser_ids:
+                le = session.get(Edition, loser_edition_id)
+                if le is None:
+                    result["skipped_stale"] += 1
+                    continue
+                # Belt-and-braces (mirrors _apply_edition_group): refuse if an unplanned
+                # edition_narrators row still hangs off this loser edition — deleting it would
+                # cascade that unaccounted-for row away.
+                unplanned = session.execute(
+                    select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == loser_edition_id)
+                ).first()
+                if unplanned is not None:
+                    result["skipped_stale"] += 1
+                    continue
+                session.delete(le)
+            session.flush()
+
+        # 2. Suggestions.
+        for sid in comp.repoint_suggestion_ids:
+            s = session.get(Suggestions, sid)
+            if s is None:
+                result["skipped_stale"] += 1
+                continue
+            s.work_id = comp.survivor_id
+            result["repoint_suggestion"] += 1
+        for sid in comp.drop_duplicate_suggestion_ids:
+            s = session.get(Suggestions, sid)
+            if s is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(s)
+            result["drop_duplicate_suggestion"] += 1
+        session.flush()
+
+        # 3. Trope/style link union.
+        for loser_work_id, trope_id, relevance, justification in comp.copy_trope_links:
+            existing = session.get(WorkTrope, {"work_id": comp.survivor_id, "trope_id": trope_id})
+            source = session.get(WorkTrope, {"work_id": loser_work_id, "trope_id": trope_id})
+            if source is None:
+                result["skipped_stale"] += 1
+                continue
+            if existing is None:
+                session.add(
+                    WorkTrope(
+                        work_id=comp.survivor_id,
+                        trope_id=trope_id,
+                        relevance_score=relevance,
+                        justification=justification,
+                    )
+                )
+                result["copy_link"] += 1
+            session.delete(source)
+        for loser_work_id, trope_id in comp.drop_trope_links:
+            wt = session.get(WorkTrope, {"work_id": loser_work_id, "trope_id": trope_id})
+            if wt is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(wt)
+            result["drop_link"] += 1
+        session.flush()
+
+        for loser_work_id, style_id, attribute_type in comp.copy_style_links:
+            pk = {"work_id": comp.survivor_id, "style_id": style_id, "attribute_type": attribute_type}
+            existing = session.get(WorkStyle, pk)
+            source_pk = {"work_id": loser_work_id, "style_id": style_id, "attribute_type": attribute_type}
+            source = session.get(WorkStyle, source_pk)
+            if source is None:
+                result["skipped_stale"] += 1
+                continue
+            if existing is None:
+                session.add(WorkStyle(work_id=comp.survivor_id, style_id=style_id, attribute_type=attribute_type))
+                result["copy_link"] += 1
+            session.delete(source)
+        for loser_work_id, style_id, attribute_type in comp.drop_style_links:
+            ws = session.get(
+                WorkStyle, {"work_id": loser_work_id, "style_id": style_id, "attribute_type": attribute_type}
+            )
+            if ws is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(ws)
+            result["drop_link"] += 1
+        session.flush()
+
+        # 4. Contributors: union by (author_id, role).
+        for author_id, role in comp.copy_contributors:
+            pk = {"work_id": comp.survivor_id, "author_id": author_id, "role": role}
+            if session.get(WorkContributor, pk) is not None:
+                result["skipped_stale"] += 1
+                continue
+            session.add(WorkContributor(work_id=comp.survivor_id, author_id=author_id, role=role))
+            result["copy_contributor"] += 1
+        for loser_work_id, author_id, role in comp.drop_contributors:
+            wc = session.get(WorkContributor, {"work_id": loser_work_id, "author_id": author_id, "role": role})
+            if wc is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(wc)
+            result["drop_contributor"] += 1
+        session.flush()
+
+        # (Loser WorkContributor rows not explicitly copied/dropped above — i.e. any row this
+        # composition didn't already account for — are deleted via Work's own
+        # cascade="all, delete-orphan" relationship when the loser Work row is deleted, below.
+        # copy_contributors + drop_contributors together are exhaustive over the loser's
+        # contributor rows AT COMPOSE TIME (compose_cluster_merge iterates every row), so this is
+        # belt-and-braces for a row added between compose and this point, not an expected path.)
+
+        # 5. detected_duplicates: deleted BEFORE the Work rows they reference (FKs fail loud
+        # otherwise — see the module comment above compose_cluster_merge).
+        for a, b in comp.delete_detection_pairs:
+            row = session.get(DetectedDuplicate, {"work_id_a": a, "work_id_b": b})
+            if row is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(row)
+            result["delete_detection"] += 1
+        session.flush()
+
+        # 6. Loser Work rows, last.
+        for wid in comp.delete_work_ids:
+            w = session.get(Work, wid)
+            if w is None:
+                result["skipped_stale"] += 1
+                continue
+            session.delete(w)
+            result["delete_work"] += 1
+        session.flush()
+
+    return result

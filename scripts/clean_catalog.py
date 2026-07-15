@@ -13,13 +13,16 @@
   python scripts/clean_catalog.py --repair-fallbacks --dry-run
   python scripts/clean_catalog.py --repair-fallbacks-apply --yes --report data/reports/fallback-repair-<ts>.txt
   python scripts/clean_catalog.py --merge-works
+  python scripts/clean_catalog.py --merge-works-apply --yes --report data/reports/works-merge-<ts>.txt
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
 --dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
 the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted.
 --repair-fallbacks-apply likewise re-plans fresh and refuses on any drift from --report (required,
 no default — GH #70). --merge-works (Spec 2026-07-14 PR-2 part 1) is detection/planning ONLY —
-always a dry-run, no --apply counterpart exists yet."""
+always a dry-run. --merge-works-apply (PR-2 part 2, H2) executes the merge composition (editions/
+suggestions/trope+style links/contributors/detected_duplicates/Work-row deletion) behind the same
+drift-refusing gate — requires --yes and --report (no default, same as --repair-fallbacks-apply)."""
 
 from __future__ import annotations
 
@@ -257,34 +260,20 @@ def _run_repair_fallbacks(manager: DatabaseManager, safe: str) -> int:
         return 0
 
 
-def _write_works_merge_report(clusters, *, db_target: str) -> Path:
-    """Persist the works-merge dry-run plan to data/reports/works-merge-<UTC>.txt (Spec
-    2026-07-14 PR-2), reusing render_works_merge_report's human-readable text and the same
-    microsecond-timestamp collision avoidance as _write_dedup_report / fallback_repair's
-    write_report. PLANNING ONLY — there is no apply step yet (H2), so unlike those two reports
-    this one carries no machine-readable token block to gate an apply against."""
-    reports_dir = Path("data/reports")
-    reports_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.now(UTC)
-    ts = now.strftime("%Y%m%dT%H%M%S") + f"{now.microsecond:06d}Z"
-    path = reports_dir / f"works-merge-{ts}.txt"
-    path.write_text(dedup_backfill.render_works_merge_report(clusters, db_target=db_target), encoding="utf-8")
-    return path
-
-
 def _run_merge_works(manager: DatabaseManager, safe: str) -> int:
-    """--merge-works: DETECTION/PLANNING ONLY (PR-2 part 1) — always a dry-run, never applies.
-    Reuses the --repair-fallbacks CLI conventions: prints the DB target before opening the work
-    session, prints per-class cluster summaries + survivor picks, writes the full report to
-    data/reports/works-merge-<UTC>.txt for operator review. apply arrives in a follow-up
-    task (H2), which builds the merge composition (editions/suggestions/trope-links/
-    contributors/Work-row deletion) on top of this plan's clusters — see docs/superpowers/
-    specs/2026-07-14-works-merge-tool-design.md."""
+    """--merge-works: DETECTION + COMPOSITION PLANNING (PR-2 parts 1+2) — always a dry-run,
+    never applies. Prints the DB target before opening the work session, prints per-class
+    cluster summaries + survivor picks, writes the full report (H1's human-readable cluster
+    sections + H2's per-composition op summary + the machine-readable token block) to
+    data/reports/works-merge-<UTC>.txt — the SAME report --merge-works-apply's drift gate
+    cross-checks a fresh re-plan against (dedup_backfill.render_works_merge_apply_report /
+    write_works_merge_apply_report), so a --merge-works dry-run report is always a valid
+    --report argument for --merge-works-apply."""
     print(f"DB target: …@{safe}")
     with manager.get_session() as session:
         clusters = dedup_backfill.plan_works_merge(session)
         summary = clusters.summary()
-        print("\n=== works-merge plan (DETECTION ONLY — PR-2 part 1) ===")
+        print("\n=== works-merge plan (detection — PR-2 part 1) ===")
         for key, count in summary.items():
             print(f"  {key:32} {count}")
 
@@ -299,9 +288,72 @@ def _run_merge_works(manager: DatabaseManager, safe: str) -> int:
         _print_clusters("works_detected_duplicates", clusters.detected_duplicates, never_applied=False)
         _print_clusters("works_fuzzy_report_only", clusters.fuzzy_report_only, never_applied=True)
 
-        report_path = _write_works_merge_report(clusters, db_target=safe)
-        print(f"\nfull plan (every cluster) written to {report_path} — review this before any apply.")
-        print("\napply arrives in a follow-up (H2) — this command never mutates data.")
+        compositions = [
+            dedup_backfill.compose_cluster_merge(session, cluster)
+            for cluster in dedup_backfill.applyable_works_merge_clusters(clusters)
+        ]
+        print(f"\n=== apply composition (PR-2 part 2) — {len(compositions)} applyable clusters ===")
+        for comp in compositions[:20]:
+            print(
+                f"  survivor={comp.survivor_id}  losers={comp.loser_ids}  "
+                f"repoint_editions={len(comp.repoint_edition_ids)}  merge_editions={len(comp.merge_editions)}  "
+                f"dropped_duplicate_reads={comp.dropped_duplicate_reads}  "
+                f"repoint_suggestions={len(comp.repoint_suggestion_ids)}  "
+                f"drop_duplicate_suggestions={len(comp.drop_duplicate_suggestion_ids)}  "
+                f"copy_links={len(comp.copy_trope_links) + len(comp.copy_style_links)}  "
+                f"copy_contributors={len(comp.copy_contributors)}  "
+                f"delete_detections={len(comp.delete_detection_pairs)}  "
+                f"delete_works={len(comp.delete_work_ids)}"
+            )
+            if comp.malformed_author_candidates:
+                print(f"    malformed_author_candidates={comp.malformed_author_candidates} (report-only)")
+
+        report_path = dedup_backfill.write_works_merge_apply_report(clusters, compositions, db_target=safe)
+        print(f"\nfull plan (every cluster + composition token) written to {report_path} — review before applying.")
+        print(f"\napply with: --merge-works-apply --yes --report {report_path}")
+        return 0
+
+
+def _run_merge_works_apply(manager: DatabaseManager, args, url: str, safe: str) -> int:
+    """--merge-works-apply: guards first (mirrors --repair-fallbacks-apply exactly), THEN opens
+    the work session that re-plans fresh and applies — see dedup_backfill.apply_works_merge.
+    No embedding warm-up needed here (unlike --repair-fallbacks-apply): works-merge composition
+    never calls get_cached_embedding, only plan_works_merge's own detection queries, which are
+    already embedding-free (survivor selection uses trope-link COUNTS, not similarity)."""
+    print(f"DB target: …@{safe}")
+    if not args.yes:
+        print("\nREFUSING --merge-works-apply without --yes.")
+        return 2
+    if not is_prod_url(url):
+        print(f"\nREFUSING --merge-works-apply: '{safe}' is not a live prod DB (sqlite/backup/localhost).")
+        return 2
+    if args.report is None:
+        print(
+            "\nREFUSING --merge-works-apply: --report is required (no default — "
+            "name the reviewed --merge-works dry-run report explicitly)."
+        )
+        return 1
+
+    with manager.get_session() as session:
+        try:
+            applied = dedup_backfill.apply_works_merge(session, args.report)
+        except dedup_backfill.WorksMergeDriftError as exc:
+            print(f"\nREFUSING --merge-works-apply: {exc}")
+            print(f"New tokens present in the fresh plan but NOT in the reviewed report: +{len(exc.delta)}")
+            for token in sorted(exc.delta)[:40]:
+                print(f"  {token}")
+            print(
+                f"\nre-review {exc.fresh_report_path}, then re-run "
+                f"--merge-works-apply --yes --report {exc.fresh_report_path}"
+            )
+            return 1
+        except (OSError, ValueError) as exc:
+            print(f"\nREFUSING --merge-works-apply: {exc}")
+            return 1
+
+        print("\napplied:")
+        for key, count in applied.items():
+            print(f"  {key:32} {count}")
         return 0
 
 
@@ -417,17 +469,33 @@ def main(argv: list[str] | None = None) -> int:
         "--merge-works",
         action="store_true",
         help=(
-            "Spec 2026-07-14 PR-2 part 1: DETECTION/PLANNING ONLY for the works-merge tool — "
+            "Spec 2026-07-14 PR-2: DETECTION + COMPOSITION PLANNING for the works-merge tool — "
             "always a dry-run, this flag never applies. Prints the four detection classes "
             "(strongest evidence first): works_same_isbn, works_same_identity, "
             "works_detected_duplicates (the #141/#143 feed), and works_fuzzy_report_only "
             "(NEVER applied by design — operator promotes pairs by hand). Each cluster shows "
             "its deterministic survivor pick (most justified trope links -> newest "
-            "deep_enriched_at -> most editions -> lowest UUID). Writes "
-            "data/reports/works-merge-<UTC timestamp>.txt for review. Apply (the merge "
-            "composition: editions/suggestions/trope-links/contributors/Work-row deletion) "
-            "arrives in a follow-up task — see etl/dedup_backfill.py's plan_works_merge and "
-            "docs/superpowers/specs/2026-07-14-works-merge-tool-design.md."
+            "deep_enriched_at -> most editions -> lowest UUID), plus the per-cluster merge "
+            "composition (editions/suggestions/trope+style links/contributors/detected_"
+            "duplicates/Work-row deletion) that --merge-works-apply would execute. Writes "
+            "data/reports/works-merge-<UTC timestamp>.txt for review — the same report "
+            "--merge-works-apply's drift gate cross-checks a fresh re-plan against."
+        ),
+    )
+    ap.add_argument(
+        "--merge-works-apply",
+        action="store_true",
+        help=(
+            "Apply the works-merge composition (Spec 2026-07-14 PR-2 part 2, H2). A SEPARATE "
+            "invocation from the reviewed --merge-works dry-run: re-plans (detection + "
+            "composition) from scratch and REFUSES (exit 1) if the fresh plan contains any "
+            "token the operator never reviewed (op-tagged, so even an operation flip on the "
+            "same ids counts) — see etl/dedup_backfill.py's apply_works_merge. Requires --yes "
+            "and --report (no default, same as --repair-fallbacks-apply — a distinct "
+            "destructive operation that deletes Work rows carrying live user reading history; "
+            "must name its reviewed report explicitly). works_fuzzy_report_only clusters are "
+            "structurally unreachable by this gate — they are never part of the applyable "
+            "composition, by construction, not by a runtime check."
         ),
     )
     ap.add_argument(
@@ -475,6 +543,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_repair_fallbacks_apply(manager, args, url, safe)
     if args.merge_works:
         return _run_merge_works(manager, safe)
+    if args.merge_works_apply:
+        return _run_merge_works_apply(manager, args, url, safe)
 
     with manager.get_session() as session:
         print(f"DB target: …@{safe}")
@@ -666,7 +736,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
             "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, "
-            "--repair-fallbacks-apply, or --merge-works."
+            "--repair-fallbacks-apply, --merge-works, or --merge-works-apply."
         )
         return 1
 

@@ -1,9 +1,10 @@
-"""CLI-level test for --merge-works (Spec 2026-07-14 PR-2 part 1) — mirrors
+"""CLI-level test for --merge-works (Spec 2026-07-14 PR-2, H1+H2) — mirrors
 test_clean_catalog_repair_fallbacks_cli.py's dry-run-only structure. --merge-works is
-detection/planning ONLY (no apply counterpart exists yet), so unlike --repair-fallbacks-apply
-there is no --yes / prod-url / --report guard to test here — just the report-write/return-0
-wiring. The planner/report mechanics themselves are covered by test/unit/test_works_merge.py
-(pure) and test/integration/test_works_merge.py (db_integration)."""
+ALWAYS a dry-run (no --yes / prod-url / --report guard to test here — just the report-write/
+return-0 wiring), but since H2 it also composes the merge plan and writes the token-bearing
+apply report. The planner/report mechanics themselves are covered by test/unit/test_works_merge.py
+(pure) and test/integration/test_works_merge.py (db_integration); --merge-works-apply's own
+guard/drift-gate CLI wiring is covered by test/unit/test_clean_catalog_merge_works_apply_cli.py."""
 
 import importlib.util
 from pathlib import Path
@@ -34,7 +35,8 @@ def test_merge_works_dry_run_never_applies(monkeypatch, capsys, tmp_path):
     """--merge-works always writes a report and returns 0 without --yes or a prod URL — it's
     read-only by construction, even against what CLI dispatch treats as a non-prod localhost
     URL. plan_works_merge itself does real SQLAlchemy query-building — stub it, same as the
-    repair-fallbacks CLI test stubs plan_fallback_repair."""
+    repair-fallbacks CLI test stubs plan_fallback_repair. An empty WorksMergeClusters has no
+    applyable clusters, so compose_cluster_merge is never called and needs no stub."""
     _patch_db(monkeypatch, url="postgresql://u:p@localhost/db")
     monkeypatch.setattr(
         clean_catalog.dedup_backfill,
@@ -45,9 +47,13 @@ def test_merge_works_dry_run_never_applies(monkeypatch, capsys, tmp_path):
     rc = clean_catalog.main(["--merge-works"])
     assert rc == 0
     out = capsys.readouterr().out
-    assert "works-merge plan (DETECTION ONLY" in out
-    assert "apply arrives in a follow-up" in out
+    assert "works-merge plan (detection" in out
+    assert "apply composition (PR-2 part 2)" in out
+    assert "apply with: --merge-works-apply --yes --report" in out
     assert (tmp_path / "data" / "reports").exists()
     written = list((tmp_path / "data" / "reports").glob("works-merge-*.txt"))
     assert len(written) == 1
-    assert "NEVER APPLIED" in written[0].read_text(encoding="utf-8")
+    report_text = written[0].read_text(encoding="utf-8")
+    assert "NEVER APPLIED" in report_text
+    assert "== PLAN TOKENS ==" in report_text
+    assert "== END PLAN TOKENS ==" in report_text
