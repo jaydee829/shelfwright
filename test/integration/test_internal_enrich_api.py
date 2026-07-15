@@ -87,6 +87,22 @@ def test_bad_token_signature_is_forbidden(client, monkeypatch):
     assert resp.status_code == 403
 
 
+def test_redirected_deep_pass_returns_200_non_retryable(client, db_url, monkeypatch):
+    """GH #141: a "redirected" pass completed and stamped the invoked work — its data
+    lives on the twin, recorded in detected_duplicates. Retrying would burn another paid
+    deep pass for nothing, so this must be a 2xx, not a 5xx."""
+    manager = DatabaseManager(db_url)
+    work_id = _seed_work(manager)
+    monkeypatch.setattr(
+        internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}
+    )
+    monkeypatch.setattr(internal_mod.two_phase, "enrich_deep", lambda wid: "redirected")
+
+    resp = client.post(f"/internal/enrich/{work_id}", headers={"Authorization": "Bearer good"})
+    assert resp.status_code == 200
+    assert resp.json() == {"work_id": str(work_id), "status": "redirected"}
+
+
 def test_unknown_work_returns_404(client, monkeypatch):
     monkeypatch.setattr(
         internal_mod, "_verify_oidc", lambda token, audience: {"email": QUEUE_SA, "email_verified": True}

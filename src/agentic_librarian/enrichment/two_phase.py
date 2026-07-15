@@ -24,10 +24,11 @@ from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy import text as sa_text  # aliased: a loop variable in _warm_embeddings shadows 'text' (F402)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.get_or_create import get_or_create
-from agentic_librarian.db.models import Author, Edition, ReadingHistory, Work, WorkContributor
+from agentic_librarian.db.models import Author, DetectedDuplicate, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import collect_embedding_texts, persist_enriched_work
 from agentic_librarian.orchestration.definitions import (
@@ -182,24 +183,40 @@ def enrich_deep(work_id: UUID) -> str:
     at enrich-queue concurrency 4, where a late transient failure also re-paid every LLM
     call), then re-persist in a fresh session.
 
+    GH #141: the write session's persist_enriched_work re-checks dedup by SCOUT-CANONICAL
+    identity (title + author as the scouts now report them), which can differ from the
+    invoked work's own (possibly dirty) identity and resolve to a DIFFERENT existing Work
+    — the invoked row's twin. This is not undone (the persist legitimately lands on the
+    twin — it's the same book); refusing would require re-plumbing persist_enriched_work's
+    many callers for zero data benefit. Instead the redirect is recorded in
+    detected_duplicates (the works-merge tool's feed) and the INVOKED row is stamped, so
+    the requeue sweep stops re-listing it (closing the paid-pass-burning loop).
+
     Returns one of:
-      "missing" — no Work has that id, or it has no linked Author (non-retryable). Also
-                  returned (final-review Minor 7 honesty fix) if the write session's
-                  persist_enriched_work returns None — nothing was persisted and
-                  deep_enriched_at was never stamped, so "done" would be a lie; "missing" tells
-                  the caller (api/internal.py) this is non-retryable the same way an
-                  already-gone Work is, rather than falsely reporting success. Also returned
-                  (PR #126 review) if the empty-path stamp session finds the Work gone —
-                  it was deleted while the slow scouts were running with no session held.
-      "empty"   — the scouts yielded nothing to add this pass, and the Work still exists. A
-                  SHORT session stamps work.deep_enriched_at = now() anyway (GH #97): the
-                  timestamp means "the deep pass COMPLETED", including confirmed-empty — the
-                  caller (api/internal.py) decides retryability from the work's real-trope
-                  state, not from this string alone. An exception raised before this point
-                  propagates uncaught, leaving deep_enriched_at unstamped so Cloud Tasks
-                  retries the whole pass.
-      "done"    — the scouts found something AND the write session actually persisted +
-                  stamped deep_enriched_at on the SAME Work in the SAME session."""
+      "missing"    — no Work has that id, or it has no linked Author (non-retryable). Also
+                     returned (final-review Minor 7 honesty fix) if the write session's
+                     persist_enriched_work returns None — nothing was persisted and
+                     deep_enriched_at was never stamped, so "done" would be a lie; "missing"
+                     tells the caller (api/internal.py) this is non-retryable the same way an
+                     already-gone Work is, rather than falsely reporting success. Also
+                     returned (PR #126 review) if the empty-path stamp session finds the Work
+                     gone — it was deleted while the slow scouts were running with no session
+                     held. Also returned (#141) if the redirect path's re-load of the invoked
+                     row by id finds it gone — same deleted-mid-pass honesty rule.
+      "empty"      — the scouts yielded nothing to add this pass, and the Work still exists. A
+                     SHORT session stamps work.deep_enriched_at = now() anyway (GH #97): the
+                     timestamp means "the deep pass COMPLETED", including confirmed-empty — the
+                     caller (api/internal.py) decides retryability from the work's real-trope
+                     state, not from this string alone. An exception raised before this point
+                     propagates uncaught, leaving deep_enriched_at unstamped so Cloud Tasks
+                     retries the whole pass.
+      "done"       — the scouts found something AND the write session actually persisted +
+                     stamped deep_enriched_at on the SAME Work in the SAME session.
+      "redirected" — (#141) the scouts found something, but persist landed it on a DIFFERENT
+                     existing Work (the twin) instead of the invoked one. The invoked row is
+                     stamped deep_enriched_at (the pass DID complete) and a detected_duplicates
+                     row is recorded; the twin's data is untouched by this function beyond
+                     persist's own write. Non-retryable success — see api/internal.py."""
     with db_manager.get_session() as session:
         work = session.get(Work, work_id)
         if work is None:
@@ -228,14 +245,33 @@ def enrich_deep(work_id: UUID) -> str:
     _warm_embeddings(row)
 
     with db_manager.get_session() as session:
-        work = _persist_row(session, row)
-        if work is None:
+        persisted = _persist_row(session, row)
+        if persisted is None:
             # Nothing was persisted (e.g. the scouted row had no usable contributor to attach
             # to — persist_enriched_work's own "no work" case) and deep_enriched_at was never
             # stamped. Reporting "done" here would be dishonest: the caller would treat a
             # no-op as success. "missing" makes it non-retryable the same way an already-gone
             # Work is (final-review Minor 7).
             return "missing"
-        work.deep_enriched_at = datetime.now(UTC)
+        if persisted.id == work_id:
+            persisted.deep_enriched_at = datetime.now(UTC)
+            session.flush()
+            return "done"
+
+        # #141: persist's dedup re-check resolved a DIFFERENT existing work (the twin) — same
+        # book, dirty invoked-row identity. Do NOT undo the twin's write. Record the redirect
+        # (upsert-or-ignore: a redelivered Cloud Tasks retry must not pile up duplicate rows)
+        # and stamp the INVOKED row, re-loaded by id since `persisted` is the twin, not it.
+        session.execute(
+            pg_insert(DetectedDuplicate)
+            .values(work_id_a=work_id, work_id_b=persisted.id, source="deep_pass_redirect")
+            .on_conflict_do_nothing(index_elements=["work_id_a", "work_id_b"])
+        )
+        invoked = session.get(Work, work_id)
+        if invoked is None:
+            # The invoked row was deleted while the slow scouts were running (same
+            # deleted-mid-pass honesty rule as the other "missing" cases above).
+            return "missing"
+        invoked.deep_enriched_at = datetime.now(UTC)
         session.flush()
-    return "done"
+        return "redirected"
