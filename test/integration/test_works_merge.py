@@ -41,6 +41,7 @@ def test_empty_db_plan_is_empty(db_url):
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 0,
+            "ignored_self_detections": 0,
         }
 
 
@@ -127,6 +128,7 @@ def test_beware_of_chicken_2_sequel_is_never_a_pair(db_url):
             "works_same_identity": 0,
             "works_detected_duplicates": 0,
             "works_fuzzy_report_only": 0,
+            "ignored_self_detections": 0,
         }
 
 
@@ -167,6 +169,26 @@ def test_detected_duplicates_unordered_pair_both_rows_collapse_to_one_cluster(db
 
         clusters = db_.plan_works_merge(session)
         assert clusters.summary()["works_detected_duplicates"] == 1
+
+
+def test_self_referential_detected_duplicate_row_ignored_not_crashed(db_url):
+    """H2 fix 1: a bad feed row where work_id_a == work_id_b (a work 'duplicate' of itself) must
+    not crash the planner — `frozenset((A, A))` used to break plan_works_merge_clusters' union-
+    find unpack (`a, b = tuple(pair)` on a size-1 frozenset). It is skipped at feed ingestion and
+    counted under ignored_self_detections, visible in the plan summary rather than silent."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w = _work("Self-Referential Work")
+        session.add(w)
+        session.flush()
+        session.add(DetectedDuplicate(work_id_a=w.id, work_id_b=w.id, source="deep_pass_redirect"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)  # must not raise
+
+        assert clusters.summary()["ignored_self_detections"] == 1
+        assert clusters.summary()["works_detected_duplicates"] == 0
+        assert clusters.detected_duplicates == []
 
 
 def test_fuzzy_class_never_contains_pairs_from_stronger_classes(db_url):

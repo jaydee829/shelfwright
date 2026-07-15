@@ -20,12 +20,14 @@ from datetime import UTC, date, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from agentic_librarian.core.user_context import DEFAULT_USER_ID
 from agentic_librarian.db.models import (
     Author,
     DetectedDuplicate,
     Edition,
+    Narrator,
     ReadingHistory,
     Style,
     Suggestions,
@@ -35,6 +37,7 @@ from agentic_librarian.db.models import (
     WorkContributor,
     WorkStyle,
     WorkTrope,
+    edition_narrators,
 )
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl import dedup_backfill as db_
@@ -193,8 +196,6 @@ def test_edition_merge_drops_duplicate_narrator_link_keeps_repoints_new(db_url):
     edition repoints cleanly."""
     manager = DatabaseManager(db_url)
     with manager.get_session() as session:
-        from agentic_librarian.db.models import Narrator, edition_narrators
-
         survivor = _work("Mistborn")
         loser = _work("Mistborn")
         session.add_all([survivor, loser])
@@ -521,3 +522,334 @@ def test_delete_work_ids_is_exactly_the_loser_set(db_url):
 
         assert set(comp.delete_work_ids) == {loser1.id, loser2.id}
         assert survivor.id not in comp.delete_work_ids
+
+
+# --------------------------------------------------------------------------------------------
+# 7. apply_works_merge itself — THE USER GATE. plan -> report -> apply, driven through the real
+# functions end to end (mirrors test/integration/test_fallback_repair.py's e2e shapes).
+# --------------------------------------------------------------------------------------------
+
+
+def test_beware_shaped_full_e2e_through_apply(db_url):
+    """The brief's canonical shape: two works sharing an ISBN AND edition format (works_same_isbn
+    class, ALSO an edition-format collision -> merge_edition), reads split across two users plus
+    one user with reads on BOTH works (one date collides with an existing survivor read, one is
+    distinct), an active suggestion on the loser, richer survivor tropes plus one loser-only
+    trope (relevance/justification carried), and detected_duplicates rows in BOTH orders.
+    Asserts: one work survives; every read is preserved or counted dropped; the suggestion is
+    repointed; the trope union is exact; both detection rows are gone; the EXACT per-op counts
+    map (including merge_edition >= 1); the orphan-author pointer; and a fresh re-plan converges
+    to zero clusters."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        second_user = _second_user(session)
+
+        survivor = _work("Beware of Chicken", deep_enriched_at=datetime(2026, 6, 12, tzinfo=UTC))
+        loser = _work("Beware of Chicken")
+        session.add_all([survivor, loser])
+        session.flush()
+
+        survivor_edition = Edition(work_id=survivor.id, isbn_13="9781039452275", format="ebook")
+        loser_edition = Edition(work_id=loser.id, isbn_13="9781039452275", format="ebook")
+        session.add_all([survivor_edition, loser_edition])
+        session.flush()
+
+        # second_user: one read, only on the loser -> distinct -> repoint.
+        session.add(
+            ReadingHistory(edition_id=loser_edition.id, user_id=second_user.id, date_completed=date(2024, 3, 1))
+        )
+        # DEFAULT_USER_ID: a read on the survivor, AND two reads on the loser — one whose date
+        # collides with the survivor's own read (dropped-as-duplicate), one whose date is
+        # distinct (repointed).
+        session.add(
+            ReadingHistory(edition_id=survivor_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2023, 1, 1))
+        )
+        session.add(
+            ReadingHistory(edition_id=loser_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2023, 1, 1))
+        )
+        session.add(
+            ReadingHistory(edition_id=loser_edition.id, user_id=DEFAULT_USER_ID, date_completed=date(2024, 5, 5))
+        )
+        session.flush()
+
+        session.add(Suggestions(work_id=loser.id, user_id=second_user.id, status="Suggested"))
+        session.flush()
+
+        survivor_trope_1 = Trope(name="Found Family")
+        survivor_trope_2 = Trope(name="Chosen One")
+        loser_only_trope = Trope(name="Slow Burn")
+        session.add_all([survivor_trope_1, survivor_trope_2, loser_only_trope])
+        session.flush()
+        session.add(WorkTrope(work_id=survivor.id, trope_id=survivor_trope_1.id, justification="scout said so"))
+        session.add(WorkTrope(work_id=survivor.id, trope_id=survivor_trope_2.id, justification="scout said so too"))
+        session.add(
+            WorkTrope(
+                work_id=loser.id,
+                trope_id=loser_only_trope.id,
+                relevance_score=0.75,
+                justification="loser-only context",
+            )
+        )
+        session.flush()
+
+        session.add(DetectedDuplicate(work_id_a=loser.id, work_id_b=survivor.id, source="deep_pass_redirect"))
+        session.add(DetectedDuplicate(work_id_a=survivor.id, work_id_b=loser.id, source="deep_pass_redirect"))
+        session.flush()
+
+        # --- plan + report ---
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary()["works_same_isbn"] == 1
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        # --- apply ---
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied == {
+            "repoint_edition": 0,
+            "merge_edition": 1,
+            "repoint_read": 2,
+            "drop_duplicate_read": 1,
+            "repoint_narrator": 0,
+            "drop_narrator": 0,
+            "repoint_suggestion": 1,
+            "drop_duplicate_suggestion": 0,
+            "copy_link": 1,
+            "drop_link": 0,
+            "copy_contributor": 0,
+            "drop_contributor": 0,
+            "delete_detection": 2,
+            "delete_work": 1,
+            "skipped_stale": 0,
+            "orphaned_authors_pointer": 0,
+        }
+
+        assert session.query(Work).count() == 1
+        assert session.get(Work, survivor.id) is not None
+        assert session.get(Work, loser.id) is None
+        assert session.get(Edition, loser_edition.id) is None
+
+        remaining_reads = session.query(ReadingHistory).all()
+        assert len(remaining_reads) == 3  # one dropped-as-duplicate, none silently lost
+        assert all(rh.edition_id == survivor_edition.id for rh in remaining_reads)
+        read_keys = {(rh.user_id, rh.date_completed) for rh in remaining_reads}
+        assert read_keys == {
+            (second_user.id, date(2024, 3, 1)),
+            (DEFAULT_USER_ID, date(2023, 1, 1)),
+            (DEFAULT_USER_ID, date(2024, 5, 5)),
+        }
+
+        suggestion = session.query(Suggestions).filter_by(user_id=second_user.id).one()
+        assert suggestion.work_id == survivor.id
+
+        survivor_tropes = {
+            (wt.trope_id, wt.relevance_score, wt.justification)
+            for wt in session.query(WorkTrope).filter_by(work_id=survivor.id).all()
+        }
+        assert survivor_tropes == {
+            (survivor_trope_1.id, 1.0, "scout said so"),
+            (survivor_trope_2.id, 1.0, "scout said so too"),
+            (loser_only_trope.id, 0.75, "loser-only context"),
+        }
+        assert session.query(WorkTrope).filter_by(work_id=loser.id).all() == []
+
+        assert session.query(DetectedDuplicate).count() == 0
+
+        converged = db_.plan_works_merge(session)
+        assert converged.summary() == {
+            "works_same_isbn": 0,
+            "works_same_identity": 0,
+            "works_detected_duplicates": 0,
+            "works_fuzzy_report_only": 0,
+            "ignored_self_detections": 0,
+        }
+
+
+def test_drift_refusal_e2e_full_snapshot_equality(db_url):
+    """A SEPARATE duplicate pair mints between the reviewed dry-run and apply — refuses (drift
+    error carrying the delta + a fresh report path) and changes NOTHING: a full snapshot across
+    works/editions/reading_history/suggestions/work_tropes/detected_duplicates is byte-identical
+    before and after the refused apply (mirrors test_fallback_repair.py's drift test)."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        survivor = _work("Mistborn", deep_enriched_at=datetime(2026, 1, 1, tzinfo=UTC))
+        loser = _work("Mistborn")
+        session.add_all([survivor, loser])
+        session.flush()
+        session.add(Edition(work_id=survivor.id, isbn_13="9780765311788", format="ebook"))
+        session.add(Edition(work_id=loser.id, isbn_13="9780765311788", format="audiobook"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        # live traffic in the gap: a brand-new duplicate pair appears, unrelated to the reviewed
+        # cluster.
+        new_a = _work("Elantris", deep_enriched_at=datetime(2026, 1, 1, tzinfo=UTC))
+        new_b = _work("Elantris")
+        session.add_all([new_a, new_b])
+        session.flush()
+        session.add(DetectedDuplicate(work_id_a=new_a.id, work_id_b=new_b.id, source="deep_pass_redirect"))
+        session.flush()
+
+        def _snapshot():
+            return {
+                "works": {(w.id, w.title) for w in session.query(Work).all()},
+                "editions": {(e.id, e.work_id, e.isbn_13, e.format) for e in session.query(Edition).all()},
+                "reading_history": {
+                    (rh.id, rh.edition_id, rh.user_id, rh.date_completed) for rh in session.query(ReadingHistory).all()
+                },
+                "suggestions": {(s.id, s.work_id, s.user_id, s.status) for s in session.query(Suggestions).all()},
+                "work_tropes": {
+                    (wt.work_id, wt.trope_id, wt.relevance_score, wt.justification)
+                    for wt in session.query(WorkTrope).all()
+                },
+                "detected_duplicates": {(d.work_id_a, d.work_id_b) for d in session.query(DetectedDuplicate).all()},
+            }
+
+        before = _snapshot()
+
+        with pytest.raises(db_.WorksMergeDriftError, match="drifted") as exc_info:
+            db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert any(
+            t.startswith("delete_work:") and (str(new_a.id) in t or str(new_b.id) in t) for t in exc_info.value.delta
+        )
+        assert exc_info.value.fresh_report_path.exists()
+        fresh_reviewable = db_.parse_works_merge_report(exc_info.value.fresh_report_path.read_text(encoding="utf-8"))
+        assert exc_info.value.delta <= fresh_reviewable  # every delta token is present, re-reviewable
+
+        after = _snapshot()
+        assert after == before
+
+
+def test_fuzzy_only_cluster_never_consumes_tokens_through_apply(db_url):
+    """A fuzzy-only cluster (no shared ISBN, no shared identity, no detected_duplicates row —
+    the ONLY edge is title similarity) appears in the plan/report but apply consumes ZERO tokens
+    from it and never composes it — the structural exclusion (applyable_works_merge_clusters
+    never includes fuzzy_report_only) holds all the way through the gate, both works survive."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author_a = Author(name="Author A")
+        author_b = Author(name="Author B")
+        work_a = _work("Calling Bullshit Now")
+        work_b = _work("Calling Bullshit")
+        session.add_all([author_a, author_b, work_a, work_b])
+        session.flush()
+        # DIFFERENT authors (keeps this OUT of works_same_identity), no ISBN (OUT of
+        # works_same_isbn), no detected_duplicates row -> the only edge left is fuzzy title
+        # similarity.
+        session.add(WorkContributor(work_id=work_a.id, author_id=author_a.id, role="Author"))
+        session.add(WorkContributor(work_id=work_b.id, author_id=author_b.id, role="Author"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary() == {
+            "works_same_isbn": 0,
+            "works_same_identity": 0,
+            "works_detected_duplicates": 0,
+            "works_fuzzy_report_only": 1,
+            "ignored_self_detections": 0,
+        }
+
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        assert compositions == []  # fuzzy is structurally never composed
+
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+        report_text = report_path.read_text(encoding="utf-8")
+        assert "NEVER APPLIED" in report_text
+        assert "Calling Bullshit" in report_text
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["delete_work"] == 0
+        assert session.get(Work, work_a.id) is not None
+        assert session.get(Work, work_b.id) is not None
+
+
+def test_identity_cluster_merges_through_apply_no_shared_isbn(db_url):
+    """We-Are-Legion-shaped: punctuation-variant titles + shared author, no shared ISBN at all
+    -> works_same_identity, merged through the real apply gate."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        author = Author(name="Dennis E. Taylor")
+        w1 = _work("We Are Legion (We Are Bob)")
+        w2 = _work("We are Legion; We are Bob", deep_enriched_at=datetime(2026, 6, 1, tzinfo=UTC))
+        session.add_all([author, w1, w2])
+        session.flush()
+        session.add(WorkContributor(work_id=w1.id, author_id=author.id, role="Author"))
+        session.add(WorkContributor(work_id=w2.id, author_id=author.id, role="Author"))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary()["works_same_identity"] == 1
+        assert clusters.summary()["works_same_isbn"] == 0
+
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["delete_work"] == 1
+        assert applied["drop_contributor"] == 1  # shared (author, role) pair, not duplicated
+        assert applied["copy_contributor"] == 0
+        assert session.query(Work).count() == 1
+        survivor = session.query(Work).one()
+        assert survivor.id == w2.id  # deep_enriched_at newest wins the survivor tiebreak
+        assert session.query(WorkContributor).filter_by(work_id=survivor.id).count() == 1
+
+        converged = db_.plan_works_merge(session)
+        assert converged.summary()["works_same_identity"] == 0
+
+
+def test_narrator_union_through_apply_repoint_and_drop(db_url):
+    """Format-collision merge (both editions 'audiobook') where the loser edition carries a
+    narrator absent on the survivor edition (repoint_narrator) AND a narrator already shared
+    with the survivor (drop_narrator) — both paths execute and count through the real apply
+    gate, not just compose_cluster_merge's plan."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        survivor = _work("Mistborn", deep_enriched_at=datetime(2026, 1, 1, tzinfo=UTC))
+        loser = _work("Mistborn")
+        session.add_all([survivor, loser])
+        session.flush()
+        survivor_edition = Edition(work_id=survivor.id, isbn_13="9780765311788", format="audiobook")
+        loser_edition = Edition(work_id=loser.id, isbn_13="9780765311788", format="audiobook")
+        session.add_all([survivor_edition, loser_edition])
+        session.flush()
+
+        shared_narrator = Narrator(name="Michael Kramer")
+        new_narrator = Narrator(name="Someone Else")
+        session.add_all([shared_narrator, new_narrator])
+        session.flush()
+        session.execute(
+            edition_narrators.insert().values(edition_id=survivor_edition.id, narrator_id=shared_narrator.id)
+        )
+        session.execute(edition_narrators.insert().values(edition_id=loser_edition.id, narrator_id=shared_narrator.id))
+        session.execute(edition_narrators.insert().values(edition_id=loser_edition.id, narrator_id=new_narrator.id))
+        session.flush()
+
+        clusters = db_.plan_works_merge(session)
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["merge_edition"] == 1
+        assert applied["repoint_narrator"] == 1
+        assert applied["drop_narrator"] == 1
+        assert session.get(Edition, loser_edition.id) is None
+
+        remaining_narrators = {
+            row.narrator_id
+            for row in session.execute(
+                select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == survivor_edition.id)
+            ).all()
+        }
+        assert remaining_narrators == {shared_narrator.id, new_narrator.id}

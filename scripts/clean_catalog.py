@@ -354,6 +354,9 @@ def _run_merge_works_apply(manager: DatabaseManager, args, url: str, safe: str) 
         print("\napplied:")
         for key, count in applied.items():
             print(f"  {key:32} {count}")
+        orphaned_pointer = applied.get("orphaned_authors_pointer", 0)
+        if orphaned_pointer:
+            print(f"\n{orphaned_pointer} author(s) may be orphaned — run --dedup-for-constraints dry-run to sweep.")
         return 0
 
 

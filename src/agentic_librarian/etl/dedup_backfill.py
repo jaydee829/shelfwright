@@ -888,6 +888,10 @@ class WorksMergeClusters:
     same_identity: list[WorksMergeCluster] = field(default_factory=list)
     detected_duplicates: list[WorksMergeCluster] = field(default_factory=list)
     fuzzy_report_only: list[WorksMergeCluster] = field(default_factory=list)
+    # Self-referential detected_duplicates feed rows (work_id_a == work_id_b) skipped at
+    # ingestion — see _dedupe_detected_duplicate_rows. Surfaced here (not just logged) so a bad
+    # feed row is visible to the operator reading the plan/report, never silent.
+    ignored_self_detections: int = 0
 
     def summary(self) -> dict[str, int]:
         return {
@@ -895,6 +899,7 @@ class WorksMergeClusters:
             "works_same_identity": len(self.same_identity),
             "works_detected_duplicates": len(self.detected_duplicates),
             "works_fuzzy_report_only": len(self.fuzzy_report_only),
+            "ignored_self_detections": self.ignored_self_detections,
         }
 
 
@@ -1053,20 +1058,38 @@ def _detect_same_identity_pairs(session: Session) -> list[tuple[UUID, UUID]]:
     return pairs
 
 
-def _detect_detected_duplicate_pairs(session: Session) -> list[tuple[UUID, UUID]]:
-    """works_detected_duplicates: rows from the #141/#143 detected_duplicates feed, deduped as
-    UNORDERED pairs — both (A, B) and (B, A) rows can exist for the same cluster (composite PK
-    is (work_id_a, work_id_b), not order-normalized; see DetectedDuplicate's docstring)."""
-    rows = session.query(DetectedDuplicate.work_id_a, DetectedDuplicate.work_id_b).all()
+def _dedupe_detected_duplicate_rows(rows: list[tuple[UUID, UUID]]) -> tuple[list[tuple[UUID, UUID]], int]:
+    """Pure (no session): dedupe raw detected_duplicates feed rows as UNORDERED pairs — both
+    (A, B) and (B, A) rows can exist for the same cluster (composite PK is (work_id_a,
+    work_id_b), not order-normalized; see DetectedDuplicate's docstring) — and SKIP any
+    self-referential row (work_id_a == work_id_b). A work is never its own duplicate; a
+    self-pair is a bad feed row, not a real detection. Left in, `frozenset((A, A))` collapses to
+    size 1 and crashes plan_works_merge_clusters' union-find unpack (`a, b = tuple(pair)`) —
+    skipping it here, at the feed-ingestion boundary, keeps the crash from ever reaching that
+    pure composition core. Returns (pairs, ignored_self_count) so the caller can surface the
+    count in the plan summary — a bad feed row should be VISIBLE to the operator, not silently
+    dropped."""
     seen: set[frozenset] = set()
     pairs: list[tuple[UUID, UUID]] = []
+    ignored_self = 0
     for a, b in rows:
+        if a == b:
+            ignored_self += 1
+            continue
         pair = frozenset((a, b))
         if pair in seen:
             continue
         seen.add(pair)
         pairs.append(tuple(sorted((a, b), key=str)))
-    return pairs
+    return pairs, ignored_self
+
+
+def _detect_detected_duplicate_pairs(session: Session) -> tuple[list[tuple[UUID, UUID]], int]:
+    """works_detected_duplicates: rows from the #141/#143 detected_duplicates feed. See
+    _dedupe_detected_duplicate_rows (kept session-free for a fast, deterministic unit-test
+    surface) for the actual dedup/self-pair-skip logic. Returns (pairs, ignored_self_count)."""
+    rows = session.query(DetectedDuplicate.work_id_a, DetectedDuplicate.work_id_b).all()
+    return _dedupe_detected_duplicate_rows(rows)
 
 
 def _detect_fuzzy_pairs(
@@ -1131,18 +1154,20 @@ def plan_works_merge(session: Session) -> WorksMergeClusters:
         for a, b in _detect_same_identity_pairs(session)
         if not _series_guard_blocks(title_by_work[a], title_by_work[b])
     ]
-    detected_duplicate_pairs = _detect_detected_duplicate_pairs(session)
+    detected_duplicate_pairs, ignored_self_detections = _detect_detected_duplicate_pairs(session)
 
     already_paired = {frozenset(p) for p in same_isbn_pairs + same_identity_pairs + detected_duplicate_pairs}
     fuzzy_pairs = _detect_fuzzy_pairs(title_by_work, already_paired)
 
-    return plan_works_merge_clusters(
+    clusters = plan_works_merge_clusters(
         same_isbn_pairs=same_isbn_pairs,
         same_identity_pairs=same_identity_pairs,
         detected_duplicate_pairs=detected_duplicate_pairs,
         fuzzy_pairs=fuzzy_pairs,
         stats_by_work=stats_by_work,
     )
+    clusters.ignored_self_detections = ignored_self_detections
+    return clusters
 
 
 def render_works_merge_report(clusters: WorksMergeClusters, *, db_target: str | None = None) -> str:
@@ -1488,20 +1513,44 @@ def plan_delta(reviewed: dict[str, set[str]], fresh: DedupPlan) -> dict[str, set
 # There is no code path, however careless, that could reach it — the field simply isn't in the
 # iteration.
 #
+# Deliverable 5 (spec item 5, stated here so nobody "fixes" it later): the availability cache
+# (availability/overdrive.py's `availability_cache` table) and `user_libraries` are keyed by
+# TITLE/AUTHOR STRINGS, not work ids — they have no FK to Work at all. A works-merge is
+# deliberately silent about both: there is nothing to repoint, nothing to union, no row that
+# could dangle. The survivor's title/author strings are what a "where to get it" lookup already
+# keyed on before the merge, so availability continues to resolve correctly with zero action here.
+#
 # DISJOINTNESS PROOF (deliverable 2 — the deferred-intersections discipline, reasoned through
 # rather than found empirically): after plan_works_merge_clusters' union-find, every cluster is a
 # disjoint SET OF WORK IDS — no work id appears in two clusters (union-find guarantees this by
 # construction: any pair that shares a work id gets unioned into the SAME cluster). Every row this
-# composition ever touches (editions, reading_history, edition_narrators, suggestions, work_tropes,
-# work_styles, work_contributors, detected_duplicates) hangs off exactly one work id via a
-# NOT-NULL foreign key (Edition.work_id, ReadingHistory.edition_id -> Edition.work_id transitively,
-# Suggestions.work_id, WorkTrope.work_id, WorkStyle.work_id, WorkContributor.work_id,
-# DetectedDuplicate.work_id_a/work_id_b). A row can only be "in play" for a cluster if its owning
-# work id is a member of that cluster's work_ids set. Since work_ids sets are disjoint across
-# clusters in one plan, a row belonging to work W can only ever be named by the ONE cluster that
-# contains W — never by two different clusters in the same plan. This rules out the dedup_backfill
-# 6.3 hazard (a row touched by two independently-computed classes from the same snapshot) BY
-# CONSTRUCTION, not by scanning for overlaps after the fact.
+# composition touches via a SINGLE NOT-NULL foreign key (Edition.work_id, ReadingHistory.edition_id
+# -> Edition.work_id transitively, Suggestions.work_id, WorkTrope.work_id, WorkStyle.work_id,
+# WorkContributor.work_id) hangs off exactly one work id, so it can only ever be "in play" for the
+# ONE cluster containing that id.
+#
+# detected_duplicates is the one exception worth stating precisely rather than folding into the
+# above: each row carries TWO work ids (work_id_a, work_id_b), not one — so "hangs off exactly one
+# work id" does not literally hold for it. The argument for detected_duplicates is the EDGE
+# argument instead: every detected_duplicates row (after self-pair filtering, see
+# _dedupe_detected_duplicate_rows) becomes a union-find edge in plan_works_merge_clusters — ALL of
+# it, not just the pairs reported under works_detected_duplicates (a pair's CLASS LABEL is only its
+# strongest matching class for display purposes; the UNION still runs on every pair from every
+# class, see the union-find loop above). So if a detected_duplicates row names (X, Y), X and Y are
+# ALWAYS unioned into the SAME cluster by construction — its two endpoints necessarily co-cluster.
+# There is no detected_duplicates row whose two work ids could land in two DIFFERENT clusters of
+# the same plan; therefore a detected_duplicates row is still "owned" by exactly one cluster, just
+# via an edge argument rather than a single-FK argument. (compose_cluster_merge's own detected_
+# duplicates deletion step, further below, is intentionally MORE permissive than this proof
+# requires — it deletes any row naming a loser on EITHER side even against a work id outside the
+# row's own cluster, e.g. a stale detection — apply's session.get() null-check on an
+# already-deleted row from a different cluster's pass makes that safe too, via skipped_stale.)
+#
+# Since work_ids sets are disjoint across clusters in one plan, a row belonging to work W (or, for
+# detected_duplicates, a row whose edge co-clusters with W) can only ever be named by the ONE
+# cluster that contains W — never by two different clusters in the same plan. This rules out the
+# dedup_backfill 6.3 hazard (a row touched by two independently-computed classes from the same
+# snapshot) BY CONSTRUCTION, not by scanning for overlaps after the fact.
 #
 # The one genuine cross-cluster collision surface the spec calls out is a UNIQUENESS constraint
 # spanning rows from DIFFERENT works: uq_suggestions_active is (user_id, work_id) WHERE
@@ -1999,6 +2048,24 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
 
     shrinkage = len(reviewed_tokens - fresh_tokens)
 
+    # Orphan-author pointer (deliverable 1.6): every author id linked to ANY loser Work in this
+    # apply, gathered NOW — before any loser Work row (and its cascaded WorkContributor rows)
+    # gets deleted below. Re-checked AFTER the whole apply completes using the SAME structural
+    # predicate _plan_orphan_authors uses (zero work_contributors AND zero author_styles), scoped
+    # to just this apply's own candidates rather than a full-catalog scan — this is a POINTER for
+    # the operator, not a delete: actual removal stays the existing --dedup-for-constraints
+    # dry-run/apply loop's job (never mutate an Author here).
+    candidate_author_ids: set[UUID] = set()
+    for comp in fresh_compositions:
+        if not comp.loser_ids:
+            continue
+        candidate_author_ids.update(
+            row.author_id
+            for row in session.query(WorkContributor.author_id)
+            .filter(WorkContributor.work_id.in_(comp.loser_ids))
+            .all()
+        )
+
     result = {
         "repoint_edition": 0,
         "merge_edition": 0,
@@ -2015,6 +2082,7 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
         "delete_detection": 0,
         "delete_work": 0,
         "skipped_stale": shrinkage,
+        "orphaned_authors_pointer": 0,
     }
 
     for comp in fresh_compositions:
@@ -2037,6 +2105,7 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
             if session.get(Edition, mg.survivor_id) is None:
                 result["skipped_stale"] += 1
                 continue
+            result["merge_edition"] += 1
             for rh_id in mg.repoint_reading_history:
                 rh = session.get(ReadingHistory, rh_id)
                 if rh is None:
@@ -2085,11 +2154,18 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
                     continue
                 # Belt-and-braces (mirrors _apply_edition_group): refuse if an unplanned
                 # edition_narrators row still hangs off this loser edition — deleting it would
-                # cascade that unaccounted-for row away.
-                unplanned = session.execute(
+                # cascade that unaccounted-for row away. Symmetric guard (Minor 6, final review)
+                # for reading_history: unlike edition_narrators (a plain `secondary=` link table
+                # that would silently cascade), ReadingHistory.edition_id has NO cascade at all —
+                # an unplanned row here would make the delete raise an IntegrityError instead of
+                # silently losing anything, but "refuse and count skipped_stale" is still the
+                # right behavior (this composition already accounted for every row it saw at
+                # compose time; an unplanned survivor here means something changed since).
+                unplanned_narrators = session.execute(
                     select(edition_narrators.c.narrator_id).where(edition_narrators.c.edition_id == loser_edition_id)
                 ).first()
-                if unplanned is not None:
+                unplanned_reading_history = session.query(ReadingHistory).filter_by(edition_id=loser_edition_id).first()
+                if unplanned_narrators is not None or unplanned_reading_history is not None:
                     result["skipped_stale"] += 1
                     continue
                 session.delete(le)
@@ -2206,5 +2282,15 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
             session.delete(w)
             result["delete_work"] += 1
         session.flush()
+
+    # Re-check the candidates gathered before the loop: an author now orphaned by THIS apply
+    # (its only contributor links lived on losers this apply just deleted) — same predicate as
+    # _plan_orphan_authors, applied to the narrower candidate set so the pointer is precise about
+    # what THIS merge did, not the whole catalog's pre-existing orphan backlog.
+    for author_id in candidate_author_ids:
+        has_wc = session.query(WorkContributor).filter_by(author_id=author_id).first() is not None
+        has_as = session.query(AuthorStyle).filter_by(author_id=author_id).first() is not None
+        if not has_wc and not has_as:
+            result["orphaned_authors_pointer"] += 1
 
     return result
