@@ -158,11 +158,24 @@ def _primary_author(text: str) -> str:
     has_and_separator = bool(re.search(r"\s+(?:and|&)\s+", stripped, re.IGNORECASE))
     comma_count = stripped.count(",")
 
-    if comma_count >= 2 or has_and_separator:
-        return segments[0]
-
+    # Checked BEFORE the multi-separator arm: a triple like 'Casualfarmer, CasualFarmer,
+    # CasualFarmer' must collapse to one name, not fall into Last-First preservation.
     all_equal = len({seg.lower() for seg in segments}) == 1
     if all_equal:
+        return segments[0]
+
+    if comma_count >= 2 or has_and_separator:
+        # Gemini review (#143): a "Last, First" PRIMARY followed by more authors
+        # ('Ware, Ruth, John Smith') must keep the full primary name — truncating to the
+        # bare surname 'Ware' is the least matchable identity of all. The first two comma
+        # segments are one person when they DIFFER and don't both look like full names.
+        if (
+            comma_count >= 1
+            and len(segments) >= 2
+            and segments[0].lower() != segments[1].lower()
+            and not (_is_full_name(segments[0]) and _is_full_name(segments[1]))
+        ):
+            return f"{segments[0]}, {segments[1]}"
         return segments[0]
 
     if comma_count == 1 and all(_is_full_name(seg) for seg in segments):

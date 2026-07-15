@@ -205,8 +205,19 @@ def test_parse_rows_flags_future_and_unparseable_dates_and_defaults_format():
             "Casualfarmer",
             "duplicate_segments_with_whitespace_around_separator",
         ),
-        ("A, B, C", "A", "two_plus_commas_take_first_segment"),
-        ("Author A, Author B, Author A", "Author A", "three_commas_take_first_segment"),
+        # Single-letter segments read as a Last-First primary under the #143 heuristic —
+        # degenerate input, accepted: 'A, B' is at least a mergeable identity.
+        ("A, B, C", "A, B", "two_plus_commas_degenerate_single_letters"),
+        ("Jane Doe, John Smith, Bob Lee", "Jane Doe", "two_plus_commas_full_names_take_first"),
+        # Gemini review (#143): "Last, First" primary + additional authors keeps the full
+        # primary name instead of truncating to the bare surname.
+        ("Ware, Ruth, John Smith", "Ware, Ruth", "multi_comma_last_first_primary_kept"),
+        ("Ware, Ruth and John Smith", "Ware, Ruth", "comma_and_mix_last_first_primary_kept"),
+        ("Casualfarmer, CasualFarmer, CasualFarmer", "Casualfarmer", "all_equal_triple_collapses"),
+        ("Casualfarmer, CasualFarmer, John Smith", "Casualfarmer", "partial_dup_takes_first_not_joined"),
+        # Full-name fixtures: names ending in a bare initial ('Author A') read as
+        # Last-First pairs under the #143 heuristic — covered by its own rows above.
+        ("Amy North, Bea South, Amy North", "Amy North", "three_commas_take_first_segment"),
         ("Jane Doe and John Smith", "Jane Doe", "explicit_and_separator_takes_first"),
         ("X and Y", "X", "single_token_names_and_separator_takes_first"),
         ("Jane Doe & John Smith", "Jane Doe", "explicit_ampersand_separator_takes_first"),
