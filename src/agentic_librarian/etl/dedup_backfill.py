@@ -1116,7 +1116,11 @@ def _classify_isbn_group_pairs(
     mismatch: list[tuple[UUID, UUID]] = []
     for i, wa in enumerate(ordered):
         for wb in ordered[i + 1 :]:
-            if fold_by_work.get(wa) == fold_by_work.get(wb):
+            # Direct indexing on purpose (Gemini review, #146): callers guarantee every id is
+            # in fold_by_work (unknown ids are dropped at the edition scan). A .get() here
+            # once let two UNTRACKED ids match None == None into an APPLYABLE pair — the
+            # wrong failure direction for a destructive tool; a KeyError is the honest one.
+            if fold_by_work[wa] == fold_by_work[wb]:
                 applyable.append((wa, wb))
             else:
                 mismatch.append((wa, wb))
@@ -1140,7 +1144,12 @@ def _detect_same_isbn_pairs(
     rows = session.query(Edition.work_id, Edition.isbn_13).filter(Edition.isbn_13.isnot(None)).all()
     groups: dict[str, set[UUID]] = defaultdict(set)
     for work_id, isbn in rows:
-        groups[isbn].add(work_id)
+        # Gemini review (#146): a work created between the caller's works scan and this
+        # edition scan has no fold/stats entry — skip it (next plan run sees it) instead of
+        # letting unknown ids match None == None into an applyable pair or KeyError at
+        # cluster build.
+        if work_id in fold_by_work:
+            groups[isbn].add(work_id)
     applyable: list[tuple[UUID, UUID]] = []
     mismatch: list[tuple[UUID, UUID]] = []
     for work_ids in groups.values():

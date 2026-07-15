@@ -167,6 +167,39 @@ def test_classify_isbn_group_pairs_applyable_count(case_name, titles, expect_app
     assert len(applyable) + len(mismatch) == math.comb(len(titles), 2)
 
 
+def test_classify_isbn_group_pairs_raises_on_unknown_work_id():
+    """Gemini review (#146): an id missing from fold_by_work must FAIL LOUD (KeyError), never
+    match None == None into an applyable pair. The edition scan filters unknown ids before
+    grouping (test below); this pins the honest-failure contract if that filter ever regresses."""
+    ids, fold_by_work = _fold_ids("Beware of Chicken")
+    stranger = uuid4()  # never registered in fold_by_work
+    with pytest.raises(KeyError):
+        _classify_isbn_group_pairs([ids[0], stranger], fold_by_work)
+
+
+def test_detect_same_isbn_pairs_skips_works_unknown_to_the_plan():
+    """A work created between the plan's works scan and its edition scan (no fold/stats entry)
+    is skipped — it becomes next plan run's problem instead of a None-matched applyable pair
+    or a KeyError at cluster build (Gemini review, #146)."""
+    from unittest.mock import MagicMock
+
+    from agentic_librarian.etl.dedup_backfill import _detect_same_isbn_pairs
+
+    known_a, known_b = uuid4(), uuid4()
+    stranger = uuid4()
+    fold_by_work = {known_a: _fold("Beware of Chicken"), known_b: _fold("Beware of Chicken")}
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = [
+        (known_a, "9781039452275"),
+        (known_b, "9781039452275"),
+        (stranger, "9781039452275"),  # mid-plan newcomer: same ISBN, unknown to the plan
+        (stranger, "9990000000000"),  # and alone on another ISBN
+    ]
+    applyable, mismatch = _detect_same_isbn_pairs(session, fold_by_work)
+    assert applyable == [tuple(sorted((known_a, known_b), key=str))]
+    assert mismatch == []  # the stranger produced neither applyable nor mismatch pairs
+
+
 def test_classify_isbn_group_pairs_beware_shaped_sequel_never_applyable():
     """The prod shape exactly: two equal-fold 'Beware of Chicken' works pair up applyable; the
     differently-folded 'Beware of Chicken 2' sequel pairs with EACH of them as mismatch — never
