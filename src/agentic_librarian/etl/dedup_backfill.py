@@ -801,13 +801,15 @@ def _strip_trailing_volume_token(folded_title: str) -> tuple[str, bool]:
 
 
 def _series_guard_blocks(title_a: str, title_b: str) -> bool:
-    """True if `title_a`/`title_b` differ ONLY by a trailing volume/sequel token — i.e. one
-    title, once its trailing volume token is stripped, equals the other's fold exactly, but the
-    two folded titles were NOT already equal. Symmetric in its two arguments by construction
-    (both directions are tried). 'Beware of Chicken' vs 'Beware of Chicken 2' -> blocked;
-    'Beware of Chicken' vs 'Beware of Chicken' -> NOT blocked (nothing to guard against);
-    'We Are Legion (We Are Bob)' vs 'We are Legion; We are Bob' -> NOT blocked (no trailing
-    volume token on either side, this is the punctuation-fold case fold() already handles)."""
+    """True if `title_a`/`title_b` are different entries of one series — i.e. they differ
+    ONLY by trailing volume/sequel tokens. Two shapes (Gemini review, PR #144):
+      base vs volume:   'Beware of Chicken' vs 'Beware of Chicken 2' -> blocked;
+      volume vs volume: 'Beware of Chicken 2' vs 'Beware of Chicken 3' -> blocked
+                        (both carry volume tokens and share the stripped base).
+    NOT blocked: identical folds ('Beware of Chicken 2' vs itself — a true same-volume
+    duplicate must stay mergeable), and titles with no trailing volume token on either side
+    ('We Are Legion (We Are Bob)' vs 'We are Legion; We are Bob' — the punctuation-fold
+    case fold() already handles). Symmetric in its two arguments by construction."""
     fa, fb = _fold(title_a), _fold(title_b)
     if fa == fb:
         return False
@@ -815,7 +817,9 @@ def _series_guard_blocks(title_a: str, title_b: str) -> bool:
     stripped_b, had_b = _strip_trailing_volume_token(fb)
     if had_a and stripped_a == fb:
         return True
-    return bool(had_b and stripped_b == fa)
+    if had_b and stripped_b == fa:
+        return True
+    return bool(had_a and had_b and stripped_a == stripped_b)
 
 
 def fuzzy_similarity(title_a: str, title_b: str) -> float:
@@ -1102,17 +1106,25 @@ def _detect_fuzzy_pairs(
     design spec's "retroactive global fuzzy dedup... stays report-only" framing; this is a
     detail-list class, not a hot path."""
     ids = sorted(title_by_work, key=str)
+    # Gemini review (#144): fold each title ONCE — refolding inside the O(n^2) loop was
+    # redundant CPU per pair. Jaccard is computed on the precomputed token sets; the series
+    # guard still gets the raw titles (it needs fold-internal volume-token structure).
+    tokens_by_work = {wid: set(_fold(title_by_work[wid]).split()) for wid in ids}
     pairs: list[tuple[UUID, UUID]] = []
     for i, wa in enumerate(ids):
+        tokens_a = tokens_by_work[wa]
         for wb in ids[i + 1 :]:
             pair = frozenset((wa, wb))
             if pair in already_paired:
                 continue
-            title_a, title_b = title_by_work[wa], title_by_work[wb]
-            if _series_guard_blocks(title_a, title_b):
+            tokens_b = tokens_by_work[wb]
+            if not tokens_a or not tokens_b:
                 continue
-            if fuzzy_similarity(title_a, title_b) >= threshold:
-                pairs.append((wa, wb))
+            if len(tokens_a & tokens_b) / len(tokens_a | tokens_b) < threshold:
+                continue
+            if _series_guard_blocks(title_by_work[wa], title_by_work[wb]):
+                continue
+            pairs.append((wa, wb))
     return pairs
 
 
@@ -1128,13 +1140,17 @@ def _gather_work_stats(session: Session) -> dict[UUID, WorkStats]:
     )
     edition_counts = Counter(row.work_id for row in session.query(Edition.work_id).all())
     out: dict[UUID, WorkStats] = {}
-    for work in session.query(Work).order_by(Work.id).all():
-        out[work.id] = WorkStats(
-            work_id=work.id,
-            title=work.title,
-            justified_trope_links=trope_link_counts.get(work.id, 0),
-            deep_enriched_at=work.deep_enriched_at,
-            edition_count=edition_counts.get(work.id, 0),
+    # Column-explicit (Gemini review, #144): only three columns are needed — full entity
+    # hydration was pure overhead in a whole-catalog scan.
+    for work_id, title, deep_enriched_at in (
+        session.query(Work.id, Work.title, Work.deep_enriched_at).order_by(Work.id).all()
+    ):
+        out[work_id] = WorkStats(
+            work_id=work_id,
+            title=title,
+            justified_trope_links=trope_link_counts.get(work_id, 0),
+            deep_enriched_at=deep_enriched_at,
+            edition_count=edition_counts.get(work_id, 0),
         )
     return out
 
@@ -1759,41 +1775,41 @@ def compose_cluster_merge(session: Session, cluster: WorksMergeCluster) -> WorkM
                 survivor_style_keys.add(key)
 
     # --- 4. Contributors: union by (author_id, role) --------------------------------------------
+    # Author names joined in one query per work (Gemini review, #144) — the previous
+    # per-contributor session.get(Author, ...) was an N+1.
     survivor_contributors = (
-        session.query(WorkContributor)
-        .filter_by(work_id=survivor_id)
+        session.query(WorkContributor.author_id, WorkContributor.role, Author.name)
+        .join(Author, Author.id == WorkContributor.author_id)
+        .filter(WorkContributor.work_id == survivor_id)
         .order_by(WorkContributor.author_id, WorkContributor.role)
         .all()
     )
-    survivor_keys = {(wc.author_id, wc.role) for wc in survivor_contributors}
+    survivor_keys = {(author_id, role) for author_id, role, _name in survivor_contributors}
     survivor_names_by_role: dict[str, set[str]] = defaultdict(set)
-    for wc in survivor_contributors:
-        author = session.get(Author, wc.author_id)
-        if author is not None:
-            survivor_names_by_role[wc.role].add(author.name.strip().casefold())
+    for _author_id, role, name in survivor_contributors:
+        survivor_names_by_role[role].add(name.strip().casefold())
 
     for loser_id in loser_ids:
-        for wc in (
-            session.query(WorkContributor)
-            .filter_by(work_id=loser_id)
+        for author_id, role, name in (
+            session.query(WorkContributor.author_id, WorkContributor.role, Author.name)
+            .join(Author, Author.id == WorkContributor.author_id)
+            .filter(WorkContributor.work_id == loser_id)
             .order_by(WorkContributor.author_id, WorkContributor.role)
             .all()
         ):
-            key = (wc.author_id, wc.role)
+            key = (author_id, role)
             if key in survivor_keys:
-                comp.drop_contributors.append((loser_id, wc.author_id, wc.role))
+                comp.drop_contributors.append((loser_id, author_id, role))
                 continue
-            author = session.get(Author, wc.author_id)
-            name_cf = author.name.strip().casefold() if author is not None else None
-            if name_cf is not None and name_cf in survivor_names_by_role.get(wc.role, set()):
+            name_cf = name.strip().casefold()
+            if name_cf in survivor_names_by_role.get(role, set()):
                 # A DIFFERENT Author row already on the survivor case-folds equal (the #142
                 # malformed-comma-joined-author shape) — report, never mutate an Author here.
-                comp.malformed_author_candidates.append(wc.author_id)
+                comp.malformed_author_candidates.append(author_id)
                 continue
-            comp.copy_contributors.append((wc.author_id, wc.role))
+            comp.copy_contributors.append((author_id, role))
             survivor_keys.add(key)
-            if name_cf is not None:
-                survivor_names_by_role[wc.role].add(name_cf)
+            survivor_names_by_role[role].add(name_cf)
 
     # --- 5. detected_duplicates: delete every row referencing ANY loser on either side. Not
     # restricted to rows where BOTH sides are cluster members: a loser could in principle be

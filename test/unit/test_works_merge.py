@@ -86,6 +86,15 @@ def test_fold_table(case_name, a, b, expect_equal):
             False,
         ),
         ("unrelated_titles_not_blocked", "Beware of Chicken", "Calling Bullshit", False),
+        # Gemini review (#144): volume-vs-volume — two sequels of one series must block
+        # (the operator is about to read Beware of Chicken 3; it must never pair with 2).
+        ("volume_vs_volume_blocked", "Beware of Chicken 2", "Beware of Chicken 3", True),
+        ("volume_vs_volume_roman_blocked", "Beware of Chicken II", "Beware of Chicken 3", True),
+        ("volume_vs_volume_hash_blocked", "Beware of Chicken #2", "Beware of Chicken #3", True),
+        # Same volume twice = a genuine duplicate pair — must stay mergeable (folds equal).
+        ("same_volume_dup_not_blocked", "Beware of Chicken 2", "Beware of Chicken 2", False),
+        # Volume tokens on DIFFERENT bases: not one series — the guard must not block.
+        ("volume_tokens_different_bases_not_blocked", "Beware of Chicken 2", "Mistborn 3", False),
     ],
 )
 def test_series_guard_table(case_name, base_title, variant_title, expect_blocked):
