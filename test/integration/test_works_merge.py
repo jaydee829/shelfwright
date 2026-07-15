@@ -309,3 +309,87 @@ def test_render_works_merge_report_never_applied_marker_present(db_url):
         assert "works_fuzzy_report_only" in report
         assert "NEVER APPLIED" in report
         assert "localhost/test" in report
+
+
+# --------------------------------------------------------------------------------------------
+# --promote-pair (H4): db_integration coverage for the CLI helper function
+# dedup_backfill.promote_detected_duplicate_pair — driven directly (not through the CLI/argparse
+# layer, which is covered by test/unit/test_clean_catalog_promote_pair_cli.py with the seam
+# mocked). Two titles chosen deliberately unrelated (no shared ISBN, no author overlap, no
+# fold-equal/fuzzy title match) so the ONLY way this pair could ever land in a plan is via the
+# operator promotion itself — proving the feed integration, not some other class accidentally
+# catching the same pair.
+# --------------------------------------------------------------------------------------------
+
+
+def test_promote_pair_lands_as_applyable_detected_duplicates_cluster(db_url):
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w1 = _work("Calling Bullshit")
+        w2 = _work("The Tao of Pooh", deep_enriched_at=datetime(2026, 7, 1, tzinfo=UTC))
+        session.add_all([w1, w2])
+        session.flush()
+
+        # Sanity: unrelated titles never cluster on their own.
+        assert db_.plan_works_merge(session).summary()["works_detected_duplicates"] == 0
+
+        result = db_.promote_detected_duplicate_pair(session, w1.id, w2.id)
+        assert result.already_existed is False
+        assert result.title_a == "Calling Bullshit"
+        assert result.title_b == "The Tao of Pooh"
+
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary()["works_detected_duplicates"] == 1
+        cluster = clusters.detected_duplicates[0]
+        assert set(cluster.work_ids) == {w1.id, w2.id}
+        assert cluster.survivor_id == w2.id  # more-enriched work wins
+
+        applyable_ids = {wid for c in db_.applyable_works_merge_clusters(clusters) for wid in c.work_ids}
+        assert applyable_ids == {w1.id, w2.id}
+
+
+def test_promote_pair_rerun_is_idempotent_row_count_unchanged(db_url):
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        w1 = _work("Calling Bullshit")
+        w2 = _work("The Tao of Pooh")
+        session.add_all([w1, w2])
+        session.flush()
+
+        first = db_.promote_detected_duplicate_pair(session, w1.id, w2.id)
+        second = db_.promote_detected_duplicate_pair(session, w1.id, w2.id)
+
+        assert first.already_existed is False
+        assert second.already_existed is True
+        assert session.query(DetectedDuplicate).count() == 1
+
+
+def test_promote_pair_then_flows_through_apply_works_merge_e2e(db_url):
+    """Promoted pair -> plan -> compose -> report -> apply_works_merge: the merge succeeds (one
+    work survives) and the promoted detection row is consumed (deleted) by the apply, same as any
+    other detected_duplicates-class cluster."""
+    manager = DatabaseManager(db_url)
+    with manager.get_session() as session:
+        survivor = _work("The Tao of Pooh", deep_enriched_at=datetime(2026, 7, 1, tzinfo=UTC))
+        loser = _work("Calling Bullshit")
+        session.add_all([survivor, loser])
+        session.flush()
+
+        db_.promote_detected_duplicate_pair(session, loser.id, survivor.id)
+
+        clusters = db_.plan_works_merge(session)
+        assert clusters.summary()["works_detected_duplicates"] == 1
+        compositions = [db_.compose_cluster_merge(session, c) for c in db_.applyable_works_merge_clusters(clusters)]
+        report_path = db_.write_works_merge_apply_report(clusters, compositions)
+
+        applied = db_.apply_works_merge(session, report_path)
+        session.flush()
+
+        assert applied["delete_work"] == 1
+        assert applied["delete_detection"] == 1
+        assert session.get(Work, survivor.id) is not None
+        assert session.get(Work, loser.id) is None
+        assert session.query(DetectedDuplicate).count() == 0
+
+        # A fresh re-plan converges to zero clusters.
+        assert db_.plan_works_merge(session).summary()["works_detected_duplicates"] == 0

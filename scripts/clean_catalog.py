@@ -14,6 +14,8 @@
   python scripts/clean_catalog.py --repair-fallbacks-apply --yes --report data/reports/fallback-repair-<ts>.txt
   python scripts/clean_catalog.py --merge-works
   python scripts/clean_catalog.py --merge-works-apply --yes --report data/reports/works-merge-<ts>.txt
+  python scripts/clean_catalog.py --promote-pair WORK_ID_A WORK_ID_B --yes
+  python scripts/clean_catalog.py --promote-pair A1 B1 --promote-pair A2 B2 --yes
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
 --dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
@@ -22,7 +24,11 @@ the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if 
 no default — GH #70). --merge-works (Spec 2026-07-14 PR-2 part 1) is detection/planning ONLY —
 always a dry-run. --merge-works-apply (PR-2 part 2, H2) executes the merge composition (editions/
 suggestions/trope+style links/contributors/detected_duplicates/Work-row deletion) behind the same
-drift-refusing gate — requires --yes and --report (no default, same as --repair-fallbacks-apply)."""
+drift-refusing gate — requires --yes and --report (no default, same as --repair-fallbacks-apply).
+--promote-pair (H4) is the operator's front door for hand-promoting a duplicate pair the detection
+classes missed (e.g. a works_fuzzy_report_only pair, or one an operator just spots by eye): it
+inserts a source='operator' row into the detected_duplicates feed --merge-works's
+works_detected_duplicates class already reads — repeatable in one invocation, requires --yes."""
 
 from __future__ import annotations
 
@@ -30,6 +36,7 @@ import argparse
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 from sqlalchemy import func
 
@@ -361,6 +368,61 @@ def _run_merge_works_apply(manager: DatabaseManager, args, url: str, safe: str) 
         return 0
 
 
+def _run_promote_pair(manager: DatabaseManager, args, url: str, safe: str) -> int:
+    """--promote-pair (H4): operator front door into the works-merge detection feed. WRITES one
+    detected_duplicates row per pair (source='operator') — same --yes / is_prod_url guard shape
+    as every other write mode (mirrors --repair-fallbacks-apply exactly), checked BEFORE any
+    UUID parsing so a guard failure never depends on the pair arguments being well-formed.
+
+    UUID parsing is pure string handling done HERE, before any session opens (a malformed token
+    should never touch the DB). Everything DB-touching — the self-pair rejection, the
+    both-ids-exist check, and the ON CONFLICT DO NOTHING insert itself — lives in
+    dedup_backfill.promote_detected_duplicate_pair, the CLI helper function db_integration tests
+    drive directly. All pairs are parsed before the session opens, and a validation failure on
+    ANY pair (self-pair / unknown id) propagates OUT of the `with manager.get_session()` block
+    uncaught, so DatabaseManager.get_session's own except-clause rolls back the whole
+    transaction — a bad pair anywhere in a multi-pair invocation refuses ALL of it, never leaving
+    earlier pairs promoted while a later one silently fails."""
+    print(f"DB target: …@{safe}")
+    if not args.yes:
+        print("\nREFUSING --promote-pair without --yes.")
+        return 2
+    if not is_prod_url(url):
+        print(f"\nREFUSING --promote-pair: '{safe}' is not a live prod DB (sqlite/backup/localhost).")
+        return 2
+
+    parsed_pairs: list[tuple[UUID, UUID]] = []
+    for raw_a, raw_b in args.promote_pair:
+        try:
+            work_id_a = UUID(raw_a)
+        except ValueError:
+            print(f"\nREFUSING --promote-pair: {raw_a!r} is not a valid UUID.")
+            return 1
+        try:
+            work_id_b = UUID(raw_b)
+        except ValueError:
+            print(f"\nREFUSING --promote-pair: {raw_b!r} is not a valid UUID.")
+            return 1
+        parsed_pairs.append((work_id_a, work_id_b))
+
+    try:
+        with manager.get_session() as session:
+            for work_id_a, work_id_b in parsed_pairs:
+                result = dedup_backfill.promote_detected_duplicate_pair(session, work_id_a, work_id_b)
+                status = "already promoted" if result.already_existed else "promoted"
+                print(f"{status}: {result.title_a} {result.work_id_a} + {result.title_b} {result.work_id_b}")
+    except ValueError as exc:
+        # dedup_backfill.promote_detected_duplicate_pair's self-pair ValueError and
+        # UnknownWorkIdsError (a ValueError subclass) both land here — the session block above
+        # has already been unwound (rolled back) by DatabaseManager.get_session's except-clause
+        # by the time this runs.
+        print(f"\nREFUSING --promote-pair: {exc}")
+        return 1
+
+    print("\nre-run --merge-works for a fresh gated report.")
+    return 0
+
+
 def _run_repair_fallbacks_apply(manager: DatabaseManager, args, url: str, safe: str) -> int:
     """--repair-fallbacks-apply: guards first (no session needed for those), THEN warms in its
     own short session, THEN opens the work session that re-plans fresh and applies — see
@@ -520,6 +582,25 @@ def main(argv: list[str] | None = None) -> int:
             "its reviewed report explicitly)."
         ),
     )
+    ap.add_argument(
+        "--promote-pair",
+        action="append",
+        nargs=2,
+        metavar=("WORK_ID_A", "WORK_ID_B"),
+        default=None,
+        help=(
+            "H4: operator promotion of a hand-picked duplicate work pair into the works-merge "
+            "detection feed (writes a source='operator' row into detected_duplicates — the same "
+            "feed --merge-works's works_detected_duplicates class reads). Repeatable: pass "
+            "--promote-pair twice for two pairs in one invocation. Each pair is validated (both "
+            "ids must be well-formed UUIDs, distinct, and name existing works) before anything is "
+            "written; a bad pair anywhere refuses the WHOLE invocation. Idempotent — re-running "
+            "the same pair is a no-op (ON CONFLICT DO NOTHING), so it is safe to re-run. Requires "
+            "--yes and a live prod DB (same is_prod_url guard as every other write mode). After "
+            "promoting, re-run --merge-works for a fresh gated report — the pair only becomes "
+            "applyable on the NEXT dry-run/apply cycle, never in this same invocation."
+        ),
+    )
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--yes", action="store_true", help="required confirmation for --apply")
@@ -554,6 +635,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_merge_works(manager, safe)
     if args.merge_works_apply:
         return _run_merge_works_apply(manager, args, url, safe)
+    if args.promote_pair:
+        return _run_promote_pair(manager, args, url, safe)
 
     with manager.get_session() as session:
         print(f"DB target: …@{safe}")
@@ -745,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
             "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, "
-            "--repair-fallbacks-apply, --merge-works, or --merge-works-apply."
+            "--repair-fallbacks-apply, --merge-works, --merge-works-apply, or --promote-pair."
         )
         return 1
 

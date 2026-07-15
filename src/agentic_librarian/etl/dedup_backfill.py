@@ -46,6 +46,7 @@ from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from agentic_librarian.db.models import (
@@ -2445,3 +2446,69 @@ def apply_works_merge(session: Session, reviewed_report_path: Path) -> dict[str,
             result["orphaned_authors_pointer"] += 1
 
     return result
+
+
+# --------------------------------------------------------------------------------------------
+# --promote-pair (H4): operator promotion of a hand-picked duplicate pair into the
+# detected_duplicates feed. This is the ONLY way a works_fuzzy_report_only pair (or any pair the
+# operator spots by eye, never surfaced by any detection class) becomes applyable — by writing a
+# source='operator' row into the SAME feed the #141/#143 deep-pass redirect writes into, so
+# plan_works_merge's existing works_detected_duplicates class picks it up on the next
+# --merge-works dry-run with zero new planner logic. Mirrors two_phase.enrich_deep's ON CONFLICT
+# DO NOTHING insert shape exactly (see test_detected_duplicates_upsert.py) — a re-run of the same
+# ordered pair is a no-op, not a duplicate row.
+# --------------------------------------------------------------------------------------------
+
+
+class UnknownWorkIdsError(ValueError):
+    """Raised by promote_detected_duplicate_pair when one or both work ids don't exist."""
+
+    def __init__(self, missing_ids: list[UUID]):
+        self.missing_ids = missing_ids
+        joined = ", ".join(str(i) for i in missing_ids)
+        super().__init__(f"unknown work id(s): {joined}")
+
+
+@dataclass
+class PromoteDuplicatePairResult:
+    work_id_a: UUID
+    work_id_b: UUID
+    title_a: str
+    title_b: str
+    already_existed: bool  # True when the (work_id_a, work_id_b) row was already present
+
+
+def promote_detected_duplicate_pair(session: Session, work_id_a: UUID, work_id_b: UUID) -> PromoteDuplicatePairResult:
+    """The CLI helper function scripts/clean_catalog.py's --promote-pair mode calls per pair
+    (after UUID parsing, which is pure string handling done by the caller before any session is
+    open). Owns every DB-touching guard: rejects a self-pair (a work is never its own duplicate —
+    the SAME structural rule _dedupe_detected_duplicate_rows already enforces on the read side),
+    verifies BOTH work ids exist (raises UnknownWorkIdsError naming exactly which one(s) don't —
+    never a bare 'not found'), then inserts a source='operator' detected_duplicates row with the
+    same ON CONFLICT DO NOTHING shape two_phase.enrich_deep's redirect insert uses (conflict
+    target = the composite PK), so re-running the exact same ordered pair is idempotent — no
+    second row, no error. already_existed is determined by a pre-insert session.get check (not by
+    trusting driver-specific rowcount semantics), so it's stable across DB-API drivers."""
+    if work_id_a == work_id_b:
+        raise ValueError(f"cannot promote {work_id_a} as a duplicate of itself")
+
+    found = dict(session.query(Work.id, Work.title).filter(Work.id.in_([work_id_a, work_id_b])).all())
+    missing = [wid for wid in (work_id_a, work_id_b) if wid not in found]
+    if missing:
+        raise UnknownWorkIdsError(missing)
+
+    already_existed = session.get(DetectedDuplicate, {"work_id_a": work_id_a, "work_id_b": work_id_b}) is not None
+    session.execute(
+        pg_insert(DetectedDuplicate)
+        .values(work_id_a=work_id_a, work_id_b=work_id_b, source="operator")
+        .on_conflict_do_nothing(index_elements=["work_id_a", "work_id_b"])
+    )
+    session.flush()
+
+    return PromoteDuplicatePairResult(
+        work_id_a=work_id_a,
+        work_id_b=work_id_b,
+        title_a=found[work_id_a],
+        title_b=found[work_id_b],
+        already_existed=already_existed,
+    )
