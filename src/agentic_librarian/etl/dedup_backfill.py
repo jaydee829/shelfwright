@@ -38,8 +38,10 @@ this migration adds no columns to those tables.
 
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete, select
@@ -48,6 +50,7 @@ from sqlalchemy.orm import Session
 from agentic_librarian.db.models import (
     Author,
     AuthorStyle,
+    DetectedDuplicate,
     Edition,
     Narrator,
     NarratorStyle,
@@ -55,6 +58,7 @@ from agentic_librarian.db.models import (
     Suggestions,
     Work,
     WorkContributor,
+    WorkTrope,
     edition_narrators,
 )
 from agentic_librarian.enrichment.two_phase import _normalize
@@ -701,6 +705,486 @@ def _plan_duplicate_works(session: Session) -> list[WorkDupReport]:
             continue
         out.append(WorkDupReport(work_ids=[wid for wid, _ in entries], titles=[t for _, t in entries], norm_key=key))
     return out
+
+
+# --------------------------------------------------------------------------------------------
+# Works-merge detection (PR-2 part 1, Spec 2026-07-14: docs/superpowers/specs/
+# 2026-07-14-works-merge-tool-design.md). PLANNING/DETECTION ONLY — plan_works_merge is
+# read-only, same as plan_dedup; there is no apply_works_merge here (that is a follow-up task,
+# H2, which builds the merge COMPOSITION on top of this module's plan output).
+#
+# Deliberately independent of DedupPlan / plan_dedup / apply_dedup / PLAN_ID_SET_CLASSES above:
+# those exist for the #95 pre-constraint-migration gate (a narrower, already-shipped tool with
+# its own pinned tests — duplicate_works_report_only/_plan_duplicate_works/WorkDupReport are
+# untouched by this section). The works-merge tool is a separate, later-stage cleanup with its
+# own detection classes, its own survivor-selection rule, and its own eventual apply gate; it
+# lives in the SAME FILE (per the design spec: "extend etl/dedup_backfill.py... do NOT build a
+# parallel tool") but does not thread through the constraint-gate's plan/apply machinery.
+#
+# Four detection classes, evidence-strongest first — each produces UNORDERED work-pair
+# groupings (a work id pair is a 2-tuple but is always compared/deduped as a frozenset so
+# (A, B) and (B, A) collapse to the same pair):
+#   1. works_same_isbn        — works sharing a non-null editions.isbn_13.
+#   2. works_same_identity    — fold(title) equal AND author-token overlap >= 1 full token,
+#                                with the series guard blocking sequel titles from matching.
+#   3. works_detected_duplicates — rows from the #141/#143 detected_duplicates feed, deduped as
+#                                unordered pairs (the table's composite PK is (work_id_a,
+#                                work_id_b), NOT order-normalized — both rows of one cluster can
+#                                exist; see DetectedDuplicate's docstring in db/models.py).
+#   4. works_fuzzy_report_only — token-set similarity on folded titles above a threshold, minus
+#                                pairs already caught by a stronger class above. REPORT ONLY
+#                                FOREVER: never promoted to an applyable class by this tool (the
+#                                design spec: "operator promotes pairs by hand if real"). Marked
+#                                structurally via WorksMergeClusters.fuzzy_report_only being a
+#                                SEPARATE field from the three applyable-shape lists, exactly the
+#                                way duplicate_works_report_only is a separate field on DedupPlan
+#                                — H2's future apply step can only reach the applyable fields.
+#
+# A pair that matches more than one class is reported ONCE, in its single strongest class
+# (works_same_isbn > works_same_identity > works_detected_duplicates > works_fuzzy_report_only).
+# Pairs are then unioned into transitive clusters (A~B, B~C -> one {A, B, C} cluster) via a
+# simple union-find; a cluster's reported class is the STRONGEST class of any edge that built
+# it, so a cluster with even one same_isbn edge is never fuzzy-report-only.
+# --------------------------------------------------------------------------------------------
+
+_SERIES_TOKEN_WORDS = {"book", "volume", "vol", "part", "no"}
+
+
+def _fold(title: str) -> str:
+    """fold() per the works-merge design spec: the existing _normalize (lowercase, strip,
+    collapse whitespace) PLUS punctuation folding so title variants that differ only by
+    punctuation choice compare equal — catches the real 'We Are Legion (We Are Bob)' vs
+    'We are Legion; We are Bob' pair. Punctuation class matches the spec exactly:
+    [;:()\\[\\]&.,!?'"-] -> space, then whitespace collapse (re-run through _normalize so a
+    punctuation char abutting a word doesn't leave a double space)."""
+    folded = re.sub(r"""[;:()\[\]&.,!?'"-]""", " ", title or "")
+    return _normalize(folded)
+
+
+def _roman_numeral_token(token: str) -> bool:
+    """True if `token` is a (non-empty) run of valid roman-numeral letters. Deliberately loose
+    (does not validate strict subtractive-notation ordering, e.g. accepts 'IIII') — this is a
+    series-guard heuristic over real-world sequel titles, not a roman-numeral parser; the cost
+    of a false positive (blocking a legitimate non-sequel match) is low and no observed catalog
+    title needs the stricter form."""
+    return bool(token) and all(ch in "ivxlcdm" for ch in token)
+
+
+def _strip_trailing_volume_token(folded_title: str) -> tuple[str, bool]:
+    """Given an already-`_fold`ed title, strip a trailing volume/sequel token if present:
+    a bare number ('2'), a roman numeral ('ii'), a '#' + number (folded to '# 2' since '#' is
+    not in the punctuation-fold set... but '#' IS punctuation-like; see note below), or a
+    series word ('book'/'volume'/'vol'/'part'/'no') immediately followed by a number. Returns
+    (title_with_token_removed, True) if a token was found, else (folded_title, False).
+
+    Note: '#' is not in the fold-punctuation set (spec's list is `[;:()\\[\\]&.,!?'"-]`), so
+    '#2' survives folding as a single token '#2' — handled directly below alongside the
+    bare-number and roman-numeral cases."""
+    tokens = folded_title.split(" ")
+    if not tokens or tokens[-1] == "":
+        return folded_title, False
+
+    last = tokens[-1]
+    # Series-word + number ('... book 2', '... volume ii') checked BEFORE the bare
+    # number/roman-numeral case below, so 'beware of chicken volume 2' strips BOTH trailing
+    # tokens ('volume' and '2') down to 'beware of chicken', not just the trailing '2' down to
+    # the wrong 'beware of chicken volume'.
+    if len(tokens) >= 2 and tokens[-2] in _SERIES_TOKEN_WORDS and (last.isdigit() or _roman_numeral_token(last)):
+        return " ".join(tokens[:-2]).strip(), True
+    if last.isdigit() or _roman_numeral_token(last):
+        return " ".join(tokens[:-1]).strip(), True
+    if last.startswith("#") and last[1:].isdigit():
+        return " ".join(tokens[:-1]).strip(), True
+    return folded_title, False
+
+
+def _series_guard_blocks(title_a: str, title_b: str) -> bool:
+    """True if `title_a`/`title_b` differ ONLY by a trailing volume/sequel token — i.e. one
+    title, once its trailing volume token is stripped, equals the other's fold exactly, but the
+    two folded titles were NOT already equal. Symmetric in its two arguments by construction
+    (both directions are tried). 'Beware of Chicken' vs 'Beware of Chicken 2' -> blocked;
+    'Beware of Chicken' vs 'Beware of Chicken' -> NOT blocked (nothing to guard against);
+    'We Are Legion (We Are Bob)' vs 'We are Legion; We are Bob' -> NOT blocked (no trailing
+    volume token on either side, this is the punctuation-fold case fold() already handles)."""
+    fa, fb = _fold(title_a), _fold(title_b)
+    if fa == fb:
+        return False
+    stripped_a, had_a = _strip_trailing_volume_token(fa)
+    stripped_b, had_b = _strip_trailing_volume_token(fb)
+    if had_a and stripped_a == fb:
+        return True
+    return bool(had_b and stripped_b == fa)
+
+
+def fuzzy_similarity(title_a: str, title_b: str) -> float:
+    """Token-set (Jaccard) similarity on folded titles: |intersection| / |union| of each
+    title's fold()ed word set. Dependency-free (no rapidfuzz in this project) — the spec calls
+    for "trigram or token-set ratio"; token-set is chosen since it needs no new dependency and
+    is order-insensitive, which suits title variants that reorder words."""
+    tokens_a = set(_fold(title_a).split())
+    tokens_b = set(_fold(title_b).split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+FUZZY_SIMILARITY_THRESHOLD = 0.5
+
+
+@dataclass
+class WorkStats:
+    """Per-work data survivor selection needs, gathered once per plan_works_merge run and
+    passed around as a plain dict[UUID, WorkStats] so the pure clustering/survivor core
+    (plan_works_merge_clusters, pick_survivor) never touches a Session."""
+
+    work_id: UUID
+    title: str
+    justified_trope_links: int
+    deep_enriched_at: datetime | None
+    edition_count: int
+
+
+def pick_survivor(candidates: list[WorkStats]) -> WorkStats:
+    """Deterministic survivor selection (spec order): most justified trope links -> newest
+    deep_enriched_at (NULLs sort LAST, i.e. a work that was never deep-enriched never wins this
+    tiebreak over one that was) -> most editions -> lowest UUID string (final determinism).
+    Pure function over WorkStats; no DB access."""
+
+    def sort_key(w: WorkStats):
+        # NULLs-last on a DESCENDING sort: pair (has_timestamp, timestamp) both negated-ish via
+        # a tuple that puts "no timestamp" after "has timestamp" once the whole key is sorted
+        # ascending on its negation — simplest correct form: sort ascending on
+        # (-trope_links, null_last_date_key, -edition_count, str(id)).
+        # NULLs sort after any real timestamp.
+        date_key = (1, None) if w.deep_enriched_at is None else (0, -w.deep_enriched_at.timestamp())
+        return (-w.justified_trope_links, date_key, -w.edition_count, str(w.work_id))
+
+    return sorted(candidates, key=sort_key)[0]
+
+
+@dataclass
+class WorksMergeCluster:
+    """One merge unit: every work id folded into this cluster (transitively, via unioned pairs
+    across however many class edges connected them), the survivor plan_works_merge picked for
+    it, and the per-work stats used for that selection (so the report/CLI can show its work)."""
+
+    class_name: str  # one of "works_same_isbn" / "works_same_identity" / "works_detected_duplicates"
+    work_ids: list[UUID]
+    titles: list[str]
+    survivor_id: UUID
+    stats_by_work: dict[UUID, WorkStats] = field(default_factory=dict)
+
+
+@dataclass
+class WorksMergeClusters:
+    """The four detection classes' output, evidence-strongest first. Only the first three are
+    ever eligible for a future apply step; fuzzy_report_only is a STRUCTURALLY separate field
+    (never merged into the other three, never given an apply-shaped dataclass) so a future
+    apply_works_merge (H2) cannot reach it by construction, not just by convention."""
+
+    same_isbn: list[WorksMergeCluster] = field(default_factory=list)
+    same_identity: list[WorksMergeCluster] = field(default_factory=list)
+    detected_duplicates: list[WorksMergeCluster] = field(default_factory=list)
+    fuzzy_report_only: list[WorksMergeCluster] = field(default_factory=list)
+
+    def summary(self) -> dict[str, int]:
+        return {
+            "works_same_isbn": len(self.same_isbn),
+            "works_same_identity": len(self.same_identity),
+            "works_detected_duplicates": len(self.detected_duplicates),
+            "works_fuzzy_report_only": len(self.fuzzy_report_only),
+        }
+
+
+# Class strength order, strongest first — index is used as the precedence rank (lower wins).
+_WORKS_MERGE_CLASS_ORDER = (
+    "works_same_isbn",
+    "works_same_identity",
+    "works_detected_duplicates",
+    "works_fuzzy_report_only",
+)
+
+
+class _UnionFind:
+    """Minimal union-find (path compression, no union-by-rank — cluster sizes here are tiny)
+    over arbitrary hashable ids, used to collapse transitive pairs (A~B, B~C) into one cluster
+    without pulling in a dependency."""
+
+    def __init__(self):
+        self._parent: dict[UUID, UUID] = {}
+
+    def find(self, x: UUID) -> UUID:
+        self._parent.setdefault(x, x)
+        while self._parent[x] != x:
+            self._parent[x] = self._parent[self._parent[x]]
+            x = self._parent[x]
+        return x
+
+    def union(self, a: UUID, b: UUID) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._parent[ra] = rb
+
+
+def plan_works_merge_clusters(
+    *,
+    same_isbn_pairs: list[tuple[UUID, UUID]],
+    same_identity_pairs: list[tuple[UUID, UUID]],
+    detected_duplicate_pairs: list[tuple[UUID, UUID]],
+    fuzzy_pairs: list[tuple[UUID, UUID]],
+    stats_by_work: dict[UUID, WorkStats],
+) -> WorksMergeClusters:
+    """Pure composition core (no DB access): given each class's already-detected pairs (as
+    plain (id, id) 2-tuples — order does not matter, they are deduped as unordered pairs
+    below), resolve cross-class overlap (a pair appears once, in its strongest class), collapse
+    transitive clusters via union-find, and pick each cluster's survivor.
+
+    A cluster's reported class is the STRONGEST class of any edge that built it (see the
+    module-level comment above this section) — this is what makes
+    test_transitive_cluster_takes_the_strongest_class_of_any_edge pass: a fuzzy-only edge that
+    gets pulled into a same_isbn cluster is reported under same_isbn, not fuzzy."""
+    pairs_by_class: dict[str, list[frozenset]] = {
+        "works_same_isbn": [frozenset(p) for p in same_isbn_pairs],
+        "works_same_identity": [frozenset(p) for p in same_identity_pairs],
+        "works_detected_duplicates": [frozenset(p) for p in detected_duplicate_pairs],
+        "works_fuzzy_report_only": [frozenset(p) for p in fuzzy_pairs],
+    }
+
+    # Cross-class precedence: a pair keeps only its strongest class's edge.
+    best_class_for_pair: dict[frozenset, str] = {}
+    for class_name in _WORKS_MERGE_CLASS_ORDER:
+        for pair in pairs_by_class[class_name]:
+            if pair not in best_class_for_pair:
+                best_class_for_pair[pair] = class_name
+
+    uf = _UnionFind()
+    for pair in best_class_for_pair:
+        a, b = tuple(pair)
+        uf.union(a, b)
+
+    # Group surviving (deduped, precedence-resolved) pair edges by their cluster root, and
+    # track the strongest class among the edges that built each cluster.
+    cluster_root_class_rank: dict[UUID, int] = {}
+    cluster_members: dict[UUID, set[UUID]] = defaultdict(set)
+    for pair, class_name in best_class_for_pair.items():
+        a, b = tuple(pair)
+        root = uf.find(a)
+        cluster_members[root].update((a, b))
+        rank = _WORKS_MERGE_CLASS_ORDER.index(class_name)
+        cluster_root_class_rank[root] = min(rank, cluster_root_class_rank.get(root, rank))
+
+    out = WorksMergeClusters()
+    dest_by_class_name = {
+        "works_same_isbn": out.same_isbn,
+        "works_same_identity": out.same_identity,
+        "works_detected_duplicates": out.detected_duplicates,
+        "works_fuzzy_report_only": out.fuzzy_report_only,
+    }
+    # Deterministic ordering: iterate roots sorted by string so plan output (and therefore any
+    # future report/token emission) is stable across re-plans of unchanged data.
+    for root in sorted(cluster_members, key=str):
+        members = cluster_members[root]
+        class_name = _WORKS_MERGE_CLASS_ORDER[cluster_root_class_rank[root]]
+        candidates = [stats_by_work[wid] for wid in members]
+        survivor = pick_survivor(candidates)
+        cluster = WorksMergeCluster(
+            class_name=class_name,
+            work_ids=sorted(members, key=str),
+            titles=[stats_by_work[wid].title for wid in sorted(members, key=str)],
+            survivor_id=survivor.work_id,
+            stats_by_work={wid: stats_by_work[wid] for wid in members},
+        )
+        dest_by_class_name[class_name].append(cluster)
+    return out
+
+
+def _detect_same_isbn_pairs(session: Session) -> list[tuple[UUID, UUID]]:
+    """works_same_isbn: two+ works sharing a non-null editions.isbn_13. Column-explicit (no
+    Work entity load) — matches the house convention elsewhere in this module, though this
+    query does not touch deep_enriched_at itself (the caller gathers WorkStats separately)."""
+    rows = session.query(Edition.work_id, Edition.isbn_13).filter(Edition.isbn_13.isnot(None)).all()
+    groups: dict[str, set[UUID]] = defaultdict(set)
+    for work_id, isbn in rows:
+        groups[isbn].add(work_id)
+    pairs: list[tuple[UUID, UUID]] = []
+    for work_ids in groups.values():
+        if len(work_ids) < 2:
+            continue
+        ordered = sorted(work_ids, key=str)
+        pairs.extend((ordered[0], wid) for wid in ordered[1:])
+    return pairs
+
+
+def _author_tokens(name: str) -> set[str]:
+    return set(_fold(name).split())
+
+
+def _detect_same_identity_pairs(session: Session) -> list[tuple[UUID, UUID]]:
+    """works_same_identity: fold(title) equal AND author-token-set overlap >= 1 full token,
+    with the series guard blocking sequel titles. O(n^2) within each fold(title) bucket (buckets
+    are small in practice — exact-title collisions), never across the whole catalog."""
+    rows = (
+        session.query(Work.id, Work.title, Author.name)
+        .join(WorkContributor, WorkContributor.work_id == Work.id)
+        .join(Author, Author.id == WorkContributor.author_id)
+        .filter(WorkContributor.role == "Author")
+        .order_by(Work.id)
+        .all()
+    )
+    authors_by_work: dict[UUID, set[str]] = defaultdict(set)
+    title_by_work: dict[UUID, str] = {}
+    for work_id, title, author_name in rows:
+        authors_by_work[work_id] |= _author_tokens(author_name)
+        title_by_work[work_id] = title
+
+    fold_buckets: dict[str, list[UUID]] = defaultdict(list)
+    for work_id, title in title_by_work.items():
+        fold_buckets[_fold(title)].append(work_id)
+
+    pairs: list[tuple[UUID, UUID]] = []
+    for work_ids in fold_buckets.values():
+        ordered = sorted(work_ids, key=str)
+        for i, wa in enumerate(ordered):
+            for wb in ordered[i + 1 :]:
+                if authors_by_work[wa] & authors_by_work[wb]:
+                    pairs.append((wa, wb))
+    return pairs
+
+
+def _detect_detected_duplicate_pairs(session: Session) -> list[tuple[UUID, UUID]]:
+    """works_detected_duplicates: rows from the #141/#143 detected_duplicates feed, deduped as
+    UNORDERED pairs — both (A, B) and (B, A) rows can exist for the same cluster (composite PK
+    is (work_id_a, work_id_b), not order-normalized; see DetectedDuplicate's docstring)."""
+    rows = session.query(DetectedDuplicate.work_id_a, DetectedDuplicate.work_id_b).all()
+    seen: set[frozenset] = set()
+    pairs: list[tuple[UUID, UUID]] = []
+    for a, b in rows:
+        pair = frozenset((a, b))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        pairs.append(tuple(sorted((a, b), key=str)))
+    return pairs
+
+
+def _detect_fuzzy_pairs(
+    title_by_work: dict[UUID, str], already_paired: set[frozenset], threshold: float = FUZZY_SIMILARITY_THRESHOLD
+) -> list[tuple[UUID, UUID]]:
+    """works_fuzzy_report_only: token-set similarity on folded titles above `threshold`, MINUS
+    pairs already caught by a stronger class (`already_paired`, as a set of frozensets) and
+    minus pairs the series guard blocks (a fuzzy-similar sequel title is not a duplicate).
+    O(n^2) over every work — acceptable at catalog scale (hundreds, not millions) per the
+    design spec's "retroactive global fuzzy dedup... stays report-only" framing; this is a
+    detail-list class, not a hot path."""
+    ids = sorted(title_by_work, key=str)
+    pairs: list[tuple[UUID, UUID]] = []
+    for i, wa in enumerate(ids):
+        for wb in ids[i + 1 :]:
+            pair = frozenset((wa, wb))
+            if pair in already_paired:
+                continue
+            title_a, title_b = title_by_work[wa], title_by_work[wb]
+            if _series_guard_blocks(title_a, title_b):
+                continue
+            if fuzzy_similarity(title_a, title_b) >= threshold:
+                pairs.append((wa, wb))
+    return pairs
+
+
+def _gather_work_stats(session: Session) -> dict[UUID, WorkStats]:
+    """One pass gathering everything pick_survivor needs, keyed by work id. Entity-loads Work
+    (including deep_enriched_at) — safe here (unlike plan_dedup's classes) because the
+    works-merge tool is a later-stage PR-2 cleanup that runs well after migration 48e3762d6c0c
+    (which added deep_enriched_at) and f871fd59415e (which added detected_duplicates) have both
+    landed; see this module's top docstring for the invariant that DOES still apply to
+    plan_dedup's own pre-#95-migration classes, which this function does not touch."""
+    trope_link_counts = Counter(
+        row.work_id for row in session.query(WorkTrope.work_id).filter(WorkTrope.justification.isnot(None)).all()
+    )
+    edition_counts = Counter(row.work_id for row in session.query(Edition.work_id).all())
+    out: dict[UUID, WorkStats] = {}
+    for work in session.query(Work).order_by(Work.id).all():
+        out[work.id] = WorkStats(
+            work_id=work.id,
+            title=work.title,
+            justified_trope_links=trope_link_counts.get(work.id, 0),
+            deep_enriched_at=work.deep_enriched_at,
+            edition_count=edition_counts.get(work.id, 0),
+        )
+    return out
+
+
+def plan_works_merge(session: Session) -> WorksMergeClusters:
+    """READ ONLY. Top-level works-merge detection entry point (PR-2 part 1) — gathers each
+    class's pairs from the DB, gathers per-work stats, and delegates to the pure
+    plan_works_merge_clusters for precedence resolution / transitive collapse / survivor
+    selection. No apply step exists in this module; H2 builds the merge composition on top of
+    this plan's clusters."""
+    stats_by_work = _gather_work_stats(session)
+    title_by_work = {wid: s.title for wid, s in stats_by_work.items()}
+
+    same_isbn_pairs = _detect_same_isbn_pairs(session)
+    same_identity_pairs = [
+        (a, b)
+        for a, b in _detect_same_identity_pairs(session)
+        if not _series_guard_blocks(title_by_work[a], title_by_work[b])
+    ]
+    detected_duplicate_pairs = _detect_detected_duplicate_pairs(session)
+
+    already_paired = {frozenset(p) for p in same_isbn_pairs + same_identity_pairs + detected_duplicate_pairs}
+    fuzzy_pairs = _detect_fuzzy_pairs(title_by_work, already_paired)
+
+    return plan_works_merge_clusters(
+        same_isbn_pairs=same_isbn_pairs,
+        same_identity_pairs=same_identity_pairs,
+        detected_duplicate_pairs=detected_duplicate_pairs,
+        fuzzy_pairs=fuzzy_pairs,
+        stats_by_work=stats_by_work,
+    )
+
+
+def render_works_merge_report(clusters: WorksMergeClusters, *, db_target: str | None = None) -> str:
+    """Human-readable report text, consistent with this module's existing report format
+    (dedup's `_write_dedup_report` in scripts/clean_catalog.py / fallback_repair's
+    write_report): a summary block, then per-class cluster sections showing every work id +
+    title in the cluster and which one was picked as survivor. No machine-readable token block
+    here — plan_id_set-shaped token emission is H2's job (the apply step doesn't exist yet), so
+    there is nothing to gate against drift yet. fuzzy_report_only is called out explicitly as
+    NEVER APPLIED so an operator reading a persisted copy of this text (not just the live CLI
+    output) sees the same warning."""
+    lines: list[str] = ["Works-merge plan report", "=" * 60, ""]
+    if db_target is not None:
+        lines.append(f"db target: {db_target}")
+        lines.append("")
+
+    summary = clusters.summary()
+    lines.append("summary:")
+    for key, count in summary.items():
+        lines.append(f"  {key:32} {count}")
+    lines.append("")
+
+    def _render_section(title: str, class_clusters: list[WorksMergeCluster], *, never_applied: bool) -> None:
+        suffix = "  (NEVER APPLIED — operator triage only)" if never_applied else ""
+        lines.append(f"=== {title} ({len(class_clusters)}){suffix} ===")
+        for cluster in class_clusters:
+            lines.append(f"  cluster: {cluster.work_ids}")
+            for wid in cluster.work_ids:
+                stats = cluster.stats_by_work[wid]
+                marker = " <- survivor" if wid == cluster.survivor_id else ""
+                lines.append(
+                    f"    {wid}  {stats.title!r}  "
+                    f"justified_tropes={stats.justified_trope_links} "
+                    f"deep_enriched_at={stats.deep_enriched_at} "
+                    f"editions={stats.edition_count}{marker}"
+                )
+        lines.append("")
+
+    _render_section("works_same_isbn", clusters.same_isbn, never_applied=False)
+    _render_section("works_same_identity", clusters.same_identity, never_applied=False)
+    _render_section("works_detected_duplicates", clusters.detected_duplicates, never_applied=False)
+    _render_section("works_fuzzy_report_only", clusters.fuzzy_report_only, never_applied=True)
+
+    return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------------------------

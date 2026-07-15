@@ -12,12 +12,14 @@
   python scripts/clean_catalog.py --dedup-for-constraints --apply --yes --report data/reports/dedup-<ts>.txt
   python scripts/clean_catalog.py --repair-fallbacks --dry-run
   python scripts/clean_catalog.py --repair-fallbacks-apply --yes --report data/reports/fallback-repair-<ts>.txt
+  python scripts/clean_catalog.py --merge-works
 
 Run against LIVE prod via the app container + Cloud SQL proxy. Refuses --apply on sqlite/backup/localhost.
 --dedup-for-constraints --apply re-plans from scratch and cross-checks the fresh plan against
 the reviewed --report (default: newest data/reports/dedup-*.txt) — refuses if the plan drifted.
 --repair-fallbacks-apply likewise re-plans fresh and refuses on any drift from --report (required,
-no default — GH #70)."""
+no default — GH #70). --merge-works (Spec 2026-07-14 PR-2 part 1) is detection/planning ONLY —
+always a dry-run, no --apply counterpart exists yet."""
 
 from __future__ import annotations
 
@@ -255,6 +257,54 @@ def _run_repair_fallbacks(manager: DatabaseManager, safe: str) -> int:
         return 0
 
 
+def _write_works_merge_report(clusters, *, db_target: str) -> Path:
+    """Persist the works-merge dry-run plan to data/reports/works-merge-<UTC>.txt (Spec
+    2026-07-14 PR-2), reusing render_works_merge_report's human-readable text and the same
+    microsecond-timestamp collision avoidance as _write_dedup_report / fallback_repair's
+    write_report. PLANNING ONLY — there is no apply step yet (H2), so unlike those two reports
+    this one carries no machine-readable token block to gate an apply against."""
+    reports_dir = Path("data/reports")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    ts = now.strftime("%Y%m%dT%H%M%S") + f"{now.microsecond:06d}Z"
+    path = reports_dir / f"works-merge-{ts}.txt"
+    path.write_text(dedup_backfill.render_works_merge_report(clusters, db_target=db_target), encoding="utf-8")
+    return path
+
+
+def _run_merge_works(manager: DatabaseManager, safe: str) -> int:
+    """--merge-works: DETECTION/PLANNING ONLY (PR-2 part 1) — always a dry-run, never applies.
+    Reuses the --repair-fallbacks CLI conventions: prints the DB target before opening the work
+    session, prints per-class cluster summaries + survivor picks, writes the full report to
+    data/reports/works-merge-<UTC>.txt for operator review. apply arrives in a follow-up
+    task (H2), which builds the merge composition (editions/suggestions/trope-links/
+    contributors/Work-row deletion) on top of this plan's clusters — see docs/superpowers/
+    specs/2026-07-14-works-merge-tool-design.md."""
+    print(f"DB target: …@{safe}")
+    with manager.get_session() as session:
+        clusters = dedup_backfill.plan_works_merge(session)
+        summary = clusters.summary()
+        print("\n=== works-merge plan (DETECTION ONLY — PR-2 part 1) ===")
+        for key, count in summary.items():
+            print(f"  {key:32} {count}")
+
+        def _print_clusters(title: str, class_clusters, *, never_applied: bool) -> None:
+            suffix = "  (NEVER APPLIED — operator triage only)" if never_applied else ""
+            print(f"\n--- {title}{suffix} ---")
+            for cluster in class_clusters[:20]:
+                print(f"  cluster {cluster.work_ids}  survivor={cluster.survivor_id}  titles={cluster.titles}")
+
+        _print_clusters("works_same_isbn", clusters.same_isbn, never_applied=False)
+        _print_clusters("works_same_identity", clusters.same_identity, never_applied=False)
+        _print_clusters("works_detected_duplicates", clusters.detected_duplicates, never_applied=False)
+        _print_clusters("works_fuzzy_report_only", clusters.fuzzy_report_only, never_applied=True)
+
+        report_path = _write_works_merge_report(clusters, db_target=safe)
+        print(f"\nfull plan (every cluster) written to {report_path} — review this before any apply.")
+        print("\napply arrives in a follow-up (H2) — this command never mutates data.")
+        return 0
+
+
 def _run_repair_fallbacks_apply(manager: DatabaseManager, args, url: str, safe: str) -> int:
     """--repair-fallbacks-apply: guards first (no session needed for those), THEN warms in its
     own short session, THEN opens the work session that re-plans fresh and applies — see
@@ -364,6 +414,23 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     ap.add_argument(
+        "--merge-works",
+        action="store_true",
+        help=(
+            "Spec 2026-07-14 PR-2 part 1: DETECTION/PLANNING ONLY for the works-merge tool — "
+            "always a dry-run, this flag never applies. Prints the four detection classes "
+            "(strongest evidence first): works_same_isbn, works_same_identity, "
+            "works_detected_duplicates (the #141/#143 feed), and works_fuzzy_report_only "
+            "(NEVER applied by design — operator promotes pairs by hand). Each cluster shows "
+            "its deterministic survivor pick (most justified trope links -> newest "
+            "deep_enriched_at -> most editions -> lowest UUID). Writes "
+            "data/reports/works-merge-<UTC timestamp>.txt for review. Apply (the merge "
+            "composition: editions/suggestions/trope-links/contributors/Work-row deletion) "
+            "arrives in a follow-up task — see etl/dedup_backfill.py's plan_works_merge and "
+            "docs/superpowers/specs/2026-07-14-works-merge-tool-design.md."
+        ),
+    )
+    ap.add_argument(
         "--repair-fallbacks-apply",
         action="store_true",
         help=(
@@ -406,6 +473,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_repair_fallbacks(manager, safe)
     if args.repair_fallbacks_apply:
         return _run_repair_fallbacks_apply(manager, args, url, safe)
+    if args.merge_works:
+        return _run_merge_works(manager, safe)
 
     with manager.get_session() as session:
         print(f"DB target: …@{safe}")
@@ -596,8 +665,8 @@ def main(argv: list[str] | None = None) -> int:
 
         print(
             "Nothing to do. Pass --inventory, --contributors, --prune-fallbacks, --tropes, "
-            "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, or "
-            "--repair-fallbacks-apply."
+            "--requeue-unenriched, --dedup-for-constraints, --repair-fallbacks, "
+            "--repair-fallbacks-apply, or --merge-works."
         )
         return 1
 
