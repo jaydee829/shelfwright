@@ -12,6 +12,28 @@ This file tracks work history and ticket references.
 
 ## Log
 
+### 2026-07-14/15 - RECOMMENDATION QUALITY + WORKS-MERGE ARC: #125 and #70 closed, duplicate works purged
+- **Status**: Completed (PR #146 awaiting merge — the code its ops already ran on; #145/#137 open as triage)
+- **Description**: One continuous arc from a live bad-recommendation report to a clean catalog.
+  Diagnosis: #70 rediagnosed as fallback-tag pollution (not scout collapse) + unranked candidate
+  pools + no negative targets + rec-mandating prompt. Fixes: PRs #134–#136 (retrieval ranking,
+  exclude targets, no re-suggest; conversational charter; lift-based justified-only preferences),
+  #138–#139 (slug-only fallback writer + gated recompute repair + zero-evidence reset),
+  #140 (display ordering), #143 (#141 pinned deep pass + `detected_duplicates` feed +
+  #142 author-cell parsing; migration `f871fd59415e`), #144 (gated works-merge tool),
+  #146 (detection hardening + `--promote-pair`, open). Gated prod ops executed: #70 repair
+  (612 link deletes, 25 resets, converged), requeue sweep 33/33, works-merge 13 clusters
+  (6 detected + 7 operator-promoted; catalog 800→787; *Relentless* pair excluded as two
+  different books; survivor titles touched up per operator). The merge's own dry-run gate
+  caught prod ISBN pollution before any damage (#145) — the second time this arc a dry-run
+  artifact prevented a data-loss class.
+- **URL**: https://github.com/jaydee829/shelfwright/issues/125, /issues/70, /pull/134 … /pull/146
+- **Notes**: Verification layers each caught something the previous missed (spec-compliance
+  reviews, adversarial whole-branch passes, and twice the LIVE dry-run gate itself). Residual
+  watch items: The Goblin Horde is permanently scout-unknowable (do not re-sweep); FKS/Pioneer
+  under-delete residual is preference-invisible; mismatch/fuzzy report sections are the
+  standing hand-promotion queue (`--promote-pair`). Operator UI chat smoke still pending.
+
 ### 2026-07-13 - PHASE 6.1–6.3 COMPLETE: scaling hardening groupings 1–3 — 19 of 27 issues closed
 - **Status**: Completed — all shipped, deployed, and issue-closed with evidence; prod schema
   migrated and dedup-gated sequence executed live.
