@@ -34,6 +34,112 @@ from agentic_librarian.scouts.trope_manager import TropeManager
 logger = logging.getLogger(__name__)
 
 
+def merge_edition_and_narrators(
+    session,
+    *,
+    work_id,
+    fmt,
+    isbn_13=None,
+    page_count=None,
+    audio_minutes=None,
+    publication_date=None,
+    narrator_names=None,
+    narrator_styles=None,
+    style_manager,
+    apply_metadata=True,
+):
+    """Resolve narrators (+ narrator styles) and get-or-create/merge the (work_id, fmt)
+    Edition. Extracted from persist_enriched_work (history-format-edit spec) so the
+    format-completion pass (two_phase.complete_edition) shares the exact same merge
+    semantics. apply_metadata=False (persist's skip_enrichment rows) still merges
+    narrators, mirroring the original gating. Returns the Edition, flushed when newly
+    created so its id is populated for the caller."""
+    edition = session.query(Edition).filter_by(work_id=work_id, format=fmt).first()
+
+    # A row may carry narrator_names/styles as NaN (float) — pandas fills the column with
+    # NaN for rows that lack it. Coerce non-list/dict to empty so this never crashes.
+    if not isinstance(narrator_names, list):
+        narrator_names = []
+    # Keep only non-empty strings: a malformed/NaN element would crash norm_name/.lower().
+    narrator_names = [n for n in narrator_names if isinstance(n, str) and n.strip()]
+    if not isinstance(narrator_styles, dict):
+        narrator_styles = {}
+
+    seen_narr: set[str] = set()
+    deduped_names = []
+    for n_name in narrator_names:
+        k = norm_name(n_name)
+        if k not in seen_narr:
+            seen_narr.add(k)
+            deduped_names.append(n_name)
+    narrator_names = deduped_names
+
+    narrator_objs = []
+    for n_name in narrator_names:
+        # Case-insensitive lookup so a casing variant reuses the existing Narrator row.
+        narrator = session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
+        if not narrator:
+            # GH #95: uq_narrators_name_lower — same case-insensitive requery pattern as Author.
+            narrator, _created = insert_or_requery(
+                session,
+                Narrator(name=n_name),
+                lambda n_name=n_name: (
+                    session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
+                ),
+            )
+
+        n_style_data = narrator_styles.get(n_name, {})
+        if n_style_data:
+            for attr_type, style_name in _iter_style_items(n_style_data, f"Narrator '{n_name}'"):
+                standard_style = _safe_standardize(
+                    style_manager.standardize_style, style_name, category="Narrator", label=f"style {style_name!r}"
+                )
+                if standard_style is None:
+                    continue
+                existing_link = (
+                    session.query(NarratorStyle)
+                    .filter_by(narrator_id=narrator.id, style_id=standard_style.id, attribute_type=attr_type)
+                    .first()
+                )
+                if not existing_link:
+                    session.add(NarratorStyle(narrator=narrator, style=standard_style, attribute_type=attr_type))
+
+        narrator_objs.append(narrator)
+
+    if not edition:
+        # GH #95: uq_editions_work_format backstops the SELECT-then-INSERT race above; a
+        # concurrent persist for the same (work_id, format) recovers via requery instead of
+        # a 500. narrators/other creation-only fields only apply on the winning insert.
+        # work_id= (not work=) so the not-yet-added Edition never lands in work.editions via
+        # the back_populates backref before session.add — that dangling membership is exactly
+        # what trips "Object of type <Edition> not in session" as an SAWarning-promoted error.
+        edition, _created = insert_or_requery(
+            session,
+            Edition(
+                work_id=work_id,
+                isbn_13=isbn_13,
+                format=fmt,
+                page_count=page_count,
+                audio_minutes=audio_minutes,
+                publication_date=publication_date,
+                narrators=narrator_objs,
+            ),
+            lambda: session.query(Edition).filter_by(work_id=work_id, format=fmt).first(),
+        )
+        session.flush()  # Ensure edition.id is populated for the caller's ReadingHistory check
+    else:
+        if apply_metadata:
+            # Update existing edition if new metadata found (publication_date intentionally
+            # not updated on existing editions — original behavior preserved).
+            edition.isbn_13 = isbn_13 or edition.isbn_13
+            edition.page_count = page_count or edition.page_count
+            edition.audio_minutes = audio_minutes or edition.audio_minutes
+        if narrator_objs:
+            edition.narrators = list(set(edition.narrators) | set(narrator_objs))
+
+    return edition
+
+
 def _safe_standardize(fn, *args, label: str, **kwargs):
     """Run a standardize_* embedding call, returning its Trope/Style, or None on failure.
     An embedding API error (bad/transient key, 429/5xx) must skip that one vectorization,
@@ -261,96 +367,20 @@ def persist_enriched_work(
             if not existing_link:
                 session.add(WorkStyle(work=work, style=standard_style, attribute_type=attr_type))
 
-    # 3. Edition & Narrators
-    edition = session.query(Edition).filter_by(work_id=work.id, format=row["format"]).first()
-
-    # Resolve Narrators. A row may carry narrator_names/styles as NaN (float) — pandas fills the
-    # column with NaN for rows that lack it (e.g. skip_enrichment rows mixed with audiobook rows in
-    # the same partition DataFrame). Coerce non-list/dict to empty so persist never crashes on it.
-    narrator_objs = []
-    narrator_names = row.get("narrator_names")
-    if not isinstance(narrator_names, list):
-        narrator_names = []
-    # Keep only non-empty strings: a malformed/NaN element would crash the norm_name/.lower() calls
-    # below (mirrors the raw_contributors name guard above).
-    narrator_names = [n for n in narrator_names if isinstance(n, str) and n.strip()]
-    narrator_styles = row.get("narrator_styles")
-    if not isinstance(narrator_styles, dict):
-        narrator_styles = {}
-
-    seen_narr: set[str] = set()
-    deduped_names = []
-    for n_name in narrator_names:
-        k = norm_name(n_name)
-        if k not in seen_narr:
-            seen_narr.add(k)
-            deduped_names.append(n_name)
-    narrator_names = deduped_names
-    for n_name in narrator_names:
-        # Case-insensitive lookup so a casing variant reuses the existing Narrator row (see above).
-        narrator = session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
-        if not narrator:
-            # GH #95: uq_narrators_name_lower — same case-insensitive requery pattern as Author above.
-            narrator, _created = insert_or_requery(
-                session,
-                Narrator(name=n_name),
-                lambda n_name=n_name: (
-                    session.query(Narrator).filter(func.lower(Narrator.name) == n_name.lower()).first()
-                ),
-            )
-
-        # Process Narrator Styles
-        n_style_data = narrator_styles.get(n_name, {})
-        if n_style_data:
-            for attr_type, style_name in _iter_style_items(n_style_data, f"Narrator '{n_name}'"):
-                standard_style = _safe_standardize(
-                    style_manager.standardize_style, style_name, category="Narrator", label=f"style {style_name!r}"
-                )
-                if standard_style is None:
-                    continue
-                existing_link = (
-                    session.query(NarratorStyle)
-                    .filter_by(narrator_id=narrator.id, style_id=standard_style.id, attribute_type=attr_type)
-                    .first()
-                )
-                if not existing_link:
-                    session.add(NarratorStyle(narrator=narrator, style=standard_style, attribute_type=attr_type))
-
-        narrator_objs.append(narrator)
-
-    if not edition:
-        # GH #95: uq_editions_work_format backstops the SELECT-then-INSERT race above; a
-        # concurrent persist for the same (work_id, format) recovers via requery instead of
-        # a 500. narrators/other creation-only fields only apply on the winning insert — the
-        # loser's edition is re-queried as-is and updated by the existing-edition branch on
-        # its NEXT call (mirrors the pre-#95 eventual-consistency behavior).
-        # work_id= (not work=) so the not-yet-added Edition never lands in work.editions via
-        # the back_populates backref before session.add — that dangling membership is exactly
-        # what trips "Object of type <Edition> not in session" as an SAWarning-promoted error.
-        edition, _created = insert_or_requery(
-            session,
-            Edition(
-                work_id=work.id,
-                isbn_13=isbn_13,
-                format=row.get("format"),
-                page_count=page_count,
-                audio_minutes=audio_minutes,
-                publication_date=publication_date,
-                narrators=narrator_objs,
-            ),
-            lambda: session.query(Edition).filter_by(work_id=work.id, format=row.get("format")).first(),
-        )
-        session.flush()  # Ensure edition.id is populated for ReadingHistory check
-    else:
-        if not row.get("skip_enrichment"):
-            # Update existing edition if new metadata found
-            edition.isbn_13 = isbn_13 or edition.isbn_13
-            edition.page_count = page_count or edition.page_count
-            edition.audio_minutes = audio_minutes or edition.audio_minutes
-
-        # Update narrators if needed
-        if narrator_objs:
-            edition.narrators = list(set(edition.narrators) | set(narrator_objs))
+    # 3. Edition & Narrators (shared with two_phase.complete_edition — history-format-edit)
+    edition = merge_edition_and_narrators(
+        session,
+        work_id=work.id,
+        fmt=row.get("format"),
+        isbn_13=isbn_13,
+        page_count=page_count,
+        audio_minutes=audio_minutes,
+        publication_date=publication_date,
+        narrator_names=row.get("narrator_names"),
+        narrator_styles=row.get("narrator_styles"),
+        style_manager=style_manager,
+        apply_metadata=not row.get("skip_enrichment"),
+    )
 
     # 4. Reading History (The actual read event). pd.NaT/NaN are truthy, so guard with pd.isna
     # before calling .date() (which would raise on NaT).
