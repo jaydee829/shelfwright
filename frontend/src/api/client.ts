@@ -2,12 +2,16 @@ import { getIdToken } from '../auth/firebase'
 import type { ActivityStep } from './activityLabels'
 
 export class ApiError extends Error {
-  constructor(
-    public status: number,
-    public detail: string,
-  ) {
+  // Explicit fields, not constructor parameter properties: the build runs tsc with
+  // erasableSyntaxOnly, which rejects TS-only runtime syntax (TS1294).
+  status: number
+  detail: string
+
+  constructor(status: number, detail: string) {
     super(detail)
     this.name = 'ApiError'
+    this.status = status
+    this.detail = detail
   }
 }
 
