@@ -17,8 +17,10 @@ from agentic_librarian.db.session import DatabaseManager
 router = APIRouter()
 db_manager = DatabaseManager()
 
-# Stage 3 wires the '✓ I read this' flow (add-book → status Read); 'Dismissed' = 'Not for me'.
-ALLOWED_STATUS_UPDATES = {"Dismissed", "Read"}
+# Stage 3 wires the '✓ I read this' flow (add-book → status Read); 'Dismissed' = 'Not for me';
+# 'Removed' = 'Not right now' (GH #130): neutral shelf-tidying, no negative record —
+# the work is freed to resurface and the Librarian may legitimately re-pitch it.
+ALLOWED_STATUS_UPDATES = {"Dismissed", "Read", "Removed"}
 
 
 def set_db_manager(new_manager: DatabaseManager) -> None:

@@ -123,3 +123,45 @@ def test_genres_defaults_to_empty_list_when_not_set(client, db_url):
 
     assert len(body) == 1
     assert body[0]["genres"] == []
+
+
+@pytest.mark.parametrize("status", ["Dismissed", "Read", "Removed"])
+def test_status_endpoint_accepts_each_allowed_value(client, db_url, status):
+    manager = DatabaseManager(db_url)
+    sug_id, _work_id = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title=f"Allowed {status}", author="A. Uthor")
+
+    resp = client.post(f"/recommendations/{sug_id}/status", json={"status": status})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"id": str(sug_id), "status": status}
+    with manager.get_session() as s:
+        assert s.get(Suggestions, sug_id).status == status
+
+
+@pytest.mark.parametrize("bad", ["removed", "Skipped", "", "Suggested"])
+def test_status_endpoint_rejects_bad_vocab(client, db_url, bad):
+    # Exact-match vocabulary: lowercase 'removed' is rejected (only the MCP tool
+    # normalizes case), and re-activating to 'Suggested' is not a client verb.
+    manager = DatabaseManager(db_url)
+    sug_id, _work_id = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title=f"Bad {bad!r}", author="A. Uthor")
+
+    resp = client.post(f"/recommendations/{sug_id}/status", json={"status": bad})
+
+    assert resp.status_code == 422
+    with manager.get_session() as s:
+        assert s.get(Suggestions, sug_id).status == "Suggested"  # untouched on rejection
+
+
+def test_remove_marks_status_and_removes_from_list(client, db_url):
+    # The 'Not right now' flow end-to-end: Removed resolves the pick out of the
+    # active list while keeping the row (neutral, auditable — GH #130).
+    manager = DatabaseManager(db_url)
+    sug_id, _work_id = _seed_suggestion(manager, user_id=DEFAULT_USER_ID, title="Neutral Exit", author="A. Uthor")
+
+    resp = client.post(f"/recommendations/{sug_id}/status", json={"status": "Removed"})
+    assert resp.status_code == 200
+
+    listed = client.get("/recommendations").json()
+    assert all(item["id"] != str(sug_id) for item in listed)
+    with manager.get_session() as s:
+        assert s.get(Suggestions, sug_id).status == "Removed"  # row kept, not deleted
