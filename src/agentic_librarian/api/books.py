@@ -81,5 +81,6 @@ def add_book(req: AddBookRequest, user: AuthenticatedUser = Depends(get_current_
         "title": req.title,
         "read_number": event["read_number"],
         "already_logged": event["already_logged"],
+        "pick_resolved": event["pick_resolved"],
         "enrichment_enqueued": enqueued,
     }

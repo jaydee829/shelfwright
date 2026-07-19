@@ -28,7 +28,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.get_or_create import get_or_create
-from agentic_librarian.db.models import Author, DetectedDuplicate, Edition, ReadingHistory, Work, WorkContributor
+from agentic_librarian.db.models import (
+    Author,
+    DetectedDuplicate,
+    Edition,
+    ReadingHistory,
+    Suggestions,
+    Work,
+    WorkContributor,
+)
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.etl.persist import collect_embedding_texts, merge_edition_and_narrators, persist_enriched_work
 from agentic_librarian.orchestration.definitions import (
@@ -149,12 +157,39 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
         return work.id, True
 
 
+def _resolve_active_pick(session, *, work_id: UUID, user_id) -> bool:
+    """GH #130: flip the user's active 'Suggested' pick for work_id to 'Read'. The
+    partial unique index (user_id, work_id) WHERE status='Suggested' guarantees at
+    most one row; flipping OFF 'Suggested' cannot violate any constraint. Only
+    'Suggested' rows are touched — resolved statuses are never rewritten."""
+    pick = (
+        session.query(Suggestions)
+        .filter(
+            Suggestions.work_id == work_id,
+            Suggestions.user_id == user_id,
+            Suggestions.status == "Suggested",
+        )
+        .first()
+    )
+    if pick is None:
+        return False
+    pick.status = "Read"
+    return True
+
+
 def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str | None, fmt: str) -> dict:
     """Log a read-event for the current user against work_id (the existing
     add_book_to_history semantics: a re-read on a new date is a new row; the same
-    work+date is a no-op). Requires user context (as_user / the auth dependency)."""
+    work+date is a no-op). Requires user context (as_user / the auth dependency).
+
+    GH #130 invariant: a book in the user's history is never simultaneously an
+    active pick — any 'Suggested' row for (user, work_id) is resolved to 'Read' in
+    the same transaction, on BOTH branches (a duplicate add still clears a stale
+    pick). All four history-writing paths (POST /books, both chat MCP tools, the
+    CSV import worker) flow through here and inherit it."""
     user_id = get_required_user_id()
     with db_manager.get_session() as session:
+        pick_resolved = _resolve_active_pick(session, work_id=work_id, user_id=user_id)
         prior_reads = (
             session.query(ReadingHistory)
             .join(Edition)
@@ -162,7 +197,7 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
             .all()
         )
         if any(r.date_completed == completed for r in prior_reads):
-            return {"read_number": len(prior_reads), "already_logged": True}
+            return {"read_number": len(prior_reads), "already_logged": True, "pick_resolved": pick_resolved}
         # GH #95: uq_editions_work_format backstops this get-then-create against a
         # concurrent add_read_event/persist race for the same (work_id, format).
         edition, _created = get_or_create(session, Edition, work_id=work_id, format=fmt)
@@ -176,7 +211,7 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
             )
         )
         session.flush()
-        return {"read_number": len(prior_reads) + 1, "already_logged": False}
+        return {"read_number": len(prior_reads) + 1, "already_logged": False, "pick_resolved": pick_resolved}
 
 
 def complete_edition(work_id: UUID, fmt: str) -> str:
