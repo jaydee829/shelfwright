@@ -175,7 +175,7 @@ export function getRecommendations(): Promise<Recommendation[]> {
   return getJson<Recommendation[]>('/recommendations')
 }
 
-export async function setRecommendationStatus(id: string, status: 'Dismissed' | 'Read'): Promise<void> {
+export async function setRecommendationStatus(id: string, status: 'Dismissed' | 'Read' | 'Removed'): Promise<void> {
   const res = await authedFetchRaw(`/recommendations/${id}/status`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -213,6 +213,7 @@ export interface AddBookResult {
   read_number: number
   already_logged: boolean
   enrichment_enqueued: boolean
+  pick_resolved: boolean
 }
 
 export async function addBook(input: AddBookInput): Promise<AddBookResult> {
