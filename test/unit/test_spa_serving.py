@@ -81,6 +81,56 @@ def test_api_route_wins_over_spa_catch_all(tmp_path, monkeypatch):
     assert r.json() == {"status": "ok"}
 
 
+# Refresh-on-a-tab collision (2026-07-19): /history, /recommendations, /analysis are BOTH
+# SPA client routes and authed API GETs. A browser NAVIGATION (refresh, bookmark, typed
+# URL — Accept prefers text/html) must get the shell; the SPA's fetch() calls
+# (Accept: */*) must keep reaching the API. The Accept header is the discriminator.
+_NAV_ACCEPT = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/history", "/recommendations", "/analysis", "/add", "/import", "/settings", "/history/abc/edit"],
+)
+def test_browser_navigation_to_spa_route_serves_shell(tmp_path, monkeypatch, path):
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get(path, headers={"Accept": _NAV_ACCEPT})
+    assert r.status_code == 200
+    assert 'id="root"' in r.text
+    assert r.headers["cache-control"] == "no-cache"
+
+
+@pytest.mark.parametrize("path", ["/history", "/recommendations", "/analysis"])
+def test_fetch_style_request_still_reaches_the_api(tmp_path, monkeypatch, path):
+    # fetch() sends Accept: */* — the API route must still win (401 without a token,
+    # NOT the shell).
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get(path, headers={"Accept": "*/*"})
+    assert r.status_code == 401
+    assert r.json() == {"detail": "Missing bearer token."}
+
+
+def test_navigation_to_a_real_static_file_is_not_hijacked(tmp_path, monkeypatch):
+    # A navigation whose path IS a built file (e.g. the favicon opened directly) still
+    # serves the file, not the shell.
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get("/favicon.svg", headers={"Accept": _NAV_ACCEPT})
+    assert r.status_code == 200
+    assert "<svg/>" in r.text
+
+
+def test_api_json_responses_are_no_store(tmp_path, monkeypatch):
+    # Private API JSON must never sit in a browser/proxy cache — this is also what let a
+    # stale authed /history body render as a page after the route collision.
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get("/health")
+    assert r.headers["cache-control"] == "no-store"
+
+
 def test_path_traversal_is_blocked(tmp_path, monkeypatch):
     # Secret lives OUTSIDE the dist dir. Call the handler directly — the HTTP client would
     # normalize the `..` away before routing, so a direct call is what exercises the guard.

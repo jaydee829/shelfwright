@@ -6,7 +6,7 @@ import os
 from datetime import date
 from uuid import UUID
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, text
@@ -501,6 +501,34 @@ _HASHED_ASSET_CACHE = "public, max-age=31536000, immutable"
 
 def _spa_index() -> FileResponse:
     return FileResponse(os.path.join(_spa_dir(), "index.html"), headers={"Cache-Control": _SHELL_CACHE})
+
+
+# Refresh-on-a-tab fix (2026-07-19): /history, /recommendations, /analysis are BOTH SPA
+# client routes and authed API GETs, and API routes win the router — so a browser refresh
+# on a tab rendered {"detail":"Missing bearer token."} as the page. A document NAVIGATION
+# is distinguished by its Accept header (browsers send text/html first; the SPA's fetch()
+# calls send */*): GET navigations to client routes serve the shell, fetches keep reaching
+# the API. The same middleware stamps Cache-Control: no-store on every response that set
+# no policy of its own (i.e. all API JSON) — private payloads must never be cacheable
+# (a heuristically-cached authed /history body could previously render as a page).
+_SPA_CLIENT_ROUTES = ("history", "recommendations", "analysis", "add", "import", "settings")
+
+
+@app.middleware("http")
+async def _spa_navigation_and_api_cache(request: Request, call_next):
+    if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
+        first_segment = request.url.path.strip("/").split("/", 1)[0]
+        if first_segment in _SPA_CLIENT_ROUTES:
+            # Internal rewrite to the shell route rather than returning a FileResponse
+            # from the middleware itself (BaseHTTPMiddleware + a directly-returned file
+            # response is a known footgun: fd lifetime, skipped inner middleware). The
+            # router then serves the shell exactly like a "/" request.
+            request.scope["path"] = "/"
+            request.scope["raw_path"] = b"/"
+    response = await call_next(request)
+    if "cache-control" not in response.headers:
+        response.headers["cache-control"] = "no-store"
+    return response
 
 
 @app.get("/")
