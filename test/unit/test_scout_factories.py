@@ -1,4 +1,5 @@
 from agentic_librarian.orchestration.definitions import (
+    create_completion_scout_manager,
     create_deep_scout_manager,
     create_fast_scout_manager,
 )
@@ -24,3 +25,16 @@ def test_deep_manager_has_only_llm_scouts_in_priority_order(monkeypatch):
     mgr = create_deep_scout_manager()
     types = [type(s) for s, _ in mgr.scouts]
     assert types == [AudiobookScout, DirectKnowledgeScout, StyleScout, LLMTropeScout]
+
+
+def test_completion_manager_composition():
+    """Format-completion pass (history-format-edit spec): fast API scouts + audiobook
+    scouts ONLY — never LLMTropeScout (paid trope pass) or StyleScout (author/work
+    styles); narrator styles are scouted directly by two_phase.complete_edition."""
+    manager = create_completion_scout_manager()
+    assert [type(s) for s, _priority in manager.scouts] == [
+        HardcoverScout,
+        GoogleBooksScout,
+        AudiobookScout,
+        DirectKnowledgeScout,
+    ]
