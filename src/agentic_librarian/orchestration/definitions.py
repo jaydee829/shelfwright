@@ -50,6 +50,21 @@ def create_deep_scout_manager() -> ScoutManager:
     return manager
 
 
+def create_completion_scout_manager() -> ScoutManager:
+    """Format-completion pass (history-format-edit): the fast API scouts fetch the new
+    format's edition metadata (ISBN, pages/audio minutes, publication date); the audiobook
+    scouts (which self-skip on non-audiobook formats) add narrators. Deliberately NO
+    LLMTropeScout and NO StyleScout — tropes and author/work styles belong to the Work,
+    which a format change does not touch; narrator styles are scouted directly by
+    two_phase.complete_edition."""
+    manager = ScoutManager()
+    manager.register_scout(HardcoverScout(), priority=1)
+    manager.register_scout(GoogleBooksScout(), priority=2)
+    manager.register_scout(AudiobookScout(), priority=3)
+    manager.register_scout(DirectKnowledgeScout(), priority=4)
+    return manager
+
+
 defs = Definitions(
     assets=all_assets,
     jobs=[jobs.enhance_job],

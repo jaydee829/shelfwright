@@ -1,6 +1,7 @@
 import asyncio
 import concurrent.futures
 import contextlib
+import logging
 import os
 from datetime import date
 from uuid import UUID
@@ -8,7 +9,8 @@ from uuid import UUID
 from fastapi import Body, Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
-from sqlalchemy import text
+from sqlalchemy import func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
 from agentic_librarian.agents.runtime import LibrarianConversation, astart_conversation
@@ -28,6 +30,7 @@ from agentic_librarian.api.recommendations import router as recommendations_rout
 from agentic_librarian.chat import stream, transcript
 from agentic_librarian.core import usage
 from agentic_librarian.core.user_context import as_user
+from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.migration_guard import check_migrations
 from agentic_librarian.db.models import (
     Edition,
@@ -39,8 +42,11 @@ from agentic_librarian.db.models import (
 )
 from agentic_librarian.db.session import DatabaseManager
 from agentic_librarian.enrichment import two_phase
+from agentic_librarian.enrichment.tasks import enqueue_edition_completion
 from agentic_librarian.imports import worker as imports_worker
 from agentic_librarian.mcp import server as mcp_server
+
+logger = logging.getLogger(__name__)
 
 db_manager = DatabaseManager()
 
@@ -194,10 +200,14 @@ def get_history(
         return [_history_item(h) for h in history_entries]
 
 
+HISTORY_FORMATS = {"ebook", "audiobook", "paperback", "hardcover"}
+
+
 class HistoryUpdate(BaseModel):
     date_completed: date | None = None
     rating: int | None = None
     notes: str | None = None
+    format: str | None = None
 
     @field_validator("rating", mode="before")
     @classmethod
@@ -219,6 +229,16 @@ class HistoryUpdate(BaseModel):
         if v is not None and v > date.today():
             raise ValueError("date_completed cannot be in the future")
         return v
+
+    @field_validator("format")
+    @classmethod
+    def _format_vocab(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        normalized = v.strip().lower()
+        if normalized not in HISTORY_FORMATS:
+            raise ValueError("format must be one of: ebook, audiobook, paperback, hardcover")
+        return normalized
 
 
 @app.delete("/history/{entry_id}")
@@ -245,6 +265,11 @@ def update_history(
     fields = req.model_dump(exclude_unset=True)  # only what the client actually sent
     if "date_completed" in fields and fields["date_completed"] is None:
         raise HTTPException(status_code=422, detail="date_completed cannot be null")
+    if "format" in fields and fields["format"] is None:
+        raise HTTPException(status_code=422, detail="format cannot be null")
+
+    needs_completion = False
+    work_id_str = fmt_str = ""
     with db_manager.get_session() as session:
         row = (
             session.query(ReadingHistory)
@@ -254,14 +279,98 @@ def update_history(
         )
         if row is None:
             raise HTTPException(status_code=404, detail="history entry not found")
+
+        # No ORM mutation until EVERY read/pre-check is done. Mutating row.date_completed (or
+        # doing the edition repoint) before the dup pre-check query lets SQLAlchemy autoflush
+        # emit the UPDATE while that query runs, so a real collision trips
+        # uq_reading_history_user_edition_date as an IntegrityError raised OUTSIDE the flush
+        # try/except below → 500 instead of 409. The sharp sibling is a combined date+format
+        # edit that is valid at the FINAL (new_edition, new_date) but collides at the
+        # intermediate (old_edition, new_date); and get_or_create runs its own internal flush,
+        # so session.no_autoflush alone would NOT cover it. So we resolve the final target
+        # values first and pre-check against them with the row still untouched.
+        final_date = fields.get("date_completed", row.date_completed)
+
+        target_edition = row.edition
+        new_fmt = fields.get("format")
+        if new_fmt is not None and new_fmt != (row.edition.format or "").strip().lower():
+            # Format change = repoint to the sibling (work_id, format) edition — editions are
+            # shared catalog objects, so the old one is never mutated or deleted. Reuse a
+            # casing variant if one exists (uq_editions_work_format is case-sensitive);
+            # get_or_create + the unique index backstop the concurrent-create race (#95).
+            # order_by exact-format-match first, then Edition.id (M1): a duplicate-casing
+            # catalog then can't flip the chosen target between successive edits.
+            target_edition = (
+                session.query(Edition)
+                .filter(Edition.work_id == row.edition.work_id, func.lower(Edition.format) == new_fmt)
+                .order_by((Edition.format != new_fmt), Edition.id)
+                .first()
+            )
+            if target_edition is None:
+                target_edition, _created = get_or_create(session, Edition, work_id=row.edition.work_id, format=new_fmt)
+
+        collision_detail = (
+            f"You already logged this book as {target_edition.format or 'the same format'} on {final_date.isoformat()}."
+        )
+        if target_edition.id != row.edition_id or "date_completed" in fields:
+            # uq_reading_history_user_edition_date pre-check against the FINAL (edition, date).
+            # final_date is a plain parameter because the row is still unmutated, so this query
+            # cannot autoflush a premature UPDATE. The index itself backstops the millisecond
+            # race below and maps to the same 409.
+            dup = (
+                session.query(ReadingHistory)
+                .filter(
+                    ReadingHistory.user_id == user.id,
+                    ReadingHistory.edition_id == target_edition.id,
+                    ReadingHistory.date_completed == final_date,
+                    ReadingHistory.id != row.id,
+                )
+                .first()
+            )
+            if dup is not None:
+                raise HTTPException(status_code=409, detail=collision_detail)
+
+        if target_edition.id != row.edition_id:
+            # Decide the async completion enqueue while the session is open (narrators is a
+            # lazy relationship): missing ISBN, or an audiobook with no narrators yet. The
+            # target_edition.narrators lazy-load is safe here precisely because nothing is
+            # pending yet — it can't autoflush a premature UPDATE.
+            needs_completion = target_edition.isbn_13 is None or (
+                "audiobook" in (target_edition.format or "").lower() and not target_edition.narrators
+            )
+            work_id_str = str(target_edition.work_id)
+            fmt_str = target_edition.format or ""
+
+        # ONLY NOW mutate: scalar edits + the repoint. Every read above ran against final
+        # values with the row untouched, so the flush below is the SINGLE UPDATE emission
+        # point and its IntegrityError genuinely maps to the millisecond-race 409. Raising
+        # inside the session context still rolls back EVERY field edit — a 409 must leave the
+        # row exactly as it was.
         if "date_completed" in fields:
             row.date_completed = fields["date_completed"]
         if "rating" in fields:
             row.user_rating = fields["rating"]
         if "notes" in fields:
             row.user_notes = fields["notes"]
-        session.flush()
-        return _history_item(row)
+        if target_edition.id != row.edition_id:
+            row.edition = target_edition
+        try:
+            session.flush()
+        except IntegrityError as e:
+            raise HTTPException(status_code=409, detail=collision_detail) from e
+        payload = _history_item(row)
+
+    # After commit: best-effort enqueue in the POST /books style — a Cloud Tasks failure
+    # must never fail the edit (the completion sweep-of-one can be retriggered by any
+    # later format edit; the entry itself is saved).
+    enqueued = False
+    if needs_completion:
+        try:
+            enqueued = enqueue_edition_completion(work_id_str, fmt_str)
+        except Exception:  # noqa: BLE001 - enqueue is best-effort
+            logger.exception("edition-completion enqueue failed for work %s", work_id_str)
+    payload["enrichment_enqueued"] = enqueued
+    return payload
 
 
 @app.get("/works")

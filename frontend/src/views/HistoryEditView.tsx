@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router'
-import { updateHistory, type HistoryItem } from '../api/client'
+import { ApiError, updateHistory, type HistoryItem } from '../api/client'
 import './HistoryEditView.css'
 
 export default function HistoryEditView() {
@@ -10,6 +10,7 @@ export default function HistoryEditView() {
   const [rating, setRating] = useState(row?.rating != null ? String(row.rating) : '')
   const [dateFinished, setDateFinished] = useState(row?.date_completed ?? '')
   const [notes, setNotes] = useState(row?.notes ?? '')
+  const [format, setFormat] = useState(row?.format ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -20,14 +21,17 @@ export default function HistoryEditView() {
     setBusy(true)
     setError(null)
     try {
-      await updateHistory(id as string, {
+      const body: Parameters<typeof updateHistory>[1] = {
         rating: rating ? Number(rating) : null,
         date_completed: dateFinished || null,
         notes: notes.trim() || null,
-      })
+      }
+      if (format && format !== row!.format) body.format = format
+      await updateHistory(id as string, body)
       navigate('/history')
-    } catch {
-      setError("Couldn't save those changes — try again.")
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) setError(err.detail)
+      else setError("Couldn't save those changes — try again.")
     } finally {
       setBusy(false)
     }
@@ -43,6 +47,16 @@ export default function HistoryEditView() {
         {row.format ? ` · ${row.format}` : ''}
       </p>
       <form onSubmit={onSubmit} className="history-edit-form">
+        <label>
+          Format
+          <select value={format} onChange={(e) => setFormat(e.target.value)}>
+            {!row.format && <option value="">—</option>}
+            <option value="ebook">ebook</option>
+            <option value="audiobook">audiobook</option>
+            <option value="paperback">paperback</option>
+            <option value="hardcover">hardcover</option>
+          </select>
+        </label>
         <label>
           Rating
           <select value={rating} onChange={(e) => setRating(e.target.value)}>

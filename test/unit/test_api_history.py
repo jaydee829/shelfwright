@@ -196,3 +196,36 @@ def test_get_history_tropes_prefer_real_over_slugs(tropes, expected_names):
         assert response.status_code == 200
         data = response.json()
         assert data[0]["tropes"] == expected_names
+
+
+def _patch_with_mock_row(json_body):
+    """PATCH against a minimal mocked row (validation-focused unit seam)."""
+    with patch("agentic_librarian.api.main.db_manager") as mock_db:
+        mock_session = MagicMock()
+        mock_db.get_session.return_value.__enter__.return_value = mock_session
+        _history_chain(mock_session, [])
+        return client.patch("/history/00000000-0000-4000-8000-00000000abcd", json=json_body)
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_status"),
+    [
+        pytest.param({"format": "vinyl"}, 422, id="unknown_format_rejected"),
+        pytest.param({"format": ""}, 422, id="empty_format_rejected"),
+        pytest.param({"format": None}, 422, id="null_format_rejected"),
+        pytest.param({"format": 7}, 422, id="non_string_format_rejected"),
+    ],
+)
+def test_patch_history_format_vocab_validation(body, expected_status):
+    assert _patch_with_mock_row(body).status_code == expected_status
+
+
+@pytest.mark.parametrize(
+    "raw", [pytest.param("Audiobook", id="capitalized"), pytest.param("  audiobook  ", id="padded")]
+)
+def test_patch_history_format_is_case_and_space_normalized(raw):
+    """Accepted spellings normalize to the canonical lowercase vocab before any DB work —
+    prove it via the pydantic model directly (the endpoint seam is mocked in this file)."""
+    from agentic_librarian.api.main import HistoryUpdate
+
+    assert HistoryUpdate(format=raw).format == "audiobook"
