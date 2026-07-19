@@ -400,6 +400,15 @@ This file tracks work history and ticket references.
 - **URL**: PR #86 (closes #83)
 - **Notes**: ADR-056. Two findings (bugs.md 2026-06-26): `useWordCloud@1.3.0` silently ignores `random` (dead seed → removed); layout stability/no-loop = memoising the hook inputs. Built brainstorm→spec→plan→subagent-driven (5 tasks, each spec+quality reviewed + final whole-branch review, which caught the `random` gotcha). QC at mobile+desktop both themes via the harness (jsdom can't run d3-cloud's canvas). Gemini: applied round-width / `computedWords=[]` / clamp size `norm` (NaN guard) + test; declined an `Array.isArray` guard (typed input, consistent w/ sibling components). The predicted `docs/project_notes/*` append-overlap with Safari-auth PR #85 (which merged first, ADR-055) was resolved by merging `origin/main` into the branch — kept both ADR-055 + ADR-056 (`439a57f`).
 
+### 2026-07-19 - GH #130: Picks neutral removal ("Not right now") + history→picks auto-resolution
+- **Status**: Completed (PR pending merge)
+- **Description**: New neutral 'Removed' suggestion status (third Picks button) + automatic
+  pick-resolution in add_read_event covering add-a-book, chat, and CSV-import paths;
+  POST /books reports pick_resolved and the add-book UI mentions the cleared pick.
+- **URL**: https://github.com/jaydee829/shelfwright/issues/130
+- **Notes**: ADR-061. Spec docs/superpowers/specs/2026-07-19-picks-neutral-removal-design.md.
+  Dismissed-row history intentionally not reclassified.
+
 ### 2026-07-18 - History format edit (spec 2026-07-18)
 - **Status**: PR open
 - **Description**: PATCH /history accepts format (vocab-validated); repoints to sibling

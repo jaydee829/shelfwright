@@ -1151,3 +1151,35 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Orphan-author counts can recur after any future author-merge (this rollout's own dedup
   apply included) — the runbook documents a re-run-until-clean loop rather than promising a
   single pass is sufficient.
+
+### ADR-061: Neutral pick removal ('Removed') + history→picks auto-resolution (2026-07-19)
+
+**Context:**
+- GH #130: removing a pick for shelf-tidying (duplicate, already in history) forced a false
+  "Not for me" ('Dismissed') — a permanent negative record the Librarian charter acts on.
+- Books added to history (add-a-book, chat, CSV import) left matching active picks stale;
+  only the "✓ I read this" prefill flow cleared its pick, client-side and racily.
+
+**Decision:**
+- New terminal `Suggestions.status` value `'Removed'` (UI: "Not right now"): neutral, keeps
+  the row (provenance/audit), frees the partial-unique active slot so the title may resurface.
+- Pick auto-resolution in `two_phase.add_read_event` (the choke point all four history-writing
+  paths share): active 'Suggested' row for (user, work) flips to 'Read' in the same
+  transaction, on both branches (incl. already_logged). `POST /books` reports `pick_resolved`.
+- Chat parity: `'Removed'` added to MCP `_SUGGESTION_STATUSES` + one charter line (both
+  prompt copies) distinguishing neutral removal from 'Dismissed'.
+
+**Alternatives Considered:**
+- Hard-delete the suggestion row -> rejected: loses pitch provenance, irreversible fat-finger.
+- Post-submit dialog / auto-resolve+undo on add-a-book -> rejected (user decision): the book
+  was just logged as read; no realistic "no" answer. "Not right now" is the escape hatch for
+  the rare twin-work miss.
+- Resolution only in POST /books -> rejected: chat + import adds would keep leaving stale picks.
+
+**Consequences:**
+- Invariant: a book in the user's history is never simultaneously an active pick.
+- 'Suggested'→'Read'/'Removed' flips cannot violate the partial unique index (predicate binds
+  only 'Suggested') — no guarded-flush choreography needed, unlike the history-edit path.
+- The client-side exact-id resolution in the "✓ I read this" prefill flow is retained as a
+  belt-and-suspenders for fast-pass twin-work misses; double-resolution is idempotent.
+- Historical 'Dismissed' rows are not reclassified.
