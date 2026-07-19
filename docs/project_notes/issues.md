@@ -400,10 +400,19 @@ This file tracks work history and ticket references.
 - **URL**: PR #86 (closes #83)
 - **Notes**: ADR-056. Two findings (bugs.md 2026-06-26): `useWordCloud@1.3.0` silently ignores `random` (dead seed → removed); layout stability/no-loop = memoising the hook inputs. Built brainstorm→spec→plan→subagent-driven (5 tasks, each spec+quality reviewed + final whole-branch review, which caught the `random` gotcha). QC at mobile+desktop both themes via the harness (jsdom can't run d3-cloud's canvas). Gemini: applied round-width / `computedWords=[]` / clamp size `norm` (NaN guard) + test; declined an `Array.isArray` guard (typed input, consistent w/ sibling components). The predicted `docs/project_notes/*` append-overlap with Safari-auth PR #85 (which merged first, ADR-055) was resolved by merging `origin/main` into the branch — kept both ADR-055 + ADR-056 (`439a57f`).
 
-### 2026-07-18 - History format edit (spec 2026-07-18)
-- **Status**: PR open
+### 2026-07-18 - History format edit (spec 2026-07-18, ADR-061)
+- **Status**: PR #147 open, ALL CI GREEN 2026-07-19 (26 db_integration tests executed incl. both autoflush regressions) — awaiting operator squash-merge
 - **Description**: PATCH /history accepts format (vocab-validated); repoints to sibling
   (work_id, format) Edition; 409 on uq_reading_history collisions (incl. the pre-existing
   date-edit 500 hole); async /internal/complete-edition pass fills ISBN/pages/audio +
   narrators/styles for audiobooks — never the paid trope/style deep pass.
+- **URL**: https://github.com/jaydee829/shelfwright/pull/147
 - **Notes**: merge_edition_and_narrators extracted from persist_enriched_work (shared).
+  Built spec→plan→subagent-driven (8 tasks, per-task spec+quality reviews); the final
+  whole-branch adversarial pass caught the autoflush 409/500 Critical every per-task
+  review missed (bugs.md 2026-07-19 ×3: autoflush reorder, UUID tie-break test flake,
+  TS1294 erasableSyntaxOnly). Gemini's one high comment rebutted with schema evidence
+  (date_completed is NOT NULL; its "nullable" proof was a MagicMock artifact).
+  Leave-as-is residuals: repoint-path N+1 (bounded), no null-format "—" frontend test,
+  legacy non-vocab formats display wrong in the edit select (GH #81's bulk-normalization
+  scope). Follow-up moment: "details filling in" affordance when narrators surface in UI.
