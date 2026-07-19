@@ -490,8 +490,17 @@ def _spa_dir() -> str:
     return os.environ.get("SPA_DIST_DIR", "/app/static")
 
 
+# Cache policy (2026-07-19 mobile stale-bundle incident): index.html names the hashed
+# bundles, so it must ALWAYS revalidate — without an explicit Cache-Control, mobile
+# browsers heuristically cache it and keep serving a stale shell after deploys (the
+# ETag makes revalidation a cheap 304). Vite content-hashes everything under /assets/,
+# so those are immutable; unhashed root files (favicons) revalidate like the shell.
+_SHELL_CACHE = "no-cache"
+_HASHED_ASSET_CACHE = "public, max-age=31536000, immutable"
+
+
 def _spa_index() -> FileResponse:
-    return FileResponse(os.path.join(_spa_dir(), "index.html"))
+    return FileResponse(os.path.join(_spa_dir(), "index.html"), headers={"Cache-Control": _SHELL_CACHE})
 
 
 @app.get("/")
@@ -509,5 +518,7 @@ def spa_catch_all(full_path: str):
     root = os.path.realpath(_spa_dir())
     candidate = os.path.realpath(os.path.join(root, full_path))
     if (candidate == root or candidate.startswith(root + os.sep)) and os.path.isfile(candidate):
-        return FileResponse(candidate)
+        hashed = candidate.startswith(os.path.join(root, "assets") + os.sep)
+        cache = _HASHED_ASSET_CACHE if hashed else _SHELL_CACHE
+        return FileResponse(candidate, headers={"Cache-Control": cache})
     return _spa_index()

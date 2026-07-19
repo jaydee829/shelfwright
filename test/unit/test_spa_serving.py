@@ -2,6 +2,7 @@
 for client-side routes, real built files served as-is, API routes taking precedence, and a
 path-traversal guard on the catch-all."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agentic_librarian.api.main import app
@@ -11,6 +12,7 @@ def _build_dist(root):
     (root / "assets").mkdir()
     (root / "index.html").write_text('<!doctype html><div id="root"></div>')
     (root / "assets" / "app.js").write_text('console.log("spa")')
+    (root / "favicon.svg").write_text("<svg/>")
     return root
 
 
@@ -36,6 +38,39 @@ def test_real_asset_is_served(tmp_path, monkeypatch):
     r = TestClient(app).get("/assets/app.js")
     assert r.status_code == 200
     assert 'console.log("spa")' in r.text
+
+
+# Cache policy (2026-07-19 mobile stale-bundle incident): without an explicit
+# Cache-Control, mobile browsers heuristically cache index.html and keep serving a
+# stale shell that points at old hashed bundles. index.html (and any unhashed root
+# file) must always revalidate; the content-hashed /assets/* never change and are
+# immutable.
+@pytest.mark.parametrize("path", ["/", "/add", "/index.html"])
+def test_index_and_fallback_are_no_cache(tmp_path, monkeypatch, path):
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get(path)
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    assert 'id="root"' in r.text
+
+
+def test_hashed_asset_is_immutable(tmp_path, monkeypatch):
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get("/assets/app.js")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_unhashed_root_file_is_no_cache(tmp_path, monkeypatch):
+    # favicon.svg comes from frontend/public/ unhashed — a new one must be picked up.
+    dist = _build_dist(tmp_path)
+    monkeypatch.setenv("SPA_DIST_DIR", str(dist))
+    r = TestClient(app).get("/favicon.svg")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+    assert "<svg/>" in r.text
 
 
 def test_api_route_wins_over_spa_catch_all(tmp_path, monkeypatch):
