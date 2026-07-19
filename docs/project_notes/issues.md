@@ -399,3 +399,11 @@ This file tracks work history and ticket references.
 - **Description**: Rebuilt the Analysis word clouds (signature tropes + style) from a `flex-wrap` list into a packed/rotated/frequency-accentuated cloud on `@isoterik/react-word-cloud`'s `useWordCloud` hook (own SVG render → `--cat` palette + Literata + theme via CSS). Cloud-local split `/` + strip articles + merge-sum; width-responsive font max (≈38px mobile / 60px desktop). Frontend-only — no backend/schema.
 - **URL**: PR #86 (closes #83)
 - **Notes**: ADR-056. Two findings (bugs.md 2026-06-26): `useWordCloud@1.3.0` silently ignores `random` (dead seed → removed); layout stability/no-loop = memoising the hook inputs. Built brainstorm→spec→plan→subagent-driven (5 tasks, each spec+quality reviewed + final whole-branch review, which caught the `random` gotcha). QC at mobile+desktop both themes via the harness (jsdom can't run d3-cloud's canvas). Gemini: applied round-width / `computedWords=[]` / clamp size `norm` (NaN guard) + test; declined an `Array.isArray` guard (typed input, consistent w/ sibling components). The predicted `docs/project_notes/*` append-overlap with Safari-auth PR #85 (which merged first, ADR-055) was resolved by merging `origin/main` into the branch — kept both ADR-055 + ADR-056 (`439a57f`).
+
+### 2026-07-18 - History format edit (spec 2026-07-18)
+- **Status**: PR open
+- **Description**: PATCH /history accepts format (vocab-validated); repoints to sibling
+  (work_id, format) Edition; 409 on uq_reading_history collisions (incl. the pre-existing
+  date-edit 500 hole); async /internal/complete-edition pass fills ISBN/pages/audio +
+  narrators/styles for audiobooks — never the paid trope/style deep pass.
+- **Notes**: merge_edition_and_narrators extracted from persist_enriched_work (shared).
