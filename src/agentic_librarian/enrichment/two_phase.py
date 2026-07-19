@@ -30,11 +30,13 @@ from agentic_librarian.core.user_context import get_required_user_id
 from agentic_librarian.db.get_or_create import get_or_create
 from agentic_librarian.db.models import Author, DetectedDuplicate, Edition, ReadingHistory, Work, WorkContributor
 from agentic_librarian.db.session import DatabaseManager
-from agentic_librarian.etl.persist import collect_embedding_texts, persist_enriched_work
+from agentic_librarian.etl.persist import collect_embedding_texts, merge_edition_and_narrators, persist_enriched_work
 from agentic_librarian.orchestration.definitions import (
+    create_completion_scout_manager,
     create_deep_scout_manager,
     create_fast_scout_manager,
 )
+from agentic_librarian.scouts.metadata_scout import StyleScout
 from agentic_librarian.scouts.style_manager import StyleManager
 from agentic_librarian.scouts.trope_manager import TropeManager
 from agentic_librarian.scouts.utils import EMBED_MODEL, get_cached_embedding
@@ -175,6 +177,83 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
         )
         session.flush()
         return {"read_number": len(prior_reads) + 1, "already_logged": False}
+
+
+def complete_edition(work_id: UUID, fmt: str) -> str:
+    """Format-completion pass (history-format-edit spec): fill the (work_id, fmt)
+    edition's metadata after a history-entry format change. Fast API scouts always
+    (ISBN, pages/audio minutes, publication date); audiobook scouts + per-narrator
+    style scouting only when fmt is an audiobook. Deliberately NEVER LLMTropeScout or
+    author/work-style scouting — the Work is unchanged; this pass must not touch
+    deep_enriched_at or the deep pass's retry gating.
+
+    Same session discipline as the other passes here (#94): short read session, scouts
+    with NO session held, fresh write session. Idempotent (all merges) — Cloud Tasks
+    redelivery is safe.
+
+    Returns:
+      "missing" — work, its Author link, or the (work_id, fmt) edition no longer exists
+                  (also when the work vanished while scouts ran). Non-retryable.
+      "empty"   — no scout contributed anything. Final state: the entry itself is already
+                  saved, and unlike the deep pass there is no requeue-sweep backstop
+                  economics to protect — do not retry-loop.
+      "done"    — scouted values merged onto the edition."""
+    fmt = (fmt or "")[:50]
+
+    with db_manager.get_session() as session:
+        work = session.get(Work, work_id)
+        if work is None:
+            return "missing"
+        author = next((c.author.name for c in work.contributors if c.role == "Author"), None)
+        if author is None:
+            return "missing"
+        title = work.title  # scalars captured before close (detached-instance rule)
+        edition = session.query(Edition).filter_by(work_id=work_id, format=fmt).first()
+        if edition is None:
+            return "missing"
+
+    enriched = create_completion_scout_manager().enrich(title=title, author=author, format=fmt)
+    if not enriched:
+        return "empty"
+
+    narrator_names = [n for n in (enriched.get("narrator_names") or []) if isinstance(n, str) and n.strip()]
+    narrator_styles: dict[str, dict] = {}
+    if "audiobook" in fmt.lower() and narrator_names:
+        style_scout = StyleScout()
+        for n_name in narrator_names:
+            try:
+                narrator_styles[n_name] = style_scout.scout_narrator_style(n_name)
+            except Exception:  # noqa: BLE001 - style scouting is additive; narrators still merge without it
+                logger.warning("narrator style scout failed for %r — merging narrator without styles", n_name)
+
+    # GH #123: warm the embedding LRU for every style string the persist will standardize,
+    # so no network embed happens inside the write session.
+    for style_map in narrator_styles.values():
+        for style_text in style_map.values():
+            try:
+                get_cached_embedding(EMBED_MODEL, style_text)
+            except Exception:  # noqa: BLE001 - warming is best-effort; _safe_standardize degrades in-session
+                logger.warning("embed warm failed for %r — persist will retry in-session", style_text)
+
+    with db_manager.get_session() as session:
+        if session.get(Work, work_id) is None:
+            # Deleted while the scouts ran with no session held — same honesty rule as
+            # enrich_deep's empty path.
+            return "missing"
+        merge_edition_and_narrators(
+            session,
+            work_id=work_id,
+            fmt=fmt,
+            isbn_13=enriched.get("isbn_13"),
+            page_count=enriched.get("page_count"),
+            audio_minutes=enriched.get("audio_minutes"),
+            publication_date=enriched.get("publication_date"),
+            narrator_names=narrator_names,
+            narrator_styles=narrator_styles,
+            style_manager=StyleManager(session=session),
+        )
+        session.flush()
+    return "done"
 
 
 def enrich_deep(work_id: UUID) -> str:
