@@ -519,7 +519,12 @@ async def _spa_navigation_and_api_cache(request: Request, call_next):
     if request.method == "GET" and "text/html" in request.headers.get("accept", ""):
         first_segment = request.url.path.strip("/").split("/", 1)[0]
         if first_segment in _SPA_CLIENT_ROUTES:
-            return _spa_index()
+            # Internal rewrite to the shell route rather than returning a FileResponse
+            # from the middleware itself (BaseHTTPMiddleware + a directly-returned file
+            # response is a known footgun: fd lifetime, skipped inner middleware). The
+            # router then serves the shell exactly like a "/" request.
+            request.scope["path"] = "/"
+            request.scope["raw_path"] = b"/"
     response = await call_next(request)
     if "cache-control" not in response.headers:
         response.headers["cache-control"] = "no-store"
