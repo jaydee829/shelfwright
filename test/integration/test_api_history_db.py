@@ -207,3 +207,140 @@ def test_patch_history_rejects_bad_input_and_other_users(two_user_client, db_url
     with manager.get_session() as session:
         friend_id = str(session.query(ReadingHistory).filter(ReadingHistory.user_id == FRIEND_ID).first().id)
     assert client.patch(f"/history/{friend_id}", json={"rating": 3}).status_code == 404
+
+
+def _db(db_url):
+    return DatabaseManager(db_url)
+
+
+def _my_entry(client):
+    return next(h for h in client.get("/history").json() if h["title"] == "Shared Book")
+
+
+def test_patch_format_creates_sibling_edition_and_repoints(two_user_client, db_url):
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook"})
+    assert resp.status_code == 200
+    assert resp.json()["format"] == "audiobook"
+    assert resp.json()["enrichment_enqueued"] is False  # no Cloud Tasks in tests
+    with _db(db_url).get_session() as s:
+        row = s.get(ReadingHistory, UUID(entry["id"]))
+        work_id = row.edition.work_id
+        formats = {e.format for e in s.query(Edition).filter(Edition.work_id == work_id)}
+        assert row.edition.format == "audiobook"
+        assert formats == {"ebook", "audiobook"}  # old edition intact (shared catalog object)
+        # Assertion completeness (#96 lesson): untouched fields survive; the friend's row
+        # on the ORIGINAL edition is untouched.
+        assert row.date_completed == date(2021, 1, 1)
+        friend = s.query(ReadingHistory).filter(ReadingHistory.user_id == FRIEND_ID).one()
+        assert friend.edition.format == "ebook"
+
+
+def test_patch_format_reuses_existing_sibling_edition(two_user_client, db_url):
+    with _db(db_url).get_session() as s:
+        work_id = s.query(Edition).filter(Edition.format == "ebook").first().work_id
+        s.add(Edition(work_id=work_id, format="audiobook", isbn_13="9781111111111"))
+        s.flush()
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    assert client.patch(f"/history/{entry['id']}", json={"format": "audiobook"}).status_code == 200
+    with _db(db_url).get_session() as s:
+        assert s.query(Edition).filter(Edition.work_id == work_id).count() == 2  # reused, not duplicated
+        row = s.get(ReadingHistory, UUID(entry["id"]))
+        assert row.edition.isbn_13 == "9781111111111"
+
+
+def test_patch_same_format_is_a_noop(two_user_client, db_url):
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    assert client.patch(f"/history/{entry['id']}", json={"format": "ebook"}).status_code == 200
+    with _db(db_url).get_session() as s:
+        work_id = s.get(ReadingHistory, UUID(entry["id"])).edition.work_id
+        assert s.query(Edition).filter(Edition.work_id == work_id).count() == 1  # nothing minted
+
+
+def test_patch_format_collision_is_409_and_rolls_back(two_user_client, db_url):
+    with _db(db_url).get_session() as s:
+        ebook = s.query(Edition).filter(Edition.format == "ebook").first()
+        audio = Edition(work_id=ebook.work_id, format="audiobook")
+        s.add(audio)
+        s.flush()
+        # Same user, same work, SAME date — but as an audiobook (an import-duplicate shape).
+        s.add(ReadingHistory(edition_id=audio.id, user_id=DEFAULT_USER_ID, date_completed=date(2021, 1, 1)))
+        s.flush()
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook", "notes": "should not stick"})
+    assert resp.status_code == 409
+    assert "already logged" in resp.json()["detail"]
+    with _db(db_url).get_session() as s:
+        row = s.get(ReadingHistory, UUID(entry["id"]))
+        assert row.edition.format == "ebook"  # repoint rolled back
+        assert row.user_notes != "should not stick"  # the whole PATCH rolled back, not just format
+
+
+def test_patch_date_collision_is_409_not_500(two_user_client, db_url):
+    """Pre-existing hole the format work closes: date-only edits could always trip
+    uq_reading_history_user_edition_date; they must now 409 cleanly."""
+    with _db(db_url).get_session() as s:
+        edition_id = s.query(Edition).filter(Edition.format == "ebook").first().id
+        s.add(ReadingHistory(edition_id=edition_id, user_id=DEFAULT_USER_ID, date_completed=date(2020, 6, 6)))
+        s.flush()
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)  # the 2021-01-01 read
+    assert client.patch(f"/history/{entry['id']}", json={"date_completed": "2020-06-06"}).status_code == 409
+
+
+def test_patch_format_enqueues_completion_for_new_audiobook(two_user_client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(api_main, "enqueue_edition_completion", lambda wid, fmt: calls.append((wid, fmt)) or True)
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook"})
+    assert resp.status_code == 200
+    assert resp.json()["enrichment_enqueued"] is True
+    assert len(calls) == 1 and calls[0][1] == "audiobook"
+
+
+def test_patch_format_enqueue_failure_never_fails_the_edit(two_user_client, monkeypatch):
+    def _boom(wid, fmt):
+        raise RuntimeError("tasks down")
+
+    monkeypatch.setattr(api_main, "enqueue_edition_completion", _boom)
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook"})
+    assert resp.status_code == 200
+    assert resp.json()["format"] == "audiobook"  # the edit stuck
+    assert resp.json()["enrichment_enqueued"] is False
+
+
+def test_patch_format_skips_enqueue_when_edition_complete(two_user_client, db_url, monkeypatch):
+    from agentic_librarian.db.models import Narrator
+
+    with _db(db_url).get_session() as s:
+        work_id = s.query(Edition).filter(Edition.format == "ebook").first().work_id
+        done = Edition(work_id=work_id, format="audiobook", isbn_13="9782222222222")
+        done.narrators = [Narrator(name="Ray Porter")]
+        s.add(done)
+        s.flush()
+    calls = []
+    monkeypatch.setattr(api_main, "enqueue_edition_completion", lambda wid, fmt: calls.append(1) or True)
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook"})
+    assert resp.status_code == 200
+    assert resp.json()["enrichment_enqueued"] is False
+    assert calls == []  # already complete — no paid pass
+
+
+def test_patch_notes_only_never_enqueues(two_user_client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(api_main, "enqueue_edition_completion", lambda wid, fmt: calls.append(1) or True)
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)
+    resp = client.patch(f"/history/{entry['id']}", json={"notes": "just notes"})
+    assert resp.status_code == 200
+    assert resp.json()["enrichment_enqueued"] is False
+    assert calls == []
