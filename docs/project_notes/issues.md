@@ -406,13 +406,25 @@ This file tracks work history and ticket references.
   pick-resolution in add_read_event covering add-a-book, chat, and CSV-import paths;
   POST /books reports pick_resolved and the add-book UI mentions the cleared pick.
 - **URL**: https://github.com/jaydee829/shelfwright/issues/130
-- **Notes**: ADR-061. Spec docs/superpowers/specs/2026-07-19-picks-neutral-removal-design.md.
+- **Notes**: ADR-062. Spec docs/superpowers/specs/2026-07-19-picks-neutral-removal-design.md.
   Dismissed-row history intentionally not reclassified.
 
-### 2026-07-18 - History format edit (spec 2026-07-18)
-- **Status**: PR open
+### 2026-07-18 - History format edit (spec 2026-07-18, ADR-061)
+- **Status**: MERGED 2026-07-19 (PR #147 squash `1e95517`; ALL CI GREEN incl. 26 db_integration
+  tests with both autoflush regressions). NOTE: the squash landed without the branch's final
+  project-notes commit — ADR-061 + the 3 bugs.md 2026-07-19 entries were restored on the
+  GH #130 branch (this file's sibling docs).
 - **Description**: PATCH /history accepts format (vocab-validated); repoints to sibling
   (work_id, format) Edition; 409 on uq_reading_history collisions (incl. the pre-existing
   date-edit 500 hole); async /internal/complete-edition pass fills ISBN/pages/audio +
   narrators/styles for audiobooks — never the paid trope/style deep pass.
+- **URL**: https://github.com/jaydee829/shelfwright/pull/147
 - **Notes**: merge_edition_and_narrators extracted from persist_enriched_work (shared).
+  Built spec→plan→subagent-driven (8 tasks, per-task spec+quality reviews); the final
+  whole-branch adversarial pass caught the autoflush 409/500 Critical every per-task
+  review missed (bugs.md 2026-07-19 ×3: autoflush reorder, UUID tie-break test flake,
+  TS1294 erasableSyntaxOnly). Gemini's one high comment rebutted with schema evidence
+  (date_completed is NOT NULL; its "nullable" proof was a MagicMock artifact).
+  Leave-as-is residuals: repoint-path N+1 (bounded), no null-format "—" frontend test,
+  legacy non-vocab formats display wrong in the edit select (GH #81's bulk-normalization
+  scope). Follow-up moment: "details filling in" affordance when narrators surface in UI.

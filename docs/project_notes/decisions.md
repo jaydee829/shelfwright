@@ -1152,7 +1152,30 @@ This file documents key architectural decisions, their context, and trade-offs.
   apply included) — the runbook documents a re-run-until-clean loop rather than promising a
   single pass is sufficient.
 
-### ADR-061: Neutral pick removal ('Removed') + history→picks auto-resolution (2026-07-19)
+### ADR-061: History format edit = edition repoint + targeted "format-completion" pass (2026-07-18)
+
+**Context:**
+- Users need to correct a history entry's format (e.g. logged as ebook, actually listened as audiobook). `format` lives on `Edition` — a SHARED catalog object under `uq_editions_work_format` — not on the per-user `ReadingHistory` row, and audiobook is enrichment-significant (narrators/audio minutes come only from the audiobook scouts; each format's edition carries its own ISBN/pages).
+- Spec: `docs/superpowers/specs/2026-07-18-history-format-edit-design.md`; shipped via PR #147.
+
+**Decision:**
+- A format change **repoints** the history row to the sibling `(work_id, format)` edition (case-insensitive reuse, then `get_or_create`); the old edition is never mutated or deleted.
+- Collisions with `uq_reading_history_user_edition_date` → **409, keep both rows** (human-readable detail; whole PATCH rolls back). Pre-checks run on computed final values BEFORE any ORM mutation (autoflush — see bugs.md 2026-07-19).
+- Missing metadata on the target edition triggers an **async targeted completion pass** (`POST /internal/complete-edition/{work_id}?format=…`, existing enrich queue + OIDC gate): fast API scouts for ISBN/pages/audio on ANY format, audiobook scouts + per-narrator styles for audiobooks, and **never** `LLMTropeScout`/author-work-style scouting. Persistence via `merge_edition_and_narrators`, extracted verbatim from `persist_enriched_work`.
+- Completion-pass "empty" (including all-scouts-failed — `ScoutManager.enrich` swallows per-scout exceptions) is a FINAL 200, not a retry: the entry is already saved and a later format change re-triggers completion.
+
+**Alternatives Considered:**
+- Mutate the edition's format in place → corrupts other users' history + collides with the unique index. Rejected outright.
+- Reuse the full deep pass (`enqueue_enrichment`) → re-buys the paid trope/author-style LLM pass per flip, muddies `deep_enriched_at`/poison-retry gating tuned for first-time enrichment, and is unnecessary — ISBN comes from the fast scouts' format-matched edition selection. Rejected.
+- Sweep-only backfill → the requeue sweep targets un-enriched works, not enriched works missing per-format edition data; gaps would persist indefinitely. Rejected.
+
+**Consequences:**
+- Any format flip costs at most 2 API calls (+2–4 LLM calls for audiobook targets) instead of a full deep pass.
+- Orphaned editions (no history rows) are left in place as catalog objects — harmless, reused on the next flip to that format.
+- A transient all-scouts outage during completion leaves the edition metadata-less until a later format change re-triggers it (documented, deliberate; no dedicated backfill sweep).
+- Legacy non-vocab format strings (e.g. "Audiobook", "e-book") remain in the catalog; the PATCH vocab-gate stops NEW junk and the edit view is a per-entry manual remedy — bulk normalization is GH #81's scope.
+
+### ADR-062: Neutral pick removal ('Removed') + history→picks auto-resolution (2026-07-19)
 
 **Context:**
 - GH #130: removing a pick for shelf-tidying (duplicate, already in history) forced a false
