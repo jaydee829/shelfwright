@@ -103,7 +103,7 @@ _TOOL_SCHEMAS: list[tuple[str, str, dict[str, Any], Any]] = [
     ),
     (
         "update_suggestion_status",
-        "Update a suggestion's status (Accepted / Dismissed / Already Read).",
+        "Update a suggestion's status (Accepted / Dismissed / Already Read / Removed).",
         _schema({"work_id": _STR, "status": _STR}, required=["work_id", "status"]),
         mcp_server.update_suggestion_status,
     ),

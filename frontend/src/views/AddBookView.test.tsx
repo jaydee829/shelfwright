@@ -25,6 +25,7 @@ describe('AddBookView', () => {
 
   const okResult = {
     work_id: 'w1', title: 'Dune', read_number: 1, already_logged: false, enrichment_enqueued: true,
+    pick_resolved: false,
   }
 
   it('prefills the date-finished field with today', () => {
@@ -58,5 +59,24 @@ describe('AddBookView', () => {
   it('disables submit until title and author are filled', () => {
     renderView()
     expect(screen.getByRole('button', { name: /add to history/i })).toBeDisabled()
+  })
+
+  it('mentions the cleared pick when the server resolved one', async () => {
+    vi.mocked(addBook).mockResolvedValueOnce({ ...okResult, pick_resolved: true })
+    renderView()
+    await userEvent.type(screen.getByLabelText(/title/i), 'Dune')
+    await userEvent.type(screen.getByLabelText(/author/i), 'Frank Herbert')
+    await userEvent.click(screen.getByRole('button', { name: /add to history/i }))
+    expect(await screen.findByText(/Also cleared it from your Picks/i)).toBeInTheDocument()
+  })
+
+  it('does not mention Picks when nothing was resolved', async () => {
+    vi.mocked(addBook).mockResolvedValueOnce(okResult)
+    renderView()
+    await userEvent.type(screen.getByLabelText(/title/i), 'Dune')
+    await userEvent.type(screen.getByLabelText(/author/i), 'Frank Herbert')
+    await userEvent.click(screen.getByRole('button', { name: /add to history/i }))
+    await screen.findByText(/Enriching in the background/i)
+    expect(screen.queryByText(/cleared it from your Picks/i)).toBeNull()
   })
 })

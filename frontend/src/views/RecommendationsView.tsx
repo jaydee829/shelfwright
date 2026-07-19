@@ -43,10 +43,10 @@ export default function RecommendationsView() {
 
   const visibleNewCount = useMemo(() => (recs ? recs.filter((r) => newIds.has(r.id)).length : 0), [recs, newIds])
 
-  async function dismiss(id: string) {
+  async function resolve(id: string, status: 'Dismissed' | 'Removed') {
     setBusy(id)
     try {
-      await setRecommendationStatus(id, 'Dismissed')
+      await setRecommendationStatus(id, status)
       setRecs((cur) => (cur ? cur.filter((r) => r.id !== id) : cur))
     } finally { setBusy(null) }
   }
@@ -76,7 +76,8 @@ export default function RecommendationsView() {
             {r.justification && <p className="rec-why">{r.justification}</p>}
             <div className="rec-actions">
               <button className="btn" onClick={() => readThis(r)}>✓ I read this</button>
-              <button className="btn btn--ghost" onClick={() => void dismiss(r.id)} disabled={busy === r.id}>Not for me</button>
+              <button className="btn btn--ghost" onClick={() => void resolve(r.id, 'Removed')} disabled={busy === r.id}>Not right now</button>
+              <button className="btn btn--ghost" onClick={() => void resolve(r.id, 'Dismissed')} disabled={busy === r.id}>Not for me</button>
             </div>
             <BookLinks availability={avail[r.work_id]} />
           </article>

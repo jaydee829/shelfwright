@@ -44,7 +44,8 @@ export default function AddBookView() {
       // Came from a recommendation's "I read this" → close the loop.
       if (prefill.suggestionId) await setRecommendationStatus(prefill.suggestionId, 'Read')
       setDone(
-        `Added "${result.title}"! Enriching in the background (~a minute) — its tropes will appear in your History.`,
+        `Added "${result.title}"! Enriching in the background (~a minute) — its tropes will appear in your History.` +
+          (result.pick_resolved ? ' Also cleared it from your Picks.' : ''),
       )
     } catch {
       setError("Couldn't add that book — check the title and author and try again.")

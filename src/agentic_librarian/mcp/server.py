@@ -787,13 +787,14 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
         return f"Error logging suggestion: {str(e)}"
 
 
-_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read")
+_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read", "Removed")
 
 
 @mcp.tool()
 def update_suggestion_status(work_id: str, status: str) -> str:
     """
-    Updates the status of a suggestion (e.g. 'Accepted', 'Dismissed', 'Already Read').
+    Updates the status of a suggestion (e.g. 'Accepted', 'Dismissed', 'Already Read', 'Removed'
+    — 'Removed' = neutral take-it-off-my-list-for-now, not negative feedback).
     This ensures unacted suggestions are cleaned up based on feedback.
     """
     uuid_obj = _parse_uuid(work_id)
@@ -812,6 +813,14 @@ def update_suggestion_status(work_id: str, status: str) -> str:
                 .first()
             )
             if not suggestion:
+                last = (
+                    session.query(Suggestions)
+                    .filter_by(work_id=uuid_obj, user_id=user_id)
+                    .order_by(Suggestions.suggested_at.desc())
+                    .first()
+                )
+                if last:
+                    return f"Suggestion for work {work_id} already resolved (status: {last.status}) — nothing to do."
                 return f"No active suggestion found for work {work_id}."
 
             suggestion.status = canonical

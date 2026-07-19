@@ -12,6 +12,8 @@ CHARTER_PARITY_PHRASES = [
     "MULTIPLE ROUNDS",
     "exclude_tropes/exclude_styles",
     "never pitched again",
+    "'update_suggestion_status' (Removed)",
+    "history writes auto-resolve",
 ]
 
 CHARTER_TEXTS = {

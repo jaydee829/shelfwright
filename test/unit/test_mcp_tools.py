@@ -15,6 +15,7 @@ from agentic_librarian.mcp.server import (
     get_work_details,
     search_internal_database,
     update_reading_status,
+    update_suggestion_status,
 )
 
 
@@ -237,6 +238,39 @@ def test_update_reading_status_falls_back_to_unknown_format(mock_db_manager, edi
     assert mock_add_read_event.call_args.kwargs["fmt"] == "Unknown"
 
 
+def test_update_suggestion_status_reports_already_resolved_when_active_absent(mock_db_manager):
+    """GH #130 fix: history writes auto-resolve the active pick, so the charter's mandated
+    follow-up 'update_suggestion_status' call finds no ACTIVE row on the most common feedback
+    path. Instead of the old, agent-confusing "No active suggestion found", it should calmly
+    report the most recent resolved status and write nothing."""
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    mock_query = session.query.return_value
+    mock_query.filter_by.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    resolved_row = MagicMock(status="Read")
+    mock_query.first.side_effect = [None, resolved_row]  # 1st: active lookup, 2nd: most-recent-any
+
+    resp = update_suggestion_status(work_id=str(uuid4()), status="Dismissed")
+
+    assert "already resolved" in resp
+    assert "Read" in resp
+    session.flush.assert_not_called()  # no status was written
+
+
+def test_update_suggestion_status_reports_no_active_suggestion_when_none_exist(mock_db_manager):
+    session = mock_db_manager.get_session.return_value.__enter__.return_value
+    mock_query = session.query.return_value
+    mock_query.filter_by.return_value = mock_query
+    mock_query.order_by.return_value = mock_query
+    mock_query.first.side_effect = [None, None]  # no active row, no row at all
+
+    work_id = str(uuid4())
+    resp = update_suggestion_status(work_id=work_id, status="Dismissed")
+
+    assert resp == f"No active suggestion found for work {work_id}."
+    session.flush.assert_not_called()
+
+
 def test_get_user_trope_preferences_mock(mock_db_manager):
     """Feed counts where raw frequency and lift DISAGREE (Fantasy has more raw links but
     is merely ubiquitous in the catalog; Sci-Fi is rarer but the user over-indexes on it)
@@ -362,3 +396,13 @@ def test_enrich_and_persist_work_rejects_invalid_input(caplog):
         assert server.enrich_and_persist_work(title="x" * 501, author="A") is None
         assert server.enrich_and_persist_work(title="T", author=None) is None  # type: ignore[arg-type]
     assert "rejected invalid" in caplog.text  # visible, not silent (no-silent-except rule)
+
+
+@pytest.mark.parametrize("raw", ["Removed", "removed", "REMOVED"])
+def test_suggestion_statuses_include_neutral_removed(raw):
+    # GH #130: the chat door to neutral removal — 'Removed' is canonical vocabulary
+    # and case-normalizes like the other statuses.
+    from agentic_librarian.mcp.server import _SUGGESTION_STATUSES, _normalize_status
+
+    assert "Removed" in _SUGGESTION_STATUSES
+    assert _normalize_status(raw, _SUGGESTION_STATUSES) == "Removed"

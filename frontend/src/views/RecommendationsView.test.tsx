@@ -109,4 +109,12 @@ describe('RecommendationsView', () => {
     expect(screen.getAllByText('New')).toHaveLength(1)
     expect(screen.getByText('1 new')).toBeInTheDocument()
   })
+
+  it('"Not right now" removes the card with the neutral Removed status', async () => {
+    renderWithRouter()
+    await screen.findByText('Project Hail Mary')
+    await userEvent.click(screen.getByRole('button', { name: /not right now/i }))
+    expect(vi.mocked(setRecommendationStatus)).toHaveBeenCalledWith('r1', 'Removed')
+    await waitFor(() => expect(screen.queryByText('Project Hail Mary')).not.toBeInTheDocument())
+  })
 })

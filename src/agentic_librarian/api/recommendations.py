@@ -1,6 +1,6 @@
 """Recommendations surface (Lift 2 Stage 2). Reads the user's active Suggestions
-(Lift 1 table) and lets them dismiss one. The '✓ I read this' → Read transition runs
-through the add-book flow (Stage 3), so this endpoint accepts only 'Dismissed' for now.
+(Lift 1 table) and lets them resolve one: 'Dismissed' ("Not for me"), 'Read' (via the
+add-book flow), or 'Removed' ("Not right now", neutral — GH #130).
 Identity comes from the auth context; rows are filtered by user.id (ADR-048)."""
 
 from __future__ import annotations
@@ -17,8 +17,10 @@ from agentic_librarian.db.session import DatabaseManager
 router = APIRouter()
 db_manager = DatabaseManager()
 
-# Stage 3 wires the '✓ I read this' flow (add-book → status Read); 'Dismissed' = 'Not for me'.
-ALLOWED_STATUS_UPDATES = {"Dismissed", "Read"}
+# Stage 3 wires the '✓ I read this' flow (add-book → status Read); 'Dismissed' = 'Not for me';
+# 'Removed' = 'Not right now' (GH #130): neutral shelf-tidying, no negative record —
+# the work is freed to resurface and the Librarian may legitimately re-pitch it.
+ALLOWED_STATUS_UPDATES = {"Dismissed", "Read", "Removed"}
 
 
 def set_db_manager(new_manager: DatabaseManager) -> None:
