@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -65,4 +66,32 @@ def enqueue_enrichment(work_id: str) -> bool:
     }
     _client().create_task(parent=queue, task=task)
     logger.info("enqueued deep enrichment for work %s", work_id)
+    return True
+
+
+def enqueue_edition_completion(work_id: str, fmt: str) -> bool:
+    """Enqueue the format-completion pass for (work_id, fmt) — history-format-edit spec.
+    Returns True if enqueued, False if Cloud Tasks is not configured (local dev); the
+    caller (PATCH /history) treats False/raised as non-fatal — the edit is already saved."""
+    queue = os.environ.get("CLOUD_TASKS_QUEUE")
+    base = os.environ.get("ENRICH_TARGET_BASE_URL")
+    sa = os.environ.get("ENRICH_INVOKER_SA")
+    if not (queue and base and sa):
+        logger.info("edition-completion enqueue skipped — Cloud Tasks not configured (work %s)", work_id)
+        return False
+
+    path_url = f"{base.rstrip('/')}/internal/complete-edition/{work_id}"
+    url = f"{path_url}?format={quote(fmt)}"
+    # Audience deliberately excludes the query string: the receiver verifies against a
+    # single fixed ENRICH_OIDC_AUDIENCE, so a per-format audience would never match.
+    audience = os.environ.get("ENRICH_OIDC_AUDIENCE") or path_url
+    task = {
+        "http_request": {
+            "http_method": "POST",
+            "url": url,
+            "oidc_token": {"service_account_email": sa, "audience": audience},
+        }
+    }
+    _client().create_task(parent=queue, task=task)
+    logger.info("enqueued edition completion for work %s format %s", work_id, fmt)
     return True
