@@ -157,7 +157,7 @@ def enrich_fast(title: str, author: str, fmt: str = "ebook") -> tuple[UUID, bool
         return work.id, True
 
 
-def _resolve_active_pick(session, *, work_id: UUID, user_id) -> bool:
+def _resolve_active_pick(session, *, work_id: UUID, user_id: UUID) -> bool:
     """GH #130: flip the user's active 'Suggested' pick for work_id to 'Read'. The
     partial unique index (user_id, work_id) WHERE status='Suggested' guarantees at
     most one row; flipping OFF 'Suggested' cannot violate any constraint. Only
