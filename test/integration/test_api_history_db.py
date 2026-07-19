@@ -213,8 +213,12 @@ def _db(db_url):
     return DatabaseManager(db_url)
 
 
-def _my_entry(client):
-    return next(h for h in client.get("/history").json() if h["title"] == "Shared Book")
+def _my_entry(client, fmt="ebook"):
+    """The fixture's seeded read, selected by title AND format: several tests seed a second
+    'Shared Book' read at the SAME date_completed, and /history tie-breaks equal dates by
+    ReadingHistory.id — a random UUID — so title alone is a coin flip (the CI-only flake:
+    the collision test grabbed the audiobook row and its PATCH became a same-format 200)."""
+    return next(h for h in client.get("/history").json() if h["title"] == "Shared Book" and h["format"] == fmt)
 
 
 def test_patch_format_creates_sibling_edition_and_repoints(two_user_client, db_url):
