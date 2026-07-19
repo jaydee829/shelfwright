@@ -182,8 +182,8 @@ def add_read_event(work_id: UUID, *, completed, rating: int | None, notes: str |
     add_book_to_history semantics: a re-read on a new date is a new row; the same
     work+date is a no-op). Requires user context (as_user / the auth dependency).
 
-    GH #130 invariant: a book in the user's history is never simultaneously an
-    active pick — any 'Suggested' row for (user, work_id) is resolved to 'Read' in
+    GH #130: adding to history resolves any pick active at that moment — any
+    'Suggested' row for (user, work_id) is resolved to 'Read' in
     the same transaction, on BOTH branches (a duplicate add still clears a stale
     pick). All four history-writing paths (POST /books, both chat MCP tools, the
     CSV import worker) flow through here and inherit it."""

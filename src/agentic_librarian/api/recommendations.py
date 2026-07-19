@@ -1,6 +1,6 @@
 """Recommendations surface (Lift 2 Stage 2). Reads the user's active Suggestions
-(Lift 1 table) and lets them dismiss one. The '✓ I read this' → Read transition runs
-through the add-book flow (Stage 3), so this endpoint accepts only 'Dismissed' for now.
+(Lift 1 table) and lets them resolve one: 'Dismissed' ("Not for me"), 'Read' (via the
+add-book flow), or 'Removed' ("Not right now", neutral — GH #130).
 Identity comes from the auth context; rows are filtered by user.id (ADR-048)."""
 
 from __future__ import annotations

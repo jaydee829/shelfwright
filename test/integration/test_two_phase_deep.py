@@ -348,9 +348,9 @@ def test_add_read_event_logs_and_dedups_rereads(db_url, monkeypatch):
         dupe = two_phase.add_read_event(work_id, completed=today, rating=5, notes=None, fmt="ebook")
         reread = two_phase.add_read_event(work_id, completed=earlier, rating=4, notes=None, fmt="ebook")
 
-    assert first == {"read_number": 1, "already_logged": False}
-    assert dupe == {"read_number": 1, "already_logged": True}
-    assert reread == {"read_number": 2, "already_logged": False}
+    assert first == {"read_number": 1, "already_logged": False, "pick_resolved": False}
+    assert dupe == {"read_number": 1, "already_logged": True, "pick_resolved": False}
+    assert reread == {"read_number": 2, "already_logged": False, "pick_resolved": False}
     with manager.get_session() as s:
         rows = s.query(ReadingHistory).join(Edition).filter(Edition.work_id == work_id).all()
         assert len(rows) == 2

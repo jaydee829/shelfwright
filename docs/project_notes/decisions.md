@@ -1200,7 +1200,9 @@ This file documents key architectural decisions, their context, and trade-offs.
 - Resolution only in POST /books -> rejected: chat + import adds would keep leaving stale picks.
 
 **Consequences:**
-- Invariant: a book in the user's history is never simultaneously an active pick.
+- Adding to history resolves any pick active at that moment ('Suggested' → 'Read' in the same
+  transaction); a pick created LATER for an already-read work stays active (re-pitching read
+  books is a supported re-read flow).
 - 'Suggested'→'Read'/'Removed' flips cannot violate the partial unique index (predicate binds
   only 'Suggested') — no guarded-flush choreography needed, unlike the history-edit path.
 - The client-side exact-id resolution in the "✓ I read this" prefill flow is retained as a

@@ -200,7 +200,9 @@ ADK_LIBRARIAN_INSTRUCTION = """
             ask one short confirmation question first.
 
             FEEDBACK HANDLING:
-            - "I read that" -> 'update_reading_status' AND 'update_suggestion_status' (Already Read).
+            - "I read that" -> 'update_reading_status' (history writes auto-resolve the book's active
+              pick, so a follow-up 'update_suggestion_status' is unnecessary — it will report the
+              suggestion as already resolved).
               If the user indicates it was a while ago ("years ago", "back in college"), ask roughly
               when — a year is enough — and pass it as 'year'; without a date the entry is logged as
               today, which wrongly blocks re-read suggestions for 2 years.
