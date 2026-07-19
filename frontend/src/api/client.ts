@@ -1,6 +1,16 @@
 import { getIdToken } from '../auth/firebase'
 import type { ActivityStep } from './activityLabels'
 
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    public detail: string,
+  ) {
+    super(detail)
+    this.name = 'ApiError'
+  }
+}
+
 export interface HistoryItem {
   id: string
   title: string
@@ -11,6 +21,7 @@ export interface HistoryItem {
   notes?: string | null
   genre?: string | null
   tropes?: string[]
+  enrichment_enqueued?: boolean
 }
 
 export interface Recommendation {
@@ -134,6 +145,7 @@ export interface HistoryUpdate {
   date_completed?: string | null
   rating?: number | null
   notes?: string | null
+  format?: string
 }
 
 export async function updateHistory(id: string, body: HistoryUpdate): Promise<HistoryItem> {
@@ -142,7 +154,16 @@ export async function updateHistory(id: string, body: HistoryUpdate): Promise<Hi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(`update history → ${res.status}`)
+  if (!res.ok) {
+    let detail = `update history → ${res.status}`
+    try {
+      const parsed = await res.json()
+      if (typeof parsed?.detail === 'string') detail = parsed.detail
+    } catch {
+      // non-JSON error body — keep the generic detail
+    }
+    throw new ApiError(res.status, detail)
+  }
   return res.json()
 }
 
