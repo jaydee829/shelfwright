@@ -157,3 +157,36 @@ def test_work_deleted_mid_pass_returns_missing(monkeypatch):
     scout_mgr.enrich.return_value = enriched
     monkeypatch.setattr(two_phase, "create_completion_scout_manager", lambda: scout_mgr)
     assert two_phase.complete_edition(uuid4(), "ebook") == "missing"
+
+
+def test_edition_deleted_mid_pass_returns_missing_without_merge(monkeypatch):
+    """The write session re-checks the EDITION too: the read session sees it, but an operator
+    edition delete mid-pass makes the write session's edition query return None → "missing",
+    and merge_edition_and_narrators must never run (it would silently recreate the edition)."""
+    enriched = {"isbn_13": "9780000000003", "narrator_names": [], "source_priority": ["Hardcover"]}
+    state = {"open": 0, "calls": 0}
+    work = _work_double()
+
+    class _EditionVanishesSession(_FakeSession):
+        def __enter__(self):
+            self._state["open"] += 1
+            self._state["calls"] += 1
+            m = MagicMock()
+            m.get.return_value = work  # the Work survives both sessions
+            # First (read) session sees the edition; second (write) session finds it gone.
+            edition = MagicMock() if self._state["calls"] == 1 else None
+            m.query.return_value.filter_by.return_value.first.return_value = edition
+            return m
+
+    fake_manager = MagicMock()
+    fake_manager.get_session = lambda: _EditionVanishesSession(state, work, MagicMock())
+    monkeypatch.setattr(two_phase, "db_manager", fake_manager)
+    scout_mgr = MagicMock()
+    scout_mgr.enrich.return_value = enriched
+    monkeypatch.setattr(two_phase, "create_completion_scout_manager", lambda: scout_mgr)
+    merge_calls = []
+    monkeypatch.setattr(
+        two_phase, "merge_edition_and_narrators", lambda session, **kw: merge_calls.append(kw) or MagicMock()
+    )
+    assert two_phase.complete_edition(uuid4(), "ebook") == "missing"
+    assert merge_calls == []  # the edition re-check short-circuits before any merge

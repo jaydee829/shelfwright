@@ -131,8 +131,14 @@ def complete_edition(
 ):
     """Format-completion pass target (history-format-edit spec). Same OIDC gate as
     /internal/enrich. 'missing' → 404 (non-retryable: work/edition gone); 'empty' and
-    'done' → 200 (final — no retry economics here, the history edit is already saved);
-    an unexpected exception propagates → 500 → normal Cloud Tasks retry."""
+    'done' → 200 (final — no retry economics here, the history edit is already saved).
+
+    'empty' INCLUDES the all-scouts-failed case: ScoutManager.enrich swallows each scout's
+    exception internally and returns {} when nobody contributed (the GH #98 guard), so a
+    transient outage of every scout resolves to 'empty' → 200, NOT to a retry. That is
+    deliberate — the entry is already saved and a later format change re-triggers completion.
+    A 500 → normal Cloud Tasks retry only fires for a failure OUTSIDE the scout manager
+    (persist/DB error) propagating uncaught, never for the scouts merely finding nothing."""
     _require_queue_caller(authorization)
     result = two_phase.complete_edition(work_id, format)
     if result == "missing":

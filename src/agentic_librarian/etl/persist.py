@@ -109,7 +109,9 @@ def merge_edition_and_narrators(
     if not edition:
         # GH #95: uq_editions_work_format backstops the SELECT-then-INSERT race above; a
         # concurrent persist for the same (work_id, format) recovers via requery instead of
-        # a 500. narrators/other creation-only fields only apply on the winning insert.
+        # a 500. narrators/other creation-only fields only apply on the winning insert — the
+        # loser's edition is re-queried as-is and updated by the existing-edition branch on
+        # its NEXT call (mirrors the pre-#95 eventual-consistency behavior).
         # work_id= (not work=) so the not-yet-added Edition never lands in work.editions via
         # the back_populates backref before session.add — that dangling membership is exactly
         # what trips "Object of type <Edition> not in session" as an SAWarning-promoted error.

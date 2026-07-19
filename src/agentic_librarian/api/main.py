@@ -279,13 +279,17 @@ def update_history(
         )
         if row is None:
             raise HTTPException(status_code=404, detail="history entry not found")
-        # Scalar edits first, so the collision check below runs against the FINAL date.
-        if "date_completed" in fields:
-            row.date_completed = fields["date_completed"]
-        if "rating" in fields:
-            row.user_rating = fields["rating"]
-        if "notes" in fields:
-            row.user_notes = fields["notes"]
+
+        # No ORM mutation until EVERY read/pre-check is done. Mutating row.date_completed (or
+        # doing the edition repoint) before the dup pre-check query lets SQLAlchemy autoflush
+        # emit the UPDATE while that query runs, so a real collision trips
+        # uq_reading_history_user_edition_date as an IntegrityError raised OUTSIDE the flush
+        # try/except below → 500 instead of 409. The sharp sibling is a combined date+format
+        # edit that is valid at the FINAL (new_edition, new_date) but collides at the
+        # intermediate (old_edition, new_date); and get_or_create runs its own internal flush,
+        # so session.no_autoflush alone would NOT cover it. So we resolve the final target
+        # values first and pre-check against them with the row still untouched.
+        final_date = fields.get("date_completed", row.date_completed)
 
         target_edition = row.edition
         new_fmt = fields.get("format")
@@ -294,45 +298,62 @@ def update_history(
             # shared catalog objects, so the old one is never mutated or deleted. Reuse a
             # casing variant if one exists (uq_editions_work_format is case-sensitive);
             # get_or_create + the unique index backstop the concurrent-create race (#95).
+            # order_by exact-format-match first, then Edition.id (M1): a duplicate-casing
+            # catalog then can't flip the chosen target between successive edits.
             target_edition = (
                 session.query(Edition)
                 .filter(Edition.work_id == row.edition.work_id, func.lower(Edition.format) == new_fmt)
+                .order_by((Edition.format != new_fmt), Edition.id)
                 .first()
             )
             if target_edition is None:
                 target_edition, _created = get_or_create(session, Edition, work_id=row.edition.work_id, format=new_fmt)
 
         collision_detail = (
-            f"You already logged this book as {target_edition.format or 'the same format'} "
-            f"on {row.date_completed.isoformat()}."
+            f"You already logged this book as {target_edition.format or 'the same format'} on {final_date.isoformat()}."
         )
         if target_edition.id != row.edition_id or "date_completed" in fields:
-            # uq_reading_history_user_edition_date pre-check; the index itself backstops the
-            # millisecond race below and maps to the same 409.
+            # uq_reading_history_user_edition_date pre-check against the FINAL (edition, date).
+            # final_date is a plain parameter because the row is still unmutated, so this query
+            # cannot autoflush a premature UPDATE. The index itself backstops the millisecond
+            # race below and maps to the same 409.
             dup = (
                 session.query(ReadingHistory)
                 .filter(
                     ReadingHistory.user_id == user.id,
                     ReadingHistory.edition_id == target_edition.id,
-                    ReadingHistory.date_completed == row.date_completed,
+                    ReadingHistory.date_completed == final_date,
                     ReadingHistory.id != row.id,
                 )
                 .first()
             )
             if dup is not None:
-                # Raising inside the session context rolls back EVERY field edit above —
-                # a 409 must leave the row exactly as it was.
                 raise HTTPException(status_code=409, detail=collision_detail)
 
         if target_edition.id != row.edition_id:
-            row.edition = target_edition
             # Decide the async completion enqueue while the session is open (narrators is a
-            # lazy relationship): missing ISBN, or an audiobook with no narrators yet.
+            # lazy relationship): missing ISBN, or an audiobook with no narrators yet. The
+            # target_edition.narrators lazy-load is safe here precisely because nothing is
+            # pending yet — it can't autoflush a premature UPDATE.
             needs_completion = target_edition.isbn_13 is None or (
                 "audiobook" in (target_edition.format or "").lower() and not target_edition.narrators
             )
             work_id_str = str(target_edition.work_id)
             fmt_str = target_edition.format or ""
+
+        # ONLY NOW mutate: scalar edits + the repoint. Every read above ran against final
+        # values with the row untouched, so the flush below is the SINGLE UPDATE emission
+        # point and its IntegrityError genuinely maps to the millisecond-race 409. Raising
+        # inside the session context still rolls back EVERY field edit — a 409 must leave the
+        # row exactly as it was.
+        if "date_completed" in fields:
+            row.date_completed = fields["date_completed"]
+        if "rating" in fields:
+            row.user_rating = fields["rating"]
+        if "notes" in fields:
+            row.user_notes = fields["notes"]
+        if target_edition.id != row.edition_id:
+            row.edition = target_edition
         try:
             session.flush()
         except IntegrityError as e:

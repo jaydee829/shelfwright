@@ -193,10 +193,17 @@ def complete_edition(work_id: UUID, fmt: str) -> str:
 
     Returns:
       "missing" — work, its Author link, or the (work_id, fmt) edition no longer exists
-                  (also when the work vanished while scouts ran). Non-retryable.
-      "empty"   — no scout contributed anything. Final state: the entry itself is already
-                  saved, and unlike the deep pass there is no requeue-sweep backstop
-                  economics to protect — do not retry-loop.
+                  (also when the work or edition vanished while scouts ran — re-checked in
+                  the write session). Non-retryable.
+      "empty"   — no scout contributed anything, INCLUDING the all-scouts-failed case: a
+                  transient outage of every scout lands here too, because ScoutManager.enrich
+                  swallows each scout's exception internally and returns {} when nobody
+                  contributed (the GH #98 guard). This is a deliberate FINAL state, not a
+                  transient error to retry-loop: the history entry is already saved, and a
+                  later format change re-triggers completion. Unlike the deep pass there is no
+                  requeue-sweep backstop economics to protect. A 500 → Cloud Tasks retry only
+                  occurs for failures OUTSIDE the scout manager (persist/DB errors), which
+                  propagate uncaught.
       "done"    — scouted values merged onto the edition."""
     fmt = (fmt or "")[:50]
 
@@ -239,6 +246,12 @@ def complete_edition(work_id: UUID, fmt: str) -> str:
         if session.get(Work, work_id) is None:
             # Deleted while the scouts ran with no session held — same honesty rule as
             # enrich_deep's empty path.
+            return "missing"
+        if session.query(Edition).filter_by(work_id=work_id, format=fmt).first() is None:
+            # The (work_id, fmt) edition was deleted mid-pass (operator cleanup tooling deletes
+            # editions for real) — re-check it in the WRITE session too, else
+            # merge_edition_and_narrators would silently RECREATE it. Same honesty rule as the
+            # Work re-check above and enrich_deep's deleted-mid-pass cases.
             return "missing"
         merge_edition_and_narrators(
             session,

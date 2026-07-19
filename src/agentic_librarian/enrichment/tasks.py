@@ -11,7 +11,10 @@ Config (wired in prod in Stage 4; absent in local dev → enqueue is a logged no
   ENRICH_INVOKER_SA     service-account email the queue signs the OIDC token as
   ENRICH_OIDC_AUDIENCE  the OIDC audience. The enqueue side defaults it to the full task
                         URL, but the receiver (api/internal.py) hard-requires it and 403s
-                        when unset — so in prod it must be set to match on both sides."""
+                        when unset — so in prod it must be set to match on both sides.
+
+The same config env vars now also drive POST /internal/complete-edition/{work_id} (the
+edition-completion pass enqueued by enqueue_edition_completion after a history format change)."""
 
 from __future__ import annotations
 

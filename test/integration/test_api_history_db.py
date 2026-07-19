@@ -220,6 +220,8 @@ def _my_entry(client):
 def test_patch_format_creates_sibling_edition_and_repoints(two_user_client, db_url):
     client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
     entry = _my_entry(client)
+    # Seed rating + notes first so the repoint has non-null scalars to preserve (#96 lens).
+    assert client.patch(f"/history/{entry['id']}", json={"rating": 4, "notes": "keep me"}).status_code == 200
     resp = client.patch(f"/history/{entry['id']}", json={"format": "audiobook"})
     assert resp.status_code == 200
     assert resp.json()["format"] == "audiobook"
@@ -230,11 +232,31 @@ def test_patch_format_creates_sibling_edition_and_repoints(two_user_client, db_u
         formats = {e.format for e in s.query(Edition).filter(Edition.work_id == work_id)}
         assert row.edition.format == "audiobook"
         assert formats == {"ebook", "audiobook"}  # old edition intact (shared catalog object)
-        # Assertion completeness (#96 lesson): untouched fields survive; the friend's row
-        # on the ORIGINAL edition is untouched.
+        # Assertion completeness (#96 lesson): untouched fields survive the repoint; the
+        # friend's row on the ORIGINAL edition is untouched.
         assert row.date_completed == date(2021, 1, 1)
+        assert row.user_rating == 4
+        assert row.user_notes == "keep me"
         friend = s.query(ReadingHistory).filter(ReadingHistory.user_id == FRIEND_ID).one()
         assert friend.edition.format == "ebook"
+
+
+def test_patch_combined_date_and_format_valid_at_final_state_succeeds(two_user_client, db_url):
+    """C1 sibling: a combined date+format edit valid at the FINAL (audiobook, 2020-06-06)
+    but colliding at the INTERMEDIATE (ebook, 2020-06-06) must 200, not 500. Pre-Fix-1 the
+    autoflush of row.date_completed during the dup pre-check tripped the unique index outside
+    the flush try/except."""
+    with _db(db_url).get_session() as s:
+        edition_id = s.query(Edition).filter(Edition.format == "ebook").first().id
+        # Occupy the intermediate (ebook, 2020-06-06) pair (mirrors the date-collision setup).
+        s.add(ReadingHistory(edition_id=edition_id, user_id=DEFAULT_USER_ID, date_completed=date(2020, 6, 6)))
+        s.flush()
+    client = two_user_client(DEFAULT_USER_ID, "jaydee829@gmail.com")
+    entry = _my_entry(client)  # the 2021-01-01 read
+    resp = client.patch(f"/history/{entry['id']}", json={"date_completed": "2020-06-06", "format": "audiobook"})
+    assert resp.status_code == 200
+    assert resp.json()["format"] == "audiobook"
+    assert resp.json()["date_completed"] == "2020-06-06"
 
 
 def test_patch_format_reuses_existing_sibling_edition(two_user_client, db_url):
