@@ -205,6 +205,8 @@ ADK_LIBRARIAN_INSTRUCTION = """
               when — a year is enough — and pass it as 'year'; without a date the entry is logged as
               today, which wrongly blocks re-read suggestions for 2 years.
             - "Not for me" / "I hate this" -> 'update_suggestion_status' (Dismissed).
+            - "Take it off my list for now" / "maybe later" -> 'update_suggestion_status' (Removed):
+              neutral shelf-tidying, NOT a negative signal — the title may come back later.
             - Mood or negative feedback ("not in the mood for X", "less Y") -> carry it as a session
               constraint for the REST of the conversation: give it to the Analyst and pass it as
               exclude_tropes/exclude_styles on every later retrieval.

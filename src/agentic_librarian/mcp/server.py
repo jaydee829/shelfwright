@@ -787,7 +787,7 @@ def log_suggestion(work_id: str, context: str, justification: str, conversation_
         return f"Error logging suggestion: {str(e)}"
 
 
-_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read")
+_SUGGESTION_STATUSES = ("Accepted", "Dismissed", "Already Read", "Removed")
 
 
 @mcp.tool()

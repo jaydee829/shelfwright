@@ -362,3 +362,13 @@ def test_enrich_and_persist_work_rejects_invalid_input(caplog):
         assert server.enrich_and_persist_work(title="x" * 501, author="A") is None
         assert server.enrich_and_persist_work(title="T", author=None) is None  # type: ignore[arg-type]
     assert "rejected invalid" in caplog.text  # visible, not silent (no-silent-except rule)
+
+
+@pytest.mark.parametrize("raw", ["Removed", "removed", "REMOVED"])
+def test_suggestion_statuses_include_neutral_removed(raw):
+    # GH #130: the chat door to neutral removal — 'Removed' is canonical vocabulary
+    # and case-normalizes like the other statuses.
+    from agentic_librarian.mcp.server import _SUGGESTION_STATUSES, _normalize_status
+
+    assert "Removed" in _SUGGESTION_STATUSES
+    assert _normalize_status(raw, _SUGGESTION_STATUSES) == "Removed"
